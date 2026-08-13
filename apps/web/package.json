@@ -20,7 +20,7 @@
   "dependencies": {
     "@caveat/core": "workspace:*",
     "@hono/node-server": "^2.0.4",
-    "hono": "^4.12.23",
+    "hono": "^4.13.1",
     "markdown-it": "^14.2.0"
   },
   "devDependencies": {
