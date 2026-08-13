@@ -89,8 +89,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
       '@hono/node-server':
-        specifier: ^2.0.4
-        version: 2.0.10(hono@4.12.30)
+        specifier: ^2.1.0
+        version: 2.1.0(hono@4.12.30)
       hono:
         specifier: ^4.12.23
         version: 4.12.30
@@ -511,8 +511,8 @@ packages:
     peerDependencies:
       hono: ^4
 
-  '@hono/node-server@2.0.10':
-    resolution: {integrity: sha512-ZcnNVhKTmyDJeg0UlnZjvM73JBsTAuhrH/J4fjwGOw59PwOW51r4J+p6CsKZWXdKSme4MFqU62CZMOsdDrU4CA==}
+  '@hono/node-server@2.1.0':
+    resolution: {integrity: sha512-XovyyCCnBzW+zKu+z/zq8hwNs4KOR5rEMAOxo2f40Q5xoOI37IMm6MIg2COOUtUApo0i6850MTBKH2u4QLGIqg==}
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4
@@ -1893,7 +1893,7 @@ snapshots:
     dependencies:
       hono: 4.12.14
 
-  '@hono/node-server@2.0.10(hono@4.12.30)':
+  '@hono/node-server@2.1.0(hono@4.12.30)':
     dependencies:
       hono: 4.12.30
 
