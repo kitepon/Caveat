@@ -74,7 +74,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.19.0。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.19.1。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>

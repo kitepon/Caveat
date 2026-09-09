@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.1] — 2026-09-10
+
+### Fixed
+- Windowsで長いentryパスの同期・checkoutが失敗する問題を修正する。Caveatが起動するGitに
+  `core.longpaths=true`を渡し、ユーザーのGit設定ファイルは変更しない。
+
 ## [0.19.0] — 2026-09-10
 
 ### Added

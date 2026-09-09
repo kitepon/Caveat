@@ -1,5 +1,6 @@
 # RAG Index
 
+- `windows-git-longpaths/`: Git for Windowsの長いパス設定と追加・cloneの修理前後実測（取得日 2026-09-10、確度: 確認済み）
 - `windows-pwsh-acl/`: PowerShell 7のACL API、所有者限定ACLの適用と第三者権限拒否のWindows実測（取得日 2026-09-10、確度 confirmed）
 
 調査資産の1行台帳。

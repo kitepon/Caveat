@@ -25,6 +25,9 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 
 ## 現在地
 
+- 公開0.19.0の隔離npm導入試験はMac・Linux・Windowsで成功。Mac・Linuxの実設定でも初期化・同期・再実行・4 AI MCP検索が成功した。
+- Windows実データで長いentryパスのGit追加が失敗した。最小再現は修理前に失敗し、`createGit`でWindowsだけ`core.longpaths=true`を渡した後は追加・commit・cloneに成功した。関連18試験も成功。修理を0.19.1として公開し、実機導入の受入を続ける。
+- 長いパスの別ベンダー反証でGit所有責務・設定非永続化の妥当性を確認した。OS判定を正典の`isWindows()`へ合わせる指摘を採択した。公開前のbuild・typecheck・smoke・workspace全試験は成功した。
 - 作業ツリー・stashはclean。指定commitをfetchし、そのブランチへ切替済み。origin/mainは祖先である。
 - 導入関連3ファイル29試験とCLI再buildが成功。
 - 別ベンダーの反証で設定先不一致、Codex CLIなし時のMCP欠落、Claude追加設定の診断偽陰性を確認した。

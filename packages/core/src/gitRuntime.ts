@@ -1,5 +1,6 @@
 import { parseEnv } from '@simple-git/argv-parser';
 import { simpleGit, type SimpleGit, type SimpleGitOptions } from 'simple-git';
+import { isWindows } from './platform.js';
 
 // simple-git timeout.block is an inactivity timeout: the git process is killed
 // only after stdout/stderr have been silent for this long. It is not a total
@@ -41,6 +42,8 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number }): Simp
     // Git unwind its own helper first; it is not a general process-tree or
     // total elapsed-time guarantee.
     config: [
+      // Windowsの長いentryパスを扱う。ユーザーのGit設定は変更しない。
+      ...(isWindows() ? ['core.longpaths=true'] : []),
       'http.lowSpeedLimit=1',
       `http.lowSpeedTime=${lowSpeedTimeSeconds}`,
     ],
