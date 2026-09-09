@@ -31,6 +31,7 @@ import {
 } from '../cursorInstall.js';
 import { askOnce, defaultGitHubRepoUrl, runGh, type GhRunner } from '../ghSetup.js';
 import { resolveHookNodePath } from '../nodePath.js';
+import { installMcpClient } from '../mcpInstall.js';
 import { validatePublishTarget } from './publish.js';
 
 export interface InitOptions {
@@ -55,6 +56,7 @@ export interface InitDependencies {
   isTty?: () => boolean;
   confirm?: (question: string) => boolean;
   codexAvailable?: () => boolean;
+  env?: NodeJS.ProcessEnv;
 }
 
 export async function runInit(
@@ -65,6 +67,11 @@ export async function runInit(
   const isTty = dependencies.isTty ?? (() => Boolean(process.stdin.isTTY));
   const confirm = dependencies.confirm ?? askOnce;
   const ghRunner = dependencies.ghRunner ?? runGh;
+  const env = dependencies.env ?? process.env;
+  const codexHome = env.CODEX_HOME || join(ctx.userHome, '.codex');
+  const cursorDir = env.CURSOR_HOME || join(ctx.userHome, '.cursor');
+  const grokHome = env.GROK_HOME || join(ctx.userHome, '.grok');
+  const codexAvailable = (dependencies.codexAvailable ?? detectCodexAvailability)();
   let publishTarget = ctx.config.publishTarget;
   let codexHookState: 'installed' | 'partial' | 'not-installed' | 'skipped' = 'not-installed';
   let cursorHookState: 'installed' | 'partial' | 'not-installed' | 'skipped' = 'not-installed';
@@ -227,26 +234,28 @@ export async function runInit(
       ctx.logger.warn('cannot determine CLI script path; skipping Claude integration');
     } else {
       const result = installClaudeIntegration({
-        claudeDir: join(ctx.userHome, '.claude'),
+        claudeDir: env.CLAUDE_CONFIG_DIR || join(ctx.userHome, '.claude'),
         cliScriptPath,
         nodePath: resolveHookNodePath(),
         dryRun: opts.dryRun,
         logger: ctx.logger,
       });
       reportInstallResult(ctx, result, opts.dryRun);
+      if (result.mcp.action === 'failed') {
+        throw new Error(`mcp_setup_failed: Claude Code: ${result.mcp.detail}`);
+      }
     }
   }
 
   if (opts.skipCodexHook) {
     codexHookState = 'skipped';
     ctx.logger.info('Codex hook integration skipped (--skip-codex-hook)');
-  } else if ((dependencies.codexAvailable ?? detectCodexAvailability)()) {
+  } else if (codexAvailable) {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
       codexHookState = 'skipped';
       ctx.logger.warn('cannot determine CLI script path; skipping Codex hook integration');
     } else {
-      const codexHome = join(ctx.userHome, '.codex');
       const result = installCodexHooks({
         codexHome,
         cliScriptPath,
@@ -271,13 +280,12 @@ export async function runInit(
   if (opts.skipCursorHook) {
     cursorHookState = 'skipped';
     ctx.logger.info('Cursor hook integration skipped (--skip-cursor-hook)');
-  } else if (existsSync(join(ctx.userHome, '.cursor'))) {
+  } else if (existsSync(cursorDir)) {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
       cursorHookState = 'skipped';
       ctx.logger.warn('cannot determine CLI script path; skipping Cursor hook integration');
     } else {
-      const cursorDir = join(ctx.userHome, '.cursor');
       const result = installCursorHooks({
         cursorDir,
         cliScriptPath,
@@ -297,6 +305,17 @@ export async function runInit(
     }
   }
 
+  const cliScriptPath = process.argv[1];
+  if (!cliScriptPath) throw new Error('mcp_setup_failed: CLIの実行パスを取得できません');
+  for (const [client, configPath, available] of [
+    ['codex', join(codexHome, 'config.toml'), codexAvailable],
+    ['grok', join(grokHome, 'config.toml'), existsSync(grokHome)],
+    ['cursor', join(cursorDir, 'mcp.json'), existsSync(cursorDir)],
+  ] as const) {
+    if (!available) continue;
+    const action = installMcpClient({ client, configPath, cliScriptPath, nodePath: resolveHookNodePath(), dryRun: opts.dryRun });
+    ctx.logger.info(`${client} MCP: ${action}`);
+  }
   reportEnvironmentSummary(ctx, publishTarget, codexHookState, cursorHookState, opts.dryRun);
 }
 
@@ -392,7 +411,7 @@ export function runUninstall(ctx: CliContext, opts: UninstallOptions): void {
   }
 
   const result = uninstallClaudeIntegration({
-    claudeDir: join(ctx.userHome, '.claude'),
+    claudeDir: process.env.CLAUDE_CONFIG_DIR || join(ctx.userHome, '.claude'),
     cliScriptPath,
     nodePath: resolveHookNodePath(),
     dryRun: opts.dryRun,

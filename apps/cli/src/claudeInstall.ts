@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { constants, existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Logger } from '@caveat/core';
 import { commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup } from './installShared.js';
+import { installMcpClient } from './mcpInstall.js';
 
 export interface ClaudeInstallOptions {
   claudeDir: string;
@@ -31,14 +32,6 @@ const EVENT_USER_PROMPT_SUBMIT = 'UserPromptSubmit';
 const EVENT_POST_TOOL_USE = 'PostToolUse';
 const EVENT_POST_TOOL_USE_FAILURE = 'PostToolUseFailure';
 const EVENT_STOP = 'Stop';
-
-function mcpArgs(cliScriptPath: string): string[] {
-  // `--disable-warning=ExperimentalWarning` silences the node:sqlite warning that
-  // otherwise writes a line to stderr; harmless for stderr but keeps the spawn
-  // log clean. MCP's stdio channel is JSON-RPC only — warnings must never leak
-  // to stdout and this flag guards against future node versions that might.
-  return ['--disable-warning=ExperimentalWarning', cliScriptPath, 'mcp-server'];
-}
 
 function hookCommand(
   nodePath: string,
@@ -145,7 +138,7 @@ export function isCaveatClaudeMcpRegistration(value: unknown, nodePath: string, 
     && server.type === 'stdio' && isCanonicalAsset(server.command, nodePath, constants.X_OK) && Array.isArray(server.args)
     && server.args.length === 3 && server.args[0] === '--disable-warning=ExperimentalWarning'
     && isCanonicalAsset(server.args[1], cliScriptPath, constants.R_OK) && server.args[2] === 'mcp-server'
-    && server.env !== null && typeof server.env === 'object' && !Array.isArray(server.env) && Object.keys(server.env).length === 0;
+    && server.env !== null && typeof server.env === 'object' && !Array.isArray(server.env) && Object.values(server.env).every((value) => typeof value === 'string');
 }
 
 function readSettings(path: string): Settings {
@@ -175,46 +168,21 @@ function runClaude(args: string[]): ReturnType<typeof spawnSync> {
 }
 
 function registerMcp(
+  claudeDir: string,
   nodePath: string,
   cliScriptPath: string,
   dryRun: boolean,
   logger: Logger,
 ): ClaudeInstallResult['mcp'] {
-  const args = mcpArgs(cliScriptPath);
-  if (dryRun) {
-    logger.info(
-      `[dry-run] claude mcp add --scope user caveat -- ${nodePath} ${args.join(' ')}`,
-    );
-    return { action: 'skipped', detail: 'dry-run' };
+  const configPath = process.env.CLAUDE_CONFIG_DIR
+    ? join(claudeDir, '.claude.json') : join(dirname(claudeDir), '.claude.json');
+  try {
+    const action = installMcpClient({ client: 'claude', configPath, nodePath, cliScriptPath, dryRun });
+    logger.info(`Claude MCP: ${action}`);
+    return { action: dryRun ? 'skipped' : 'registered', detail: action };
+  } catch (error) {
+    return { action: 'failed', detail: error instanceof Error ? error.message : String(error) };
   }
-
-  // Idempotent: remove first (ignore failure), then add.
-  runClaude(['mcp', 'remove', '--scope', 'user', 'caveat']);
-  const result = runClaude([
-    'mcp',
-    'add',
-    '--scope',
-    'user',
-    'caveat',
-    '--',
-    nodePath,
-    ...args,
-  ]);
-  if (result.status === 0) {
-    return { action: 'registered' };
-  }
-  if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
-    return {
-      action: 'skipped',
-      detail: 'claude CLI not found in PATH; install Claude Code to enable MCP',
-    };
-  }
-  const stderr = typeof result.stderr === 'string' ? result.stderr : '';
-  const stdout = typeof result.stdout === 'string' ? result.stdout : '';
-  return {
-    action: 'failed',
-    detail: (stderr || stdout || 'unknown error').trim(),
-  };
 }
 
 function unregisterMcp(dryRun: boolean, logger: Logger): ClaudeInstallResult['mcp'] {
@@ -268,7 +236,7 @@ export function installClaudeIntegration(
 
   const mcp = opts.skipMcpRegistration
     ? ({ action: 'skipped', detail: 'skipped by caller' } as const)
-    : registerMcp(opts.nodePath, opts.cliScriptPath, opts.dryRun, opts.logger);
+    : registerMcp(opts.claudeDir, opts.nodePath, opts.cliScriptPath, opts.dryRun, opts.logger);
 
   return {
     mcp,

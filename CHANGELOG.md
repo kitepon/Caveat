@@ -4,6 +4,20 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.0] — 2026-09-09
+
+### Added
+- `caveat init`がCodex・Grok・CursorのMCP登録を所有する。既存設定を保持し、バックアップと
+  読戻しを行う。工場による登録の代行は不要になった。
+- `CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`に導入先を合わせる。
+
+### Fixed
+- ClaudeのMCP登録失敗を`init`の非0終了へ反映し、導入成功として報告しない。
+- ClaudeのMCP登録を既存環境変数を保持するマージへ変更し、remove/addによる登録の消失をなくす。
+- 0.18.1までの修正を含み、`init --sync --yes`の既存private remote同期とscaffold復旧を配布する。
+- Windowsの文書検査・配布検査・pnpm起動をPowerShell 7へ揃え、`npm.cmd`直接起動の`EINVAL`を修正する。
+- Claude hookのsymlink検査fixtureをWindowsの正規quote形式へ合わせる。
+
 ## [0.18.1] — 2026-08-30
 
 ### Added

@@ -462,7 +462,9 @@ describe('isCanonicalCaveatClaudeHookCommand', () => {
       symlinkSync(cliReal, cliLink);
       // installer は安定パス（symlink）を書き、診断は process.execPath（実体）を渡す。
       // realpath が一致する限り canonical として認める（0.17.6 の false negative の再現固定）。
-      const command = `${nodeLink} ${cliLink} hook stop`;
+      const command = process.platform === 'win32'
+        ? `"${nodeLink}" "${cliLink}" hook stop`
+        : `${nodeLink} ${cliLink} hook stop`;
       expect(
         isCanonicalCaveatClaudeHookCommand(command, 'stop', nodeReal, cliReal),
       ).toBe(true);

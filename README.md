@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.18.1. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.19.0. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -204,9 +204,15 @@ caveat serve                                               # http://localhost:42
 What `caveat init` does:
 - Writes `~/.caveatrc.json` (empty `{}` — defaults come from a constant in the CLI)
 - Scaffolds `~/.caveat/own/` (your knowledge repo root) + `~/.caveat/index/caveat.db`
-- Runs `claude mcp add --scope user caveat -- <node> --disable-warning=ExperimentalWarning <cliPath> mcp-server`
+- Claudeのuser設定へMCPを登録し、既存の環境変数と他の登録を保持する
 - Merges `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hook entries into `~/.claude/settings.json` (existing entries preserved; backup written before any change)
 - Installs the product-owned Codex and Cursor hooks when those hosts are available, while preserving explicit hook refusal
+
+Codexが利用可能、またはGrok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
+NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録は保持します。
+設定を書き換える前にバックアップし、登録の読戻しが失敗した場合は非0終了します。
+独自の設定先は`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`で指定できます。
+`--skip-codex-hook`と`--skip-cursor-hook`はhookだけを省略し、MCP登録は行います。
 
 For a non-interactive machine setup that also initializes or synchronizes the
 private ownership remote, use this single product-owned entry with stdin closed:

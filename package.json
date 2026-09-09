@@ -17,7 +17,7 @@
     "test:product-ci-contract": "node --test scripts/product-full-ci.test.mjs",
     "test:docs-contract": "node --test scripts/docs-contract.test.mjs",
     "check:npm-pack": "node scripts/check-npm-pack.mjs",
-    "check:release-smoke": "node --check scripts/check-npm-pack.mjs && node --check scripts/codex-sidecar-advisory-smoke.mjs && node --check scripts/claude-fresh-session-smoke.mjs && node --check scripts/fixtures/fake-claude-fresh-session.mjs && node --check scripts/test-claude-fresh-session-smoke.mjs && node scripts/check-current-docs.mjs && node --test scripts/product-full-ci.test.mjs scripts/docs-contract.test.mjs scripts/verify-release-commit.test.mjs && node scripts/pnpm.mjs check:npm-pack && node scripts/pnpm.mjs smoke:codex-sidecar-advisory -- --help",
+    "check:release-smoke": "node --check scripts/check-npm-pack.mjs && node --check scripts/codex-sidecar-advisory-smoke.mjs && node --check scripts/claude-fresh-session-smoke.mjs && node --check scripts/fixtures/fake-claude-fresh-session.mjs && node --check scripts/test-claude-fresh-session-smoke.mjs && node scripts/check-current-docs.mjs && node --test scripts/product-full-ci.test.mjs scripts/docs-contract.test.mjs scripts/verify-release-commit.test.mjs scripts/process-command.test.mjs && node scripts/pnpm.mjs check:npm-pack && node scripts/pnpm.mjs smoke:codex-sidecar-advisory -- --help",
     "smoke:codex-sidecar-advisory": "node scripts/codex-sidecar-advisory-smoke.mjs",
     "test:claude-fresh-session-smoke": "node scripts/test-claude-fresh-session-smoke.mjs",
     "eval:hook-search": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-hook-search.mjs",

@@ -4,6 +4,10 @@ Use this checklist for every `caveat-cli` npm release. Do not stop at publish:
 the release is only complete after the published package passes fresh-install
 checks for Claude/Codex/Cursor and the available new-session host smokes.
 
+MCP登録はGrokも含めて確認する。`caveat init`を隔離した設定先で二度実行し、Claude / Codex /
+Grokの公開CLIによる読戻し、CursorのJSON、登録したcommandによるMCP接続と検索を確認する。
+既存の環境変数・timeout・無効化指定・別サーバーが保持され、不正な既存設定は変更されず失敗すること。
+
 ## Pre-Publish
 
 Run workspace checks sequentially. Do not run `build` and `typecheck` in
@@ -16,6 +20,9 @@ Use the repository-pinned pnpm through Corepack. Root scripts delegate through
 through Corepack, so the nested delegation remains on the pinned package
 manager. Do not set `CAVEAT_PNPM_BIN` to an unpinned binary or silence a package
 manager mismatch with `--pm-on-fail=ignore`.
+
+Windowsのpackage-manager shimは`scripts/process-command.mjs`を通じてPowerShell 7から起動する。
+文書検査・pack・隔離npm導入も同じ処理を使い、Windowsで`.cmd`を直接spawnしない。
 
 ```bash
 corepack pnpm -r build

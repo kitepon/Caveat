@@ -74,7 +74,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.18.1。Claude Code、Codex、Cursorにnative統合経路があります。
+**ステータス**: v0.19.0。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -152,9 +152,15 @@ caveat serve                                               # http://localhost:42
 `caveat init` の動作:
 - `~/.caveatrc.json` を生成（中身は空 `{}` — デフォルトは CLI 内部の定数）
 - `~/.caveat/own/`（ナレッジ repo ルート）と `~/.caveat/index/caveat.db` を scaffold
-- `claude mcp add --scope user caveat ...` で MCP サーバを登録
+- Claudeのuser設定へMCPを登録し、既存の環境変数と他の登録を保持
 - `~/.claude/settings.json` に `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hook をマージ（既存エントリは保持、書き込み前にバックアップ作成）
 - Codex / Cursor が利用可能なら製品所有hookを導入し、明示的なhook拒否設定は保持
+
+Codexが利用可能、またはGrok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
+NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録は保持します。
+設定を書き換える前にバックアップし、登録の読戻しが失敗した場合は非0終了します。
+独自の設定先は`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`で指定できます。
+`--skip-codex-hook`と`--skip-cursor-hook`はhookだけを省略し、MCP登録は行います。
 
 privateな所有remoteの初期化または同期まで非対話で行う場合は、stdinを閉じて次の製品入口を一度だけ呼びます。
 

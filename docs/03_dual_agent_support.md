@@ -17,7 +17,7 @@ of being emitted directly from Stop.
 - Hook command shape: `caveat hook <name> [arg]`
 - Hook names: `user-prompt-submit`, `post-tool-use`, `stop`, `worker`
 - Claude settings targets:
-  - MCP is registered through `claude mcp add --scope user caveat -- ...`
+  - MCPは製品のinstallerがClaudeのuser設定へマージし、既存の環境変数と他の登録を保持する。
   - Hooks are merged into `~/.claude/settings.json`
   - Caveat registers `PostToolUse` and `PostToolUseFailure` to the same
     `caveat hook post-tool-use` command. Current Claude Code emits
@@ -58,8 +58,12 @@ Reminderの検索結果と発火判定はhost間で共有するが、次の操�
   そのpathのMarkdownを更新し、新規entryはCaveatのown knowledge repoへMarkdownで作成して、
   `caveat index`を実行する。community entryは購読物なのでlocalで直接編集しない。
 
-`caveat init`はCodex / CursorへMCPを登録しないため、native hook reminderからClaude専用MCP名を
-案内してはいけない。この境界はdotagentsではなくCaveat自身のhost adapterが所有する。
+`caveat init`はCodex / Grok / CursorにもMCPを登録する。native hookの既存のCLI・Markdown案内は
+維持する。MCPの呼出し名はhostごとに異なるため、Claude固有のprefixを他hostへ複製しない。
+登録形式の差は`apps/cli/src/mcpInstall.ts`が所有する。Codex / GrokはTOML、Claude / CursorはJSONへ
+NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録を保持する。
+`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME`で設定先を変更でき、Claudeは`CLAUDE_CONFIG_DIR`を使う。
+Grokは設定ディレクトリがある場合のMCP登録だけを追加し、hook契約は増やさない。
 
 ## Codex Adapter
 

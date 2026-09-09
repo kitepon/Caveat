@@ -31,9 +31,15 @@ keeps Claude Code, Codex, and Cursor hooks working after Homebrew moves Node bet
 `caveat init` (idempotent, `--dry-run` supported) does the product setup:
 
 1. Scaffolds `~/.caveat/own/` (your personal knowledge repo) + `~/.caveat/index/caveat.db`
-2. Registers the MCP server with Claude Code (`claude mcp add --scope user`)
+2. Claudeのuser設定へMCPを登録し、既存の環境変数と他の登録を保持
 3. Merges `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hooks into `~/.claude/settings.json` (existing entries preserved, backup written before any change)
 4. Installs product-owned Codex and Cursor hooks when those hosts are available
+
+同じ`init`がCodex・Grok・CursorへもMCPを登録します。CodexはCLIの存在、Grok・Cursorは
+設定ディレクトリの存在で導入対象を決めます。`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` /
+`CLAUDE_CONFIG_DIR`を尊重し、既存の環境変数・timeout・無効化指定・他の登録を保持します。
+設定変更前のバックアップと読戻しを行い、MCP登録失敗は非0終了します。
+`--skip-codex-hook` / `--skip-cursor-hook`はhookだけを省略します。
 
 For one non-interactive setup that also creates, checks out, or synchronizes the
 private ownership remote, invoke `caveat init --sync --yes` with stdin closed.
@@ -97,7 +103,7 @@ social — subscribers choose which repository owners to trust.
 
 ## MCP tools (6)
 
-Exposed to Claude Code via the MCP server that `caveat init` registers:
+`caveat init`が登録するMCPを通じて、Claude Code・Codex・Grok・Cursorから利用できます。
 
 `caveat_search`, `caveat_get`, `caveat_record`, `caveat_update`, `caveat_list_recent`, `caveat_pull`.
 

@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parse } from 'smol-toml';
 import type { Logger } from '@caveat/core';
 import { buildContext } from '../src/context.js';
 import { runInit } from '../src/commands/init.js';
@@ -53,9 +54,11 @@ describe('caveat init integrated setup', () => {
 
   beforeEach(() => {
     fx = makeFixture();
+    for (const key of ['CODEX_HOME', 'GROK_HOME', 'CURSOR_HOME', 'CLAUDE_CONFIG_DIR']) vi.stubEnv(key, undefined);
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     rmSync(fx.root, { recursive: true, force: true });
   });
 
@@ -163,10 +166,31 @@ describe('caveat init integrated setup', () => {
       { isTty: () => false, codexAvailable: () => true },
     );
 
-    expect(readFileSync(configPath, 'utf-8')).toBe('[features]\ncodex_hooks = false\n');
+    expect(parse(readFileSync(configPath, 'utf-8')).features).toEqual({ codex_hooks: false });
+    expect(parse(readFileSync(configPath, 'utf-8')).mcp_servers).toHaveProperty('caveat');
     expect(existsSync(join(codexHome, 'hooks.json'))).toBe(false);
     expect(fx.messages.join('\n')).toMatch(/preserving explicit consent/);
     expect(fx.messages.join('\n')).toMatch(/Set `hooks = true`/);
     expect(fx.messages.join('\n')).toContain('codex hook: skipped');
+  });
+
+  it('init一回で独自HOMEのCodex・Grok・Cursorに登録し再実行できる', async () => {
+    const codexHome = join(fx.root, 'codex');
+    const grokHome = join(fx.root, 'grok');
+    const cursorHome = join(fx.root, 'cursor');
+    for (const dir of [codexHome, grokHome, cursorHome]) mkdirSync(dir);
+    const ctx = buildContext(fx.logger, { userHome: fx.userHome, caveatHome: fx.caveatHome });
+    const opts = { skipClaude: true, skipCodexHook: true, skipCursorHook: true, dryRun: false };
+    const dependencies = { isTty: () => false, codexAvailable: () => true, env: {
+      CODEX_HOME: codexHome, GROK_HOME: grokHome, CURSOR_HOME: cursorHome,
+    } };
+    await runInit(ctx, opts, dependencies);
+    await runInit(ctx, opts, dependencies);
+    for (const dir of [codexHome, grokHome]) {
+      expect(parse(readFileSync(join(dir, 'config.toml'), 'utf8')).mcp_servers).toHaveProperty('caveat');
+    }
+    expect(JSON.parse(readFileSync(join(cursorHome, 'mcp.json'), 'utf8')).mcpServers.caveat.args.at(-1)).toBe('mcp-server');
+    expect(existsSync(join(fx.userHome, '.codex'))).toBe(false);
+    for (const client of ['codex', 'grok', 'cursor']) expect(fx.messages).toContain(`info:${client} MCP: unchanged`);
   });
 });

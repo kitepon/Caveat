@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawnCommandSync } from './process-command.mjs';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -67,11 +67,10 @@ try {
 }
 
 function packCli(packDestination) {
-  const result = spawnSync(corepackCommand(), ['pnpm', 'pack', '--pack-destination', packDestination, '--json'], {
+  const result = spawnCommandSync(corepackCommand(), ['pnpm', 'pack', '--pack-destination', packDestination, '--json'], {
     cwd: packageDir,
     encoding: 'utf8',
     maxBuffer: 10 * 1024 * 1024,
-    shell: process.platform === 'win32',
   });
   if (result.stderr) process.stderr.write(result.stderr);
   if (result.error) throw result.error;
@@ -84,7 +83,7 @@ function packCli(packDestination) {
 
 function installAndReadVersion(tarball, expectedVersion) {
   const prefix = join(tempDir, 'npm-prefix');
-  const install = spawnSync(
+  const install = spawnCommandSync(
     npmCommand(),
     [
       'install',
@@ -100,7 +99,6 @@ function installAndReadVersion(tarball, expectedVersion) {
     {
       encoding: 'utf8',
       maxBuffer: 10 * 1024 * 1024,
-      shell: process.platform === 'win32',
     },
   );
   if (install.stderr) process.stderr.write(install.stderr);
@@ -110,10 +108,9 @@ function installAndReadVersion(tarball, expectedVersion) {
   }
 
   const caveat = process.platform === 'win32' ? join(prefix, 'caveat.cmd') : join(prefix, 'bin', 'caveat');
-  const version = spawnSync(caveat, ['--version'], {
+  const version = spawnCommandSync(caveat, ['--version'], {
     encoding: 'utf8',
     maxBuffer: 1024 * 1024,
-    shell: process.platform === 'win32',
   });
   if (version.stderr) process.stderr.write(version.stderr);
   if (version.error) throw version.error;

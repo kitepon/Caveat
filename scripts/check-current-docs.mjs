@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from 'node:child_process';
+import { spawnCommandSync } from './process-command.mjs';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -60,7 +60,7 @@ function localMarkdownTargets(source, sourcePath) {
 
 function checkPackedMarkdown() {
   const packageDir = resolve(repo, 'apps/cli');
-  const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+  const result = spawnCommandSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
     cwd: packageDir,
     encoding: 'utf8',
   });

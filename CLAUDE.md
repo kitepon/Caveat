@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクトの状態
 
-**v0.18.1**。Claude Code、Codex、Cursorのnative integrationを持つ。runtime error収集は
+**v0.19.0**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
 既存の`~/.caveatrc.json`で明示的に有効化し、製品文書とrelease gateはCaveat自身が所有する。
 
 **`docs/00_overview.md` が文書の入口、`docs/01_plan.md` が現行の製品契約**。
@@ -49,6 +49,11 @@ node apps/cli/dist/caveat.js <subcommand>          # 警告抑制ラッパ経由
 node apps/cli/dist/caveat.js serve --port 4242     # Web ポータル
 node apps/cli/dist/caveat.js mcp-server            # MCP stdio（手動テスト時）
 ```
+
+`caveat init`は利用可能なCodexと設定ディレクトリがあるGrok・CursorのMCP登録も所有する。
+登録は`apps/cli/src/mcpInstall.ts`に集約し、NodeとCLIの実行パスを使う。既存の環境変数、
+timeout、無効化指定、他の登録を保持し、バックアップと読戻しを行う。登録失敗は非0終了する。
+`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`を尊重する。
 
 単一テストファイル: `corepack pnpm --filter @caveat/core exec vitest run tests/env.test.ts`
 単一 describe/it: `corepack pnpm --filter @caveat/core exec vitest run tests/env.test.ts -t "envMatch"`
@@ -185,10 +190,10 @@ MCP stdio サーバは stdout に JSON-RPC 以外を書いてはいけない。`
 
 ## Claude Code 統合（Phase 10 で初期実装、Phase 12 でインストーラ化）
 
-- **MCP サーバ**: `~/.claude.json`（`claude mcp add --scope user` で書き込み）。`~/.claude/settings.json` には書けない（schema validation で `mcpServers` フィールドが reject される）
+- **MCP サーバ**: `~/.claude.json`（`CLAUDE_CONFIG_DIR`指定時はその直下の`.claude.json`）。製品のinstallerがuser設定をマージする。`settings.json`には書けない（schema validationで`mcpServers`がrejectされる）。
 - **Hooks**: `~/.claude/settings.json` の `hooks.UserPromptSubmit` / `hooks.PostToolUse` / `hooks.PostToolUseFailure` / `hooks.Stop` に throughline 等と並ぶ形で**既存エントリを保持したまま追記**
 - **`caveat init`** ([apps/cli/src/claudeInstall.ts](apps/cli/src/claudeInstall.ts)) が自動で両方を設定:
-  - MCP: `claude mcp remove` → `claude mcp add --scope user caveat -- <nodePath> --disable-warning=ExperimentalWarning <cliScriptPath> mcp-server`（idempotent）
+  - MCP: `mcpInstall.ts`が`command: <nodePath>`と`args: ["--disable-warning=ExperimentalWarning", <cliScriptPath>, "mcp-server"]`をuser設定へマージする。既存の環境変数を保持し、同一内容なら書き換えない。
   - Hooks: `settings.json` を read → `hooks.UserPromptSubmit` / `hooks.PostToolUse` / `hooks.PostToolUseFailure` / `hooks.Stop` に `node <cliScriptPath> hook <name>` を upsert → write（**書き込み前に `settings.json.caveat-backup-<ts>` を作成**）
   - `cliScriptPath` は `process.argv[1]`（NPM global install 時は `%AppData%/npm/node_modules/caveat-cli/dist/caveat.js`）
 - **冪等性**: 既に同 command の hook エントリがあれば skip。重複追加しない
