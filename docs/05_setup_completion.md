@@ -42,3 +42,6 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 - 文書のみのCIで、setup-nodeの自動キャッシュがpnpm導入前にpnpmを呼ぶ失敗を確認した。自動キャッシュを無効にし、Corepackによる既存の依存導入順序を維持した。workflow契約のfocused試験は成功。文書だけの後続commitで実CIを再確認する。
 
 参照: [採用中のsetup-nodeの入力定義](https://github.com/actions/setup-node/blob/a0853c24544627f65ddf259abe73b1d18a591444/action.yml)。
+
+文書CIでNode準備・依存導入の通過後、生成済みCLIへのリンクがfresh checkoutで切れることも確認した。
+CLAUDE.mdの参照をビルド設定へ変更し、未ビルドのcheckoutでも文書を検査できるようにした。
