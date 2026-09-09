@@ -107,8 +107,6 @@ Expected:
 
 ```bash
 original_home=$(node -p 'require("node:os").homedir()')
-original_user=${USER:?}
-original_logname=${LOGNAME:?}
 root=$(mktemp -d)
 prefix="$root/npm"
 smoke_home="$root/profile"
@@ -266,9 +264,9 @@ the separate fake CLI contract test and never invokes real Claude.
 ```bash
 repo=$(git rev-parse --show-toplevel)
 mkdir -p "$root/caveat-home"
-HOME="$original_home" USER="$original_user" LOGNAME="$original_logname" node "$repo/scripts/claude-fresh-session-smoke.mjs" \
-  --settings "$home/.claude/settings.json" \
-  --mcp-config "$home/.claude.json" \
+node "$repo/scripts/claude-fresh-session-smoke.mjs" \
+  --settings "$CLAUDE_CONFIG_DIR/settings.json" \
+  --mcp-config "$CLAUDE_CONFIG_DIR/.claude.json" \
   --caveat-home "$root/caveat-home"
 ```
 

@@ -18,6 +18,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 - Claude CLIなしでもMCP登録を解除でき、保持した追加設定が導入診断を失敗させない。
 - Codexの設定ディレクトリがあればCLIがPATHになくてもMCPを登録する。
 - npmのpackage名付きJSON出力に文書検査を対応させ、配布ファイル一覧を正しく読む。
+- Windowsのエラー収集用ACL処理もPowerShell 7へ揃える。所有者以外への権限を拒否する判定を維持し、内部例外には失敗原因を残す。
 - ClaudeのMCP登録失敗を`init`の非0終了へ反映し、導入成功として報告しない。
 - ClaudeのMCP登録を既存環境変数を保持するマージへ変更し、remove/addによる登録の消失をなくす。
 - 0.18.1までの修正を含み、`init --sync --yes`の既存private remote同期とscaffold復旧を配布する。

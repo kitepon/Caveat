@@ -34,3 +34,6 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 - 全build、typecheck、公開前smoke、workspace全試験が成功。npmの配布JSON形式変更を実測し、配列とpackage名付き形式を文書検査で扱う修理を加えた。文書focused 9件、全71文書のリンク検査が成功。
 - Grokの最終境界反証を回収し、前回4件すべての解消、新規確定欠陥なしを確認した。親も再現試験と実diffから採択した。dotagents runtime依存とGrok独自hookは追加していない。
 - npm公開用のMac認証も401となり、再ログインを依頼した。統合・公開・公開後実機smokeは引き続き工程の受入に含む。
+- `82e5e13`をmainへ統合・pushした。Windows nativeでは全build/typecheck、導入focused、文書・pack・npm隔離導入、初回空remote・既存remote・再実行・実行パス更新・4 AI MCP検索・設定保持を確認した。これは公開版の実機導入とは別の事前検証である。
+- Windows CIの既存エラー収集試験5件が`store_unsafe`で失敗した。旧PowerShell呼出しをPowerShell 7へ揃え、同環境で存在しない静的ACL APIを`Get-Acl` / `Set-Acl`へ変更した。所有者限定判定は維持し、内部causeに診断を残した。一般ユーザーの実機focusedは17件成功・1件既存skip。第三者Read追加は拒否した。サービスユーザーでのCI再検証は未実施。
+- ACL変更も別ベンダーの境界反証で新規確定欠陥なし。親は実機focusedと突合して採択した。変更後の全build・typecheck・公開前smoke・workspace全試験は成功。

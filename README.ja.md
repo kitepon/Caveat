@@ -140,6 +140,9 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
+Node 22.5以降とgitが必要です。WindowsではPowerShell 7（`pwsh.exe`）を使います。
+エラー収集用ストレージのACL処理も同じ入口です。
+
 ```sh
 npm install -g caveat-cli
 caveat init                                                # 初回セットアップ

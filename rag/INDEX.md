@@ -1,5 +1,7 @@
 # RAG Index
 
+- `windows-pwsh-acl/`: PowerShell 7のACL API、所有者限定ACLの適用と第三者権限拒否のWindows実測（取得日 2026-09-10、確度 confirmed）
+
 調査資産の1行台帳。
 
 運用規約: dotagents/PLAN.md 原則10に従い、一次ソースは `rag/<topic>/raw/` に置き、要約・リンク・成果物を還流し、ここへ1行台帳として記録する。

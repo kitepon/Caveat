@@ -145,6 +145,7 @@ own state directory, independently of the knowledge index and host hook files.
 ## Requirements
 
 - Node 22.5+ (for built-in `node:sqlite`)
+- WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
 - `git` for `caveat community add` / `caveat community pull`
 - Claude Code installed if you want Claude MCP / hooks integration. Without it, `caveat init --skip-claude` still provisions local state.
 - Codex installed if you want native Codex hooks via `caveat codex-hook install`.
