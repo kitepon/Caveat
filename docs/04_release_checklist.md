@@ -8,7 +8,8 @@ MCP登録はGrokも含めて確認する。`caveat init`を隔離した設定先
 Grokの公開CLIによる読戻し、CursorのJSON、登録したcommandによるMCP接続と検索を確認する。
 既存の環境変数・timeout・無効化指定・別サーバーが保持され、不正な既存設定は変更されず失敗すること。
 
-公開版の実機導入は対象端末へSSH接続した永続PTYから、公式`npm install -g caveat-cli@latest`、
+公開版の実機導入は永続PTYから実行する。作業中の端末はローカルで、別端末はSSHで接続する。
+公式`npm install -g caveat-cli@latest`、
 `caveat init --sync --yes`、同じ初期化の再実行、製品診断の順で行う。WindowsはPowerShell 7を使う。
 実機の共有AI設定は先にバックアップし、他製品のinstallerと同時に変更しない。
 既存private remoteのcheckout、更新後の登録先更新、公開ミラーと明示hook拒否の保持も確認する。

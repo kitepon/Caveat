@@ -11,7 +11,7 @@ on:
         description: 実行する工場環境
         type: choice
         default: all
-        options: [all, macos-native, linux-native, windows-native, wsl2]
+        options: [all, macos-native, linux-workstation, windows-native]
 
 permissions:
   contents: read

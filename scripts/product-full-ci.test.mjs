@@ -8,6 +8,15 @@ const yaml = requireFromCore('js-yaml');
 const workflowPath = new URL('../.github/workflows/product-full-ci.yml', import.meta.url);
 const callerPath = new URL('../.github/workflows/ci.yml', import.meta.url);
 
+test('現役の3環境だけを製品CIへ割り当てる', () => {
+  const source = readFileSync(workflowPath, 'utf8');
+  const caller = yaml.load(readFileSync(callerPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+  assert.deepEqual(caller.on.workflow_dispatch.inputs.environment.options,
+    ['all', 'macos-native', 'linux-workstation', 'windows-native']);
+  assert.ok(source.includes('["macos-native","linux-workstation","windows-native"]'));
+  assert.doesNotMatch(source, /linux-native|wsl2/);
+});
+
 test('windows-native product CI uses PowerShell 7 only', () => {
   const source = readFileSync(workflowPath, 'utf8');
   const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
