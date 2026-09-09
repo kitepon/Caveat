@@ -46,3 +46,5 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 
 文書CIでNode準備・依存導入の通過後、生成済みCLIへのリンクがfresh checkoutで切れることも確認した。
 CLAUDE.mdの参照をビルド設定へ変更し、未ビルドのcheckoutでも文書を検査できるようにした。
+
+- `96f1df3`のCIは現役3環境すべてで成功した。pnpm 10とnpm 12の公開引数転送をdry-runで切り分け、`apps/cli`内でGit検査を有効にして公開する手順へ修正した。配布物のdry-runは成功した。

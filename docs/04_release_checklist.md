@@ -73,11 +73,15 @@ payload, create and push the annotated tag, then publish:
 git status --short --branch
 git push
 gh run list --commit "$(git rev-parse HEAD)" --limit 5
-corepack pnpm --dir apps/cli publish --dry-run --no-git-checks
+(cd apps/cli && corepack pnpm publish --dry-run)
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
-corepack pnpm --dir apps/cli publish --no-git-checks
+(cd apps/cli && corepack pnpm publish)
 ```
+
+公開は上記のように`apps/cli`内で実行する。固定pnpm 10は先頭の`--dir`や
+`--no-git-checks`をnpmへ渡すため、npm 12では余分な引数・未知の設定として失敗する。
+cleanなmainから、Git検査を有効にしたまま公開する。
 
 ## Published Package Smoke
 
