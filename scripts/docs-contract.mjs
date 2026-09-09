@@ -7,6 +7,17 @@ import { unified } from 'unified';
 
 const markdownParser = unified().use(remarkParse).use(remarkGfm);
 
+/** npmの配列形式とpackage名をキーにした形式を同じ配布一覧へ解決する。 */
+export function npmPackReport(reports, packageName) {
+  const report = Array.isArray(reports)
+    ? reports.find((entry) => entry?.name === packageName)
+    : reports?.[packageName];
+  if (!report || report.name !== packageName || !Array.isArray(report.files)) {
+    throw new Error('npm pack dry-runに対象packageのfiles manifestがありません');
+  }
+  return report;
+}
+
 export function documentTargets(source) {
   const tree = markdownParser.parse(source);
   const definitions = new Map();

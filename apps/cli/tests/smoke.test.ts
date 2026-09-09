@@ -82,7 +82,7 @@ describe('init', () => {
 
   it('creates ~/.caveatrc.json if missing and initializes .index/caveat.db', async () => {
     const ctx = buildContext(silentLogger, { caveatHome: fx.caveatHome, userHome: fx.userHome });
-    await runInit(ctx, { skipClaude: true, dryRun: false });
+    await runInit(ctx, { skipClaude: true, dryRun: false }, { env: {}, codexAvailable: () => false, isTty: () => false });
 
     expect(existsSync(join(fx.userHome, '.caveatrc.json'))).toBe(true);
     expect(readFileSync(join(fx.userHome, '.caveatrc.json'), 'utf-8').trim()).toBe('{}');
@@ -97,7 +97,7 @@ describe('init', () => {
       'utf-8',
     );
     const ctx = buildContext(silentLogger, { caveatHome: fx.caveatHome, userHome: fx.userHome });
-    await runInit(ctx, { skipClaude: true, dryRun: false });
+    await runInit(ctx, { skipClaude: true, dryRun: false }, { env: {}, codexAvailable: () => false, isTty: () => false });
 
     const after = JSON.parse(readFileSync(join(fx.userHome, '.caveatrc.json'), 'utf-8')) as {
       knowledgeRepo: string;
@@ -123,7 +123,7 @@ describe('index', () => {
     );
 
     const ctx = buildContext(silentLogger, { caveatHome: fx.caveatHome, userHome: fx.userHome });
-    await runInit(ctx, { skipClaude: true, dryRun: false });
+    await runInit(ctx, { skipClaude: true, dryRun: false }, { env: {}, codexAvailable: () => false, isTty: () => false });
     await runIndex(ctx, { full: false });
 
     // Read back via opened db
@@ -148,7 +148,7 @@ describe('index', () => {
     );
 
     const ctx = buildContext(silentLogger, { caveatHome: fx.caveatHome, userHome: fx.userHome });
-    await runInit(ctx, { skipClaude: true, dryRun: false });
+    await runInit(ctx, { skipClaude: true, dryRun: false }, { env: {}, codexAvailable: () => false, isTty: () => false });
     await runIndex(ctx, { full: false });
 
     // Verify 'a' was inserted

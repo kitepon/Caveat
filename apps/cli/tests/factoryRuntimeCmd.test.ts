@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +54,36 @@ function readyCursor(fixture: ReturnType<typeof isolated>) {
 }
 
 describe('built factory/runtime CLI contracts', { timeout: process.platform === 'win32' ? 30_000 : 5_000 }, () => {
+  it('独自のClaude・Cursor設定先を導入と同じ場所で診断する', () => {
+    const fixture = isolated(); readyFactory(fixture); readyCursor(fixture);
+    const claudeDir = join(fixture.root, 'claude-custom');
+    const cursorDir = join(fixture.root, 'cursor-custom');
+    renameSync(join(fixture.home, '.claude'), claudeDir);
+    renameSync(join(fixture.home, '.claude.json'), join(claudeDir, '.claude.json'));
+    renameSync(join(fixture.home, '.cursor'), cursorDir);
+    const env = { ...fixture.env, CLAUDE_CONFIG_DIR: claudeDir, CURSOR_HOME: cursorDir };
+    const result = run(['factory-diagnostics', '--json', '--require-connector', 'cursor'], env);
+    expect(json(result)).toMatchObject({ overall: { status: 'ready' }, connectors: {
+      claude: { status: 'ready' }, cursor: { compatibility_status: 'ready' },
+    } });
+    expect(result.status).toBe(0);
+    const cursor = run(['cursor-hook', 'diagnostics'], env);
+    expect(cursor.status).toBe(0);
+    expect(JSON.parse(cursor.stdout).installation).toBe('installed');
+  });
+
+  it('導入時に保持したClaude MCPの環境変数とtimeoutを診断でも受け入れる', () => {
+    const fixture = isolated(); readyFactory(fixture);
+    const configPath = join(fixture.home, '.claude.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8'));
+    config.mcpServers.caveat.env = { CAVEAT_AUTO_SYNC: 'off' };
+    config.mcpServers.caveat.tool_timeout_sec = 240;
+    writeFileSync(configPath, JSON.stringify(config));
+    const result = run(['factory-diagnostics', '--json'], fixture.env);
+    expect(json(result).connectors.claude.mcp.status).toBe('ready');
+    expect(result.status).toBe(0);
+  });
+
   it('keeps a missing isolated home read-only and emits one JSON diagnostic with non-ready exit', () => {
     const fixture = isolated(); const db = join(fixture.caveatHome, 'index', 'caveat.db');
     const result = run(['factory-diagnostics', '--json'], fixture.env);

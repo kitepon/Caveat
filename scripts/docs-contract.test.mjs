@@ -3,9 +3,18 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { assertPackedMarkdownClosed, documentTargets } from './docs-contract.mjs';
+import { assertPackedMarkdownClosed, documentTargets, npmPackReport } from './docs-contract.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+
+test('npm packの配列とpackage名付き出力を読み、別packageや不正な一覧を拒否する', () => {
+  const report = { name: 'caveat-cli', files: [{ path: 'README.md' }] };
+  assert.equal(npmPackReport([report], 'caveat-cli'), report);
+  assert.equal(npmPackReport({ 'caveat-cli': report }, 'caveat-cli'), report);
+  for (const invalid of [null, [], {}, [{ name: 'other', files: [] }], { 'caveat-cli': { name: 'caveat-cli' } }]) {
+    assert.throws(() => npmPackReport(invalid, 'caveat-cli'), /files manifest/);
+  }
+});
 
 test('extracts effective Markdown links, references, and HTML image candidates through ASTs', () => {
   const targets = documentTargets(`

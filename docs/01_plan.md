@@ -40,7 +40,7 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 - Claude Code: MCPと`UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hooks。
 - Codex: `caveat codex-hook install`でnative hooksを登録する。
 - Cursor: `caveat cursor-hook install`で`~/.cursor/hooks.json`へnative hooksをupsertする。
-- `caveat init`がClaude / Codex / Grok / CursorのMCP登録を所有する。CodexはCLI、Grok / Cursorは
+- `caveat init`がClaude / Codex / Grok / CursorのMCP登録を所有する。CodexはCLIまたは設定ディレクトリ、Grok / Cursorは
   設定ディレクトリを検出した場合に登録する。既存の環境変数・timeout・無効化指定は保持し、
   登録失敗と読戻し失敗は非0終了する。GrokにはMCPを提供し、独自hookは追加しない。
 - host固有adapterは同じ検索・pending・同期coreを再利用し、別hostのfieldやstdout契約を改名しない。

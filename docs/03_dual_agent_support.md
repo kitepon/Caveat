@@ -65,6 +65,11 @@ NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無
 `CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME`で設定先を変更でき、Claudeは`CLAUDE_CONFIG_DIR`を使う。
 Grokは設定ディレクトリがある場合のMCP登録だけを追加し、hook契約は増やさない。
 
+CodexのMCP登録はCLIまたは設定ディレクトリが存在する場合に行う。hook導入の可用性判定と
+明示的な拒否は維持する。設定先は`installShared.ts`で解決し、初期化・解除・診断が共用する。
+Windowsでは`HOME`未設定でもOSのユーザーホームを使う。`caveat uninstall`はClaude連携だけを
+解除し、Claude CLIの有無に依存しない。他hostのhook解除は各hostの専用コマンドを使う。
+
 ## Codex Adapter
 
 `@caveat/core` exposes `caveatEntryToSidecarContextBlock(entry)`, which converts

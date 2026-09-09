@@ -4,7 +4,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
-## [0.19.0] — 2026-09-09
+## [0.19.0] — 2026-09-10
 
 ### Added
 - `caveat init`がCodex・Grok・CursorのMCP登録を所有する。既存設定を保持し、バックアップと
@@ -12,6 +12,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 - `CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`に導入先を合わせる。
 
 ### Fixed
+- `init --sync --yes`は端末でも質問を挟まず、未指定の公開ミラー設定を保持する。
+- `init --dry-run`による設定・scaffold・移行の書込みをなくす。
+- 初期化・解除・診断の設定先を共通化し、Windowsの`HOME`未設定にも対応する。
+- Claude CLIなしでもMCP登録を解除でき、保持した追加設定が導入診断を失敗させない。
+- Codexの設定ディレクトリがあればCLIがPATHになくてもMCPを登録する。
+- npmのpackage名付きJSON出力に文書検査を対応させ、配布ファイル一覧を正しく読む。
 - ClaudeのMCP登録失敗を`init`の非0終了へ反映し、導入成功として報告しない。
 - ClaudeのMCP登録を既存環境変数を保持するマージへ変更し、remove/addによる登録の消失をなくす。
 - 0.18.1までの修正を含み、`init --sync --yes`の既存private remote同期とscaffold復旧を配布する。

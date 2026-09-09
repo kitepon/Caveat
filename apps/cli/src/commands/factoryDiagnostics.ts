@@ -8,6 +8,7 @@ import { isCanonicalCaveatClaudeHookCommand, isCaveatClaudeMcpRegistration } fro
 import { diagnoseCursorHookConnector } from '../cursorInstall.js';
 import type { CliContext } from '../context.js';
 import { CAVEAT_VERSION } from '../version.js';
+import { resolveAgentConfigPaths } from '../installShared.js';
 
 type Status = 'ready' | 'not_ready' | 'unverified';
 export type FactoryConnector = 'cursor';
@@ -17,8 +18,7 @@ function hook(present: boolean) { return status(present, 'not_installed'); }
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
-function claudeRegistration(home: string, nodePath: string, cliScriptPath: string) {
-  const path = join(home, '.claude.json');
+function claudeRegistration(path: string, nodePath: string, cliScriptPath: string) {
   if (!existsSync(path)) return status(false, 'not_registered');
   try {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
@@ -26,9 +26,9 @@ function claudeRegistration(home: string, nodePath: string, cliScriptPath: strin
     return status(isCaveatClaudeMcpRegistration(value.mcpServers.caveat, nodePath, cliScriptPath), 'not_registered');
   } catch { return unverified('config_unreadable'); }
 }
-function claudeHooks(home: string, nodePath: string, cliScriptPath: string) {
+function claudeHooks(claudeDir: string, nodePath: string, cliScriptPath: string) {
   try {
-    const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')) as { hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>> };
+    const settings = JSON.parse(readFileSync(join(claudeDir, 'settings.json'), 'utf8')) as { hooks?: Record<string, Array<{ hooks?: Array<{ command?: string }> }>> };
     const present = (event: string, subcommand: 'user-prompt-submit' | 'post-tool-use' | 'stop') => settings.hooks?.[event]?.some((entry) => entry.hooks?.some((item) => typeof item.command === 'string' && isCanonicalCaveatClaudeHookCommand(item.command, subcommand, nodePath, cliScriptPath))) ?? false;
     return { user_prompt_submit: hook(present('UserPromptSubmit', 'user-prompt-submit')), post_tool_use: hook(present('PostToolUse', 'post-tool-use')), post_tool_use_failure: hook(present('PostToolUseFailure', 'post-tool-use')), stop: hook(present('Stop', 'stop')) };
   } catch { const bad = unverified('config_unreadable'); return { user_prompt_submit: { ...bad }, post_tool_use: { ...bad }, post_tool_use_failure: { ...bad }, stop: { ...bad } }; }
@@ -82,13 +82,14 @@ function sync(own: string) {
 }
 export function factoryDiagnostics(
   ctx: CliContext,
-  codexHome = process.env.CODEX_HOME ?? join(ctx.userHome, '.codex'),
+  codexHome = resolveAgentConfigPaths(ctx.userHome).codexHome,
   requiredConnectors: readonly FactoryConnector[] = [],
 ) {
+  const { claudeDir, claudeMcp, cursorDir } = resolveAgentConfigPaths(ctx.userHome);
   const nodePath = process.execPath; const cliScriptPath = process.argv[1] ?? '';
   const db = database(ctx.paths.dbPath); const feature = codexFeature(codexHome); let installedCodexHooks: { userPromptSubmit: boolean; postToolUse: boolean; stop: boolean } | null = null; try { installedCodexHooks = codexHooks(codexHome, nodePath, cliScriptPath); } catch {}
   const codexHook = (present: boolean | undefined) => present === undefined ? unverified('config_unreadable') : !present ? hook(false) : feature.status === 'ready' ? hook(true) : { ...feature };
-  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(ctx.userHome, nodePath, cliScriptPath), hooks: claudeHooks(ctx.userHome, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(join(ctx.userHome, '.cursor'), nodePath, cliScriptPath) } };
+  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(claudeMcp, nodePath, cliScriptPath), hooks: claudeHooks(claudeDir, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(cursorDir, nodePath, cliScriptPath) } };
   const aggregate = (all: Status[]): Status => all.includes('not_ready') ? 'not_ready' : all.includes('unverified') ? 'unverified' : 'ready';
   const connectorStatus = (connector: { mcp?: { status: Status }; hooks: Record<string, { status: Status }> }): Status => aggregate([...Object.values(connector.hooks), ...(connector.mcp ? [connector.mcp] : [])].map((v) => v.status));
   output.connectors.claude.status = connectorStatus(output.connectors.claude); output.connectors.codex.status = connectorStatus(output.connectors.codex);

@@ -208,16 +208,23 @@ What `caveat init` does:
 - Merges `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hook entries into `~/.claude/settings.json` (existing entries preserved; backup written before any change)
 - Installs the product-owned Codex and Cursor hooks when those hosts are available, while preserving explicit hook refusal
 
-Codexが利用可能、またはGrok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
+CodexのCLIまたは設定ディレクトリ、Grok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
 NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録は保持します。
 設定を書き換える前にバックアップし、登録の読戻しが失敗した場合は非0終了します。
 独自の設定先は`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`で指定できます。
 `--skip-codex-hook`と`--skip-cursor-hook`はhookだけを省略し、MCP登録は行います。
 
-For a non-interactive machine setup that also initializes or synchronizes the
-private ownership remote, use this single product-owned entry with stdin closed:
+private remoteの初期化・同期も行う場合は、次の入口を使います。`--yes`は端末でも質問を挟まず、
+公開ミラーは明示しなければ変更しません。新規remoteの作成には認証済みの`gh`が必要です。
 
 ```sh
+caveat init --sync --yes
+```
+
+更新時も同じ入口で実行パスと連携設定を更新します。
+
+```sh
+npm install -g caveat-cli@latest
 caveat init --sync --yes
 ```
 

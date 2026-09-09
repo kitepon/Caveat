@@ -156,15 +156,23 @@ caveat serve                                               # http://localhost:42
 - `~/.claude/settings.json` に `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hook をマージ（既存エントリは保持、書き込み前にバックアップ作成）
 - Codex / Cursor が利用可能なら製品所有hookを導入し、明示的なhook拒否設定は保持
 
-Codexが利用可能、またはGrok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
+CodexのCLIまたは設定ディレクトリ、Grok・Cursorの設定ディレクトリが存在する場合は、同じ`init`がMCPも登録します。
 NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録は保持します。
 設定を書き換える前にバックアップし、登録の読戻しが失敗した場合は非0終了します。
 独自の設定先は`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`で指定できます。
 `--skip-codex-hook`と`--skip-cursor-hook`はhookだけを省略し、MCP登録は行います。
 
-privateな所有remoteの初期化または同期まで非対話で行う場合は、stdinを閉じて次の製品入口を一度だけ呼びます。
+private remoteの初期化・同期も行う場合は、次の入口を使います。`--yes`は端末でも質問を挟まず、
+公開ミラーは明示しなければ変更しません。新規remoteの作成には認証済みの`gh`が必要です。
 
 ```sh
+caveat init --sync --yes
+```
+
+更新時も同じ入口で実行パスと連携設定を更新します。
+
+```sh
+npm install -g caveat-cli@latest
 caveat init --sync --yes
 ```
 

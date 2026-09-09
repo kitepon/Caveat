@@ -35,14 +35,14 @@ keeps Claude Code, Codex, and Cursor hooks working after Homebrew moves Node bet
 3. Merges `UserPromptSubmit` / `PostToolUse` / `PostToolUseFailure` / `Stop` hooks into `~/.claude/settings.json` (existing entries preserved, backup written before any change)
 4. Installs product-owned Codex and Cursor hooks when those hosts are available
 
-同じ`init`がCodex・Grok・CursorへもMCPを登録します。CodexはCLIの存在、Grok・Cursorは
+同じ`init`がCodex・Grok・CursorへもMCPを登録します。CodexはCLIまたは設定ディレクトリ、Grok・Cursorは
 設定ディレクトリの存在で導入対象を決めます。`CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` /
 `CLAUDE_CONFIG_DIR`を尊重し、既存の環境変数・timeout・無効化指定・他の登録を保持します。
 設定変更前のバックアップと読戻しを行い、MCP登録失敗は非0終了します。
 `--skip-codex-hook` / `--skip-cursor-hook`はhookだけを省略します。
 
-For one non-interactive setup that also creates, checks out, or synchronizes the
-private ownership remote, invoke `caveat init --sync --yes` with stdin closed.
+private remoteの初期化・同期は`caveat init --sync --yes`で完結します。端末でも質問を挟まず、
+公開ミラーは明示しなければ変更しません。新規remoteの作成には認証済みの`gh`が必要です。
 It uses the account already authenticated in `gh`, is idempotent, and exits
 non-zero if the explicitly requested sync fails. Callers do not inspect product
 state or run separate Caveat hook installers around this entry.
@@ -153,12 +153,10 @@ own state directory, independently of the knowledge index and host hook files.
 Release install smoke:
 
 ```sh
-npm uninstall -g caveat-cli
-npm install -g caveat-cli
+npm install -g caveat-cli@latest
 caveat --version
-caveat init
-caveat codex-hook install
-caveat cursor-hook install
+caveat init --sync --yes
+caveat factory-diagnostics --json --require-connector cursor
 ```
 
 ## License

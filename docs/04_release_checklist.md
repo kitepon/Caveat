@@ -8,6 +8,19 @@ MCP登録はGrokも含めて確認する。`caveat init`を隔離した設定先
 Grokの公開CLIによる読戻し、CursorのJSON、登録したcommandによるMCP接続と検索を確認する。
 既存の環境変数・timeout・無効化指定・別サーバーが保持され、不正な既存設定は変更されず失敗すること。
 
+公開版の実機導入は対象端末へSSH接続した永続PTYから、公式`npm install -g caveat-cli@latest`、
+`caveat init --sync --yes`、同じ初期化の再実行、製品診断の順で行う。WindowsはPowerShell 7を使う。
+実機の共有AI設定は先にバックアップし、他製品のinstallerと同時に変更しない。
+既存private remoteのcheckout、更新後の登録先更新、公開ミラーと明示hook拒否の保持も確認する。
+新規private remoteを作成する試験には認証済みの`gh`を使う。認証待ち・未実施は成功と区別する。
+
+Node 24以降では、登録されたcommandとenvによる4 AIのMCP接続・検索を次で確認できる。
+引数は公開npm版の`caveat-cli`ディレクトリで、検査は設定値や検索本文を出力しない。
+
+```sh
+node scripts/mcp-registration-smoke.mjs "$(npm root -g)/caveat-cli"
+```
+
 ## Pre-Publish
 
 Run workspace checks sequentially. Do not run `build` and `typecheck` in
@@ -89,31 +102,34 @@ Expected:
 
 ## Fresh Install Hook Smoke
 
-Use a temporary `HOME` so the user's real Claude/Codex/Cursor config is not modified.
+隔離したOSユーザーのプロファイルで行い、既存ユーザーの`HOME`を変更しない。
+そのプロファイルのCaveat設定が既定値であることを確認し、AI設定とデータは次の一時領域へ分ける。
 
 ```bash
-original_home=${HOME:?}
+original_home=$(node -p 'require("node:os").homedir()')
 original_user=${USER:?}
 original_logname=${LOGNAME:?}
 root=$(mktemp -d)
 prefix="$root/npm"
-home="$root/home"
-mkdir -p "$prefix" "$home"
-export HOME="$home"
+smoke_home="$root/profile"
+mkdir -p "$prefix" "$smoke_home"
 export PATH="$prefix/bin:$PATH"
-export CODEX_HOME="$home/.codex"
-export CURSOR_DIR="$home/.cursor"
-mkdir -p "$CURSOR_DIR"
+export CAVEAT_HOME="$smoke_home/.caveat"
+export CLAUDE_CONFIG_DIR="$smoke_home/.claude"
+export CODEX_HOME="$smoke_home/.codex"
+export GROK_HOME="$smoke_home/.grok"
+export CURSOR_HOME="$smoke_home/.cursor"
+mkdir -p "$CLAUDE_CONFIG_DIR" "$CODEX_HOME" "$GROK_HOME" "$CURSOR_HOME"
 
 npm install -g "caveat-cli@$VERSION" --prefix "$prefix"
-caveat init
-caveat codex-hook install --codex-home "$CODEX_HOME"
-caveat codex-hook diagnostics --codex-home "$CODEX_HOME"
-caveat cursor-hook install --cursor-dir "$CURSOR_DIR"
-caveat cursor-hook diagnostics --cursor-dir "$CURSOR_DIR"
+caveat init --yes
+caveat init --yes
+caveat codex-hook diagnostics
+caveat cursor-hook diagnostics
 ```
 
-Verify generated config:
+生成設定を確認する。以下の`~/.claude`等は上記の設定先へ読み替え、Claude MCPは
+`$CLAUDE_CONFIG_DIR/.claude.json`を確認する。
 
 - `~/.claude/settings.json` contains Caveat `UserPromptSubmit`,
   `PostToolUse`, `PostToolUseFailure`, and `Stop` commands.
@@ -127,8 +143,9 @@ Verify generated config:
   `postToolUseFailure`, and `stop` commands, while unrelated existing hooks are
   preserved.
 
-Run each install twice and require `unchanged` on the second run. Run each
-uninstall and require zero remaining Caveat hook entries. Cursor has no
+二度目の初期化で設定ファイルに差分がないことを確認する。解除試験は新規セッション試験の後に行う。
+`caveat uninstall`はClaude連携だけ、Codex / Cursorは各`*-hook uninstall`で解除し、
+対象のCaveat hookが残っていないことを確認する。Cursor has no
 repository-owned live-session smoke harness; its release gate is the focused
 installer/adapter tests plus this packed-package install/diagnostics smoke.
 
@@ -168,8 +185,8 @@ Expected:
 
 ## Codex Sidecar Advisory Smoke
 
-Run this after the new Codex session smoke, using the same temporary `HOME` and
-`PATH`, but set `CODEX_HOME` to the canonical real Codex home. The temporary
+新規Codexセッション試験の後、同じ一時データ領域と`PATH`を使い、
+`CODEX_HOME`だけを認証済みの正規ディレクトリにする。The temporary
 `auth.json` symlink above is accepted by the raw Codex CLI smoke, while
 `codex-sidecar` intentionally opens its canonical auth source with
 `O_NOFOLLOW` before taking a durable snapshot. Passing the symlinked temporary

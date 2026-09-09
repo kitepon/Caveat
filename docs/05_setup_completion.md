@@ -1,0 +1,36 @@
+# 単独導入の完成計画
+
+起点は `origin/codex/product-owned-setup` の `6a9fb39`。修正対象はCaveat repoとCaveatが所有する導入先だけとする。
+
+## 受入条件
+
+公開npm版の `caveat init --sync --yes` が初回、既存private remote、再実行、更新後の再設定を完結する。scaffold復旧・同期・4 AIのMCP登録を製品が所有し、既存env・timeout・無効化指定・他登録・公開ミラー設定・host別reminder契約を保持する。
+
+## 工程
+
+1. 引継ぎ差分とmain包含を確認し、未確認のuninstall変更をfocused試験とCLI再buildで検証する。
+2. 初期化・同期・AI設定の実コードと再現を確認し、原因のある不備を修理する。全Markdownを点検し、現行案内を更新する。
+3. 別ベンダーによる境界反証を回収し、指摘を実測で裁定する。
+4. release checklistのgate、main統合、commit・push・tag・CI・pnpm公開を行う。
+5. MacとSSH先のLinux・Windows nativeで公開npm版を公式導入し、初期化・更新・診断・MCP検索・利用可能なhost smokeを確認する。共有AI設定への導入は端末ごとに直列で行う。
+6. 実測・未実施・正規コマンド・工場が削除できる肩代わりを報告する。
+
+## 境界と既知の罠
+
+Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはPowerShell 7を使う。模擬試験とCIは実端末導入の代わりにしない。buildとtypecheckは直列に行う。認証に人の操作が必要な場合は必要操作を明示する。
+
+## 配置と裁定
+
+受入が公開・実機へ連鎖し、境界裁定の証跡が必要なため統括レーンを適用する。契約・修正・公開・受入は親が担当する。別ベンダーの読取専用反証を並行実行し、同一repoのwriterは親1名とする。Lattice工程管理は使用しない。
+
+## 現在地
+
+- 作業ツリー・stashはclean。指定commitをfetchし、そのブランチへ切替済み。origin/mainは祖先である。
+- 導入関連3ファイル29試験とCLI再buildが成功。
+- 別ベンダーの反証で設定先不一致、Codex CLIなし時のMCP欠落、Claude追加設定の診断偽陰性を確認した。
+- 設定先resolver共有、Claude CLIに依存しない解除、Codex設定dir検出、TTYでのyes、dry-run無変更、追加設定の診断を修理した。いずれも修理前にfocusedで再現した。
+- 修理後は導入・解除・MCP関連30試験、初期化9試験、配布CLI診断6試験、同期11試験、初期化・索引4試験が成功。CLI再build済み。
+- SSHでLinuxとWindows nativeに接続済み。WindowsはPowerShell 7で実行し、GitHub認証失効とprivate remoteのログイン要求を確認した。利用者に再認証を依頼中。公開・実機への新版導入は未実施。
+- 全build、typecheck、公開前smoke、workspace全試験が成功。npmの配布JSON形式変更を実測し、配列とpackage名付き形式を文書検査で扱う修理を加えた。文書focused 9件、全71文書のリンク検査が成功。
+- Grokの最終境界反証を回収し、前回4件すべての解消、新規確定欠陥なしを確認した。親も再現試験と実diffから採択した。dotagents runtime依存とGrok独自hookは追加していない。
+- npm公開用のMac認証も401となり、再ログインを依頼した。統合・公開・公開後実機smokeは引き続き工程の受入に含む。

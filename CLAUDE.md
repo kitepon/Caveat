@@ -50,7 +50,7 @@ node apps/cli/dist/caveat.js serve --port 4242     # Web ポータル
 node apps/cli/dist/caveat.js mcp-server            # MCP stdio（手動テスト時）
 ```
 
-`caveat init`は利用可能なCodexと設定ディレクトリがあるGrok・CursorのMCP登録も所有する。
+`caveat init`はCLIまたは設定ディレクトリがあるCodexと設定ディレクトリがあるGrok・CursorのMCP登録も所有する。
 登録は`apps/cli/src/mcpInstall.ts`に集約し、NodeとCLIの実行パスを使う。既存の環境変数、
 timeout、無効化指定、他の登録を保持し、バックアップと読戻しを行う。登録失敗は非0終了する。
 `CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME` / `CLAUDE_CONFIG_DIR`を尊重する。
@@ -117,7 +117,7 @@ Project-local `.claude/settings.json` は端末固有の permission allowlist �
 ## OS依存・ホスト依存の分離規約（2026-08-23 リファクタ）
 
 - **`process.platform` / `win32` の分岐を書けるのは [packages/core/src/platform.ts](packages/core/src/platform.ts) だけ**（テストのスキップ条件と、telemetry 用の値変換 `normalizeOs` は除く）。owner-only 所有判定・PowerShell call prefix・node 実行ファイル名・パス case 正規化はここの関数を使う。全関数は `platform` を引数で受けてテスト可能
-- **Claude / Codex / Cursor 各インストーラの共通ヘルパは [apps/cli/src/installShared.ts](apps/cli/src/installShared.ts)**（`quoteIfSpaces` / `commandTokens` / `isCanonicalAsset` / backup 付き書込）。各installerに残るのは「そのホストの設定ファイル形式と command の形」だけ
+- **Claude / Codex / Cursor 各インストーラの共通ヘルパは [apps/cli/src/installShared.ts](apps/cli/src/installShared.ts)**（`resolveAgentConfigPaths` / `quoteCommandPath` / `commandTokens` / `isCanonicalAsset` / backup付き書込）。設定先の解決は初期化・解除・診断で共有し、設定形式の差は各installerと`mcpInstall.ts`が所有する。
 - **hook のベンダー中立エンジンは [apps/cli/src/hookShared.ts](apps/cli/src/hookShared.ts)**。`HookHost` 設定（agent / stderrTag / errorCode / stop-state dir / dedupe key）で Claude / Codex / Cursor を切り替え、stdin 処理・DB 検索（markHit / query-miss log 込み）・pending drain / compact・stop 重複抑止を 1 実装で共有する。各host commandに残るのは出力形式・payload 解釈・reminder 本文組み立て・worker 方式だけ
 - 片方のホスト / OS を直す時は、共有モジュール側を直せば両方に効く。共有モジュールを迂回して cmd ファイルに同種ロジックを再複製しない
 
@@ -197,9 +197,8 @@ MCP stdio サーバは stdout に JSON-RPC 以外を書いてはいけない。`
   - Hooks: `settings.json` を read → `hooks.UserPromptSubmit` / `hooks.PostToolUse` / `hooks.PostToolUseFailure` / `hooks.Stop` に `node <cliScriptPath> hook <name>` を upsert → write（**書き込み前に `settings.json.caveat-backup-<ts>` を作成**）
   - `cliScriptPath` は `process.argv[1]`（NPM global install 時は `%AppData%/npm/node_modules/caveat-cli/dist/caveat.js`）
 - **冪等性**: 既に同 command の hook エントリがあれば skip。重複追加しない
-- **テスト**: `apps/cli/tests/claudeInstall.test.ts` — `skipMcpRegistration: true` で spawn を抑制し、settings.json merge のみテスト。実 `~/.claude.json` を汚染しない
-- **uninstall**: `caveat uninstall` で MCP remove + hook エントリ削除。`--dry-run` で事前確認可
-- **spawn 仕様**: `spawnSync(line, { shell: true })` で単一文字列を渡す（Node 24 の "shell + args array" deprecation 回避、Windows の `claude.cmd` も解決可能）
+- **テスト**: `apps/cli/tests/claudeInstall.test.ts`の`skipMcpRegistration: true`はMCP設定変更を省略する。MCPのマージ・保持・解除は隔離した設定先で検証する。
+- **uninstall**: `caveat uninstall`はClaudeのMCP登録とhookだけを削除する。Claude CLIなしでも設定を直接更新し、他の登録を保持して読戻す。解除失敗は非0終了。`--dry-run`では書き込まない。
 
 ## Hook 規約
 

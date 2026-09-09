@@ -1,5 +1,6 @@
 import { accessSync, copyFileSync, existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
+import { homedir } from 'node:os';
 
 /**
  * Claude / Codex 両インストーラで共有するヘルパ。ホスト固有なのは
@@ -45,4 +46,20 @@ export function writeFileWithBackup(path: string, text: string): string {
 
 export function writeJsonWithBackup(path: string, value: unknown): string {
   return writeFileWithBackup(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+/** AIごとの設定先は導入・解除・診断で共有する。OSのhomeはNodeに解決させる。 */
+export function resolveAgentConfigPaths(userHome = homedir(), env: NodeJS.ProcessEnv = process.env) {
+  const claudeDir = env.CLAUDE_CONFIG_DIR || join(userHome, '.claude');
+  return {
+    claudeDir,
+    claudeMcp: claudeMcpConfigPath(claudeDir, env),
+    codexHome: env.CODEX_HOME || join(userHome, '.codex'),
+    grokHome: env.GROK_HOME || join(userHome, '.grok'),
+    cursorDir: env.CURSOR_HOME || join(userHome, '.cursor'),
+  };
+}
+
+export function claudeMcpConfigPath(claudeDir: string, env: NodeJS.ProcessEnv = process.env): string {
+  return join(env.CLAUDE_CONFIG_DIR ? claudeDir : dirname(claudeDir), '.claude.json');
 }

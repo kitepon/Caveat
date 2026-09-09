@@ -102,6 +102,26 @@ describe('caveat init integrated setup', () => {
     expect(fx.messages.join('\n')).not.toContain('would configure publish target');
   });
 
+  it('--sync --yesはTTYでも公開ミラーの質問を挟まず既存設定を保持する', async () => {
+    const ctx = buildContext(fx.logger, { userHome: fx.userHome, caveatHome: fx.caveatHome });
+    const confirm = vi.fn(() => false);
+    await runInit(ctx, { skipClaude: true, dryRun: true, sync: true, yes: true }, {
+      isTty: () => true, confirm, codexAvailable: () => false,
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(fx.messages.join('\n')).not.toContain('would configure publish target');
+  });
+
+  it('初回dry-runは設定とscaffoldを作らない', async () => {
+    const ctx = buildContext(fx.logger, { userHome: fx.userHome, caveatHome: fx.caveatHome });
+    await runInit(ctx, { skipClaude: true, dryRun: true, sync: true, yes: true }, {
+      isTty: () => false, codexAvailable: () => false,
+    });
+    expect(existsSync(ctx.userConfigPath)).toBe(false);
+    expect(existsSync(ctx.paths.knowledgeRepo)).toBe(false);
+    expect(existsSync(ctx.paths.dbPath)).toBe(false);
+  });
+
   it('initializes an explicit file URL without gh and syncs it on re-init', async () => {
     const remote = join(fx.root, 'private.git');
     execFileSync('git', ['init', '--bare', '--initial-branch=main', remote]);
@@ -192,5 +212,17 @@ describe('caveat init integrated setup', () => {
     expect(JSON.parse(readFileSync(join(cursorHome, 'mcp.json'), 'utf8')).mcpServers.caveat.args.at(-1)).toBe('mcp-server');
     expect(existsSync(join(fx.userHome, '.codex'))).toBe(false);
     for (const client of ['codex', 'grok', 'cursor']) expect(fx.messages).toContain(`info:${client} MCP: unchanged`);
+  });
+
+  it('Codex CLIがPATHになくても既存のCodex設定先へMCPを登録する', async () => {
+    const codexHome = join(fx.userHome, '.codex');
+    mkdirSync(codexHome);
+    writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = false\n');
+    const ctx = buildContext(fx.logger, { userHome: fx.userHome, caveatHome: fx.caveatHome });
+    await runInit(ctx, { skipClaude: true, dryRun: false }, { isTty: () => false, codexAvailable: () => false });
+    const config = parse(readFileSync(join(codexHome, 'config.toml'), 'utf8'));
+    expect(config.mcp_servers).toHaveProperty('caveat');
+    expect(config.features).toEqual({ hooks: false });
+    expect(existsSync(join(codexHome, 'hooks.json'))).toBe(false);
   });
 });

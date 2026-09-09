@@ -3,7 +3,7 @@ import { spawnCommandSync } from './process-command.mjs';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertPackedMarkdownClosed, documentTargets } from './docs-contract.mjs';
+import { assertPackedMarkdownClosed, documentTargets, npmPackReport } from './docs-contract.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const overviewPath = resolve(repo, 'docs/00_overview.md');
@@ -71,8 +71,10 @@ function checkPackedMarkdown() {
   let reports;
   try { reports = JSON.parse(result.stdout); }
   catch { fail('npm pack dry-runのJSONを解析できません'); }
-  const report = Array.isArray(reports) ? reports[0] : undefined;
-  if (!report || !Array.isArray(report.files)) fail('npm pack dry-runにfiles manifestがありません');
+  const packageName = JSON.parse(readFileSync(resolve(packageDir, 'package.json'), 'utf8')).name;
+  let report;
+  try { report = npmPackReport(reports, packageName); }
+  catch (error) { fail(error.message); }
   const files = new Set(report.files.map((entry) => entry?.path).filter((path) => typeof path === 'string'));
   const markdown = [...files].filter((path) => extname(path).toLowerCase() === '.md');
   if (markdown.length === 0) fail('公開packageにMarkdownがありません');

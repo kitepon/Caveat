@@ -1,19 +1,19 @@
-import { spawnSync } from 'node:child_process';
 import { constants, existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import type { Logger } from '@caveat/core';
-import { commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup } from './installShared.js';
-import { installMcpClient } from './mcpInstall.js';
+import { claudeMcpConfigPath, commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup } from './installShared.js';
+import { installMcpClient, uninstallMcpClient } from './mcpInstall.js';
 
 export interface ClaudeInstallOptions {
   claudeDir: string;
+  mcpConfigPath?: string;
   /** Absolute path to the bundled CLI script (used with process.execPath). */
   cliScriptPath: string;
   /** Absolute path to the `node` binary. */
   nodePath: string;
   dryRun: boolean;
   logger: Logger;
-  /** Skip the `claude mcp add/remove` spawn (used by tests to avoid touching real `~/.claude.json`). */
+  /** テストなどでMCP設定の変更を省略する。 */
   skipMcpRegistration?: boolean;
 }
 
@@ -130,11 +130,11 @@ export function isCanonicalCaveatClaudeHookCommand(actual: string, event: 'user-
   return isCanonicalAsset(actualNodePath, nodePath, constants.X_OK) && isCanonicalAsset(actualCliScriptPath, cliScriptPath, constants.R_OK);
 }
 
-/** Read-only detector for the exact stdio registration emitted by registerMcp. */
+/** 製品のstdio実行先を検証し、保持した利用者の追加設定は許容する。 */
 export function isCaveatClaudeMcpRegistration(value: unknown, nodePath: string, cliScriptPath: string): boolean {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const server = value as Record<string, unknown>;
-  return Object.keys(server).length === 4 && ['args', 'command', 'env', 'type'].every((key) => Object.hasOwn(server, key))
+  return ['args', 'command', 'env', 'type'].every((key) => Object.hasOwn(server, key))
     && server.type === 'stdio' && isCanonicalAsset(server.command, nodePath, constants.X_OK) && Array.isArray(server.args)
     && server.args.length === 3 && server.args[0] === '--disable-warning=ExperimentalWarning'
     && isCanonicalAsset(server.args[1], cliScriptPath, constants.R_OK) && server.args[2] === 'mcp-server'
@@ -150,52 +150,19 @@ function writeSettings(path: string, settings: Settings): string {
   return writeJsonWithBackup(path, settings);
 }
 
-const CLAUDE_BIN = 'claude';
-
-function shellQuote(s: string): string {
-  // Cross-platform-safe quoting for shell: true. The inputs are all produced by
-  // this installer (no user-supplied strings), so we only need to handle paths
-  // containing spaces. Values may contain no `"` chars by construction.
-  return /[\s&|<>^()]/.test(s) ? `"${s}"` : s;
-}
-
-function runClaude(args: string[]): ReturnType<typeof spawnSync> {
-  // Use `shell: true` with a single command string to avoid the
-  // Node 24 "shell + args array" deprecation and to let the platform shell
-  // resolve claude.cmd on Windows / claude on POSIX.
-  const line = [CLAUDE_BIN, ...args].map(shellQuote).join(' ');
-  return spawnSync(line, { shell: true, encoding: 'utf-8' });
-}
-
-function registerMcp(
-  claudeDir: string,
-  nodePath: string,
-  cliScriptPath: string,
-  dryRun: boolean,
-  logger: Logger,
-): ClaudeInstallResult['mcp'] {
-  const configPath = process.env.CLAUDE_CONFIG_DIR
-    ? join(claudeDir, '.claude.json') : join(dirname(claudeDir), '.claude.json');
+function configureMcp(opts: ClaudeInstallOptions, remove = false): ClaudeInstallResult['mcp'] {
+  const configPath = opts.mcpConfigPath ?? claudeMcpConfigPath(opts.claudeDir);
   try {
-    const action = installMcpClient({ client: 'claude', configPath, nodePath, cliScriptPath, dryRun });
-    logger.info(`Claude MCP: ${action}`);
-    return { action: dryRun ? 'skipped' : 'registered', detail: action };
+    const options = { client: 'claude' as const, configPath, dryRun: opts.dryRun };
+    const action = remove
+      ? uninstallMcpClient(options)
+      : installMcpClient({ ...options, nodePath: opts.nodePath, cliScriptPath: opts.cliScriptPath });
+    const detail = remove && action === 'configured' ? 'removed' : action;
+    opts.logger.info(`Claude MCP: ${detail}`);
+    return { action: opts.dryRun ? 'skipped' : 'registered', detail };
   } catch (error) {
     return { action: 'failed', detail: error instanceof Error ? error.message : String(error) };
   }
-}
-
-function unregisterMcp(dryRun: boolean, logger: Logger): ClaudeInstallResult['mcp'] {
-  if (dryRun) {
-    logger.info('[dry-run] claude mcp remove --scope user caveat');
-    return { action: 'skipped', detail: 'dry-run' };
-  }
-  const result = runClaude(['mcp', 'remove', '--scope', 'user', 'caveat']);
-  if (result.status === 0) return { action: 'registered', detail: 'removed' };
-  if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
-    return { action: 'skipped', detail: 'claude CLI not found' };
-  }
-  return { action: 'skipped', detail: 'not registered or removal failed' };
 }
 
 export function installClaudeIntegration(
@@ -236,7 +203,7 @@ export function installClaudeIntegration(
 
   const mcp = opts.skipMcpRegistration
     ? ({ action: 'skipped', detail: 'skipped by caller' } as const)
-    : registerMcp(opts.claudeDir, opts.nodePath, opts.cliScriptPath, opts.dryRun, opts.logger);
+    : configureMcp(opts);
 
   return {
     mcp,
@@ -268,7 +235,7 @@ export function uninstallClaudeIntegration(
 
   const mcp = opts.skipMcpRegistration
     ? ({ action: 'skipped', detail: 'skipped by caller' } as const)
-    : unregisterMcp(opts.dryRun, opts.logger);
+    : configureMcp(opts, true);
 
   return {
     mcp,

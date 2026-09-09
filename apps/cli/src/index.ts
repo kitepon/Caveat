@@ -33,10 +33,12 @@ import {
   runCommunityRemove,
 } from './commands/community.js';
 import { resolveHookNodePath } from './nodePath.js';
+import { resolveAgentConfigPaths } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrors } from './commands/runtimeErrors.js';
 
 const program = new Command();
+const agentPaths = resolveAgentConfigPaths();
 function collectRepeatable(value: string, previous: string[]): string[] {
   return [...previous, value];
 }
@@ -275,7 +277,7 @@ codexHook
   .command('install')
   .description('Install Caveat hooks into ~/.codex/hooks.json and enable hooks')
   .option('--dry-run', 'show planned changes without writing', false)
-  .option('--codex-home <path>', 'Codex home directory', process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`)
+  .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
@@ -308,7 +310,7 @@ codexHook
   .command('uninstall')
   .description('Remove Caveat-owned Codex hooks from ~/.codex/hooks.json')
   .option('--dry-run', 'show planned changes without writing', false)
-  .option('--codex-home <path>', 'Codex home directory', process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`)
+  .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
@@ -331,7 +333,7 @@ codexHook
 codexHook
   .command('diagnostics')
   .description('Check local Codex hook availability')
-  .option('--codex-home <path>', 'Codex home directory', process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`)
+  .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action(async (opts: { codexHome: string }) => {
     await runCodexHook('diagnostics', opts.codexHome);
   });
@@ -372,7 +374,7 @@ cursorHook
   .command('install')
   .description('Install Caveat hooks into ~/.cursor/hooks.json (factory hooks are kept)')
   .option('--dry-run', 'show planned changes without writing', false)
-  .option('--cursor-dir <path>', 'Cursor home directory', `${process.env.HOME}/.cursor`)
+  .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
@@ -397,7 +399,7 @@ cursorHook
   .command('uninstall')
   .description('Remove Caveat-owned Cursor hooks from ~/.cursor/hooks.json')
   .option('--dry-run', 'show planned changes without writing', false)
-  .option('--cursor-dir <path>', 'Cursor home directory', `${process.env.HOME}/.cursor`)
+  .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
     const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
@@ -421,7 +423,7 @@ cursorHook
 cursorHook
   .command('diagnostics')
   .description('Check local Cursor hook installation')
-  .option('--cursor-dir <path>', 'Cursor home directory', `${process.env.HOME}/.cursor`)
+  .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action(async (opts: { cursorDir: string }) => {
     await runCursorHook('diagnostics', opts.cursorDir);
   });

@@ -9,15 +9,31 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** 設定形式の差を製品内に閉じ込め、Caveat以外の登録と利用者の指定を保持する。 */
-export function installMcpClient(options: {
+interface McpConfigOptions {
   client: McpClient;
   configPath: string;
-  nodePath: string;
-  cliScriptPath: string;
   dryRun: boolean;
-}): 'configured' | 'unchanged' | 'dry-run' {
-  const { client, configPath, nodePath, cliScriptPath, dryRun } = options;
+}
+
+/** 設定形式の差を製品内に閉じ込め、Caveat以外の登録と利用者の指定を保持する。 */
+export function installMcpClient(options: McpConfigOptions & { nodePath: string; cliScriptPath: string }) {
+  return updateMcpClient(options, (previous) => ({
+    ...previous,
+    ...(options.client === 'claude' ? { type: 'stdio', env: previous?.env ?? {} } : {}),
+    command: options.nodePath,
+    args: ['--disable-warning=ExperimentalWarning', options.cliScriptPath, 'mcp-server'],
+  }));
+}
+
+export function uninstallMcpClient(options: McpConfigOptions) {
+  return updateMcpClient(options, () => undefined);
+}
+
+function updateMcpClient(
+  options: McpConfigOptions,
+  update: (previous: Record<string, unknown> | undefined) => Record<string, unknown> | undefined,
+): 'configured' | 'unchanged' | 'dry-run' {
+  const { client, configPath, dryRun } = options;
   const json = client === 'cursor' || client === 'claude';
   const decode = (text: string): unknown => json ? JSON.parse(text) : parse(text);
   const current = existsSync(configPath) ? decode(readFileSync(configPath, 'utf8')) : {};
@@ -29,16 +45,14 @@ export function installMcpClient(options: {
   if (servers.caveat !== undefined && !object(servers.caveat)) {
     throw new Error(`mcp_config_invalid: ${client}のCaveat登録がobjectではありません`);
   }
-  const previous = (servers.caveat ?? {}) as Record<string, unknown>;
-  const registration = {
-    ...previous,
-    ...(client === 'claude' ? { type: 'stdio', env: previous.env ?? {} } : {}),
-    command: nodePath,
-    args: ['--disable-warning=ExperimentalWarning', cliScriptPath, 'mcp-server'],
-  };
+  const previous = servers.caveat as Record<string, unknown> | undefined;
+  const registration = update(previous);
   if (isDeepStrictEqual(previous, registration)) return 'unchanged';
   if (dryRun) return 'dry-run';
-  const next = { ...current, [key]: { ...servers, caveat: registration } };
+  const nextServers = { ...servers };
+  if (registration === undefined) delete nextServers.caveat;
+  else nextServers.caveat = registration;
+  const next = { ...current, [key]: nextServers };
   writeFileWithBackup(configPath, json ? `${JSON.stringify(next, null, 2)}\n` : stringify(next));
   const observed = decode(readFileSync(configPath, 'utf8'));
   if (!isDeepStrictEqual(observed, next)) {

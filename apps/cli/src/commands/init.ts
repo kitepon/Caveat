@@ -32,6 +32,7 @@ import {
 import { askOnce, defaultGitHubRepoUrl, runGh, type GhRunner } from '../ghSetup.js';
 import { resolveHookNodePath } from '../nodePath.js';
 import { installMcpClient } from '../mcpInstall.js';
+import { resolveAgentConfigPaths } from '../installShared.js';
 import { validatePublishTarget } from './publish.js';
 
 export interface InitOptions {
@@ -68,31 +69,31 @@ export async function runInit(
   const confirm = dependencies.confirm ?? askOnce;
   const ghRunner = dependencies.ghRunner ?? runGh;
   const env = dependencies.env ?? process.env;
-  const codexHome = env.CODEX_HOME || join(ctx.userHome, '.codex');
-  const cursorDir = env.CURSOR_HOME || join(ctx.userHome, '.cursor');
-  const grokHome = env.GROK_HOME || join(ctx.userHome, '.grok');
+  const { claudeDir, claudeMcp, codexHome, cursorDir, grokHome } = resolveAgentConfigPaths(ctx.userHome, env);
   const codexAvailable = (dependencies.codexAvailable ?? detectCodexAvailability)();
   let publishTarget = ctx.config.publishTarget;
   let codexHookState: 'installed' | 'partial' | 'not-installed' | 'skipped' = 'not-installed';
   let cursorHookState: 'installed' | 'partial' | 'not-installed' | 'skipped' = 'not-installed';
 
-  ensureUserConfig(ctx.userConfigPath);
+  if (!opts.dryRun) ensureUserConfig(ctx.userConfigPath);
   ctx.logger.info(`user config: ${ctx.userConfigPath}`);
 
   if (!existsSync(ctx.paths.knowledgeRepo)) {
-    mkdirSync(ctx.paths.knowledgeRepo, { recursive: true });
-    mkdirSync(ctx.paths.entriesDir, { recursive: true });
-    ctx.logger.info(`knowledge repo scaffolded: ${ctx.paths.knowledgeRepo}`);
+    if (!opts.dryRun) {
+      mkdirSync(ctx.paths.knowledgeRepo, { recursive: true });
+      mkdirSync(ctx.paths.entriesDir, { recursive: true });
+    }
+    ctx.logger.info(`${opts.dryRun ? '[dry-run] would scaffold' : 'knowledge repo scaffolded'}: ${ctx.paths.knowledgeRepo}`);
   } else {
     ctx.logger.info(`knowledge repo: ${ctx.paths.knowledgeRepo}`);
   }
 
-  migrateLegacyCommunityDir(ctx);
+  if (!opts.dryRun) migrateLegacyCommunityDir(ctx);
 
   const gitignorePath = join(ctx.paths.knowledgeRepo, '.gitignore');
   if (!existsSync(gitignorePath)) {
-    writeFileSync(gitignorePath, KNOWLEDGE_GITIGNORE, 'utf-8');
-    ctx.logger.info(`.gitignore created: ${gitignorePath}`);
+    if (!opts.dryRun) writeFileSync(gitignorePath, KNOWLEDGE_GITIGNORE, 'utf-8');
+    ctx.logger.info(`${opts.dryRun ? '[dry-run] would create .gitignore' : '.gitignore created'}: ${gitignorePath}`);
   }
 
   if (!opts.dryRun) {
@@ -133,7 +134,7 @@ export async function runInit(
 
   let syncRequested = opts.sync !== undefined && opts.sync !== false;
   let syncNudgeAccepted = false;
-  if (opts.sync === undefined && isTty()) {
+  if (opts.sync === undefined && !opts.yes && isTty()) {
     syncNudgeAccepted = confirm('private 同期を今すぐ設定する？ [y/N]');
     syncRequested = syncNudgeAccepted;
   }
@@ -191,7 +192,7 @@ export async function runInit(
 
   let publishRequested = opts.publishTarget !== undefined && opts.publishTarget !== false;
   let publishNudgeAccepted = false;
-  if (opts.publishTarget === undefined && isTty()) {
+  if (opts.publishTarget === undefined && !opts.yes && isTty()) {
     publishNudgeAccepted = confirm('公開 repo（封緘ミラー）も設定する？ [y/N]');
     publishRequested = publishNudgeAccepted;
   }
@@ -234,7 +235,8 @@ export async function runInit(
       ctx.logger.warn('cannot determine CLI script path; skipping Claude integration');
     } else {
       const result = installClaudeIntegration({
-        claudeDir: env.CLAUDE_CONFIG_DIR || join(ctx.userHome, '.claude'),
+        claudeDir,
+        mcpConfigPath: claudeMcp,
         cliScriptPath,
         nodePath: resolveHookNodePath(),
         dryRun: opts.dryRun,
@@ -308,7 +310,7 @@ export async function runInit(
   const cliScriptPath = process.argv[1];
   if (!cliScriptPath) throw new Error('mcp_setup_failed: CLIの実行パスを取得できません');
   for (const [client, configPath, available] of [
-    ['codex', join(codexHome, 'config.toml'), codexAvailable],
+    ['codex', join(codexHome, 'config.toml'), codexAvailable || existsSync(codexHome)],
     ['grok', join(grokHome, 'config.toml'), existsSync(grokHome)],
     ['cursor', join(cursorDir, 'mcp.json'), existsSync(cursorDir)],
   ] as const) {
@@ -410,14 +412,17 @@ export function runUninstall(ctx: CliContext, opts: UninstallOptions): void {
     process.exit(1);
   }
 
+  const { claudeDir, claudeMcp } = resolveAgentConfigPaths(ctx.userHome);
   const result = uninstallClaudeIntegration({
-    claudeDir: process.env.CLAUDE_CONFIG_DIR || join(ctx.userHome, '.claude'),
+    claudeDir,
+    mcpConfigPath: claudeMcp,
     cliScriptPath,
     nodePath: resolveHookNodePath(),
     dryRun: opts.dryRun,
     logger: ctx.logger,
   });
 
+  if (result.mcp.action === 'failed') throw new Error(`mcp_uninstall_failed: Claude Code: ${result.mcp.detail}`);
   ctx.logger.info(
     `MCP: ${result.mcp.action}${result.mcp.detail ? ` (${result.mcp.detail})` : ''}`,
   );
