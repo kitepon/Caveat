@@ -39,3 +39,6 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 - ACL変更も別ベンダーの境界反証で新規確定欠陥なし。親は実機focusedと突合して採択した。変更後の全build・typecheck・公開前smoke・workspace全試験は成功。
 - `6eabd0a`をmainへpush済み。Mac nativeとWindows nativeのCIが成功し、Windowsのサービスユーザーでも全試験を通過した。SSH先の一般ユーザーでもworkspace全試験と最終pack・npm隔離導入が成功した。旧ACL失敗の内訳は確定していないが、PowerShell 7での処理と拒否契約は実測できた。
 - 残作業はCIの待機ジョブ、npm公開、公開npm版の実機導入とhost smoke。Macのnpm再認証、WindowsのGitHub再認証、MacのSSHリモートログイン有効化を依頼中。公開版はまだ更新しておらず、工場の肩代わり削除は公開後の受入まで保留する。
+- 文書のみのCIで、setup-nodeの自動キャッシュがpnpm導入前にpnpmを呼ぶ失敗を確認した。自動キャッシュを無効にし、Corepackによる既存の依存導入順序を維持した。workflow契約のfocused試験は成功。文書だけの後続commitで実CIを再確認する。
+
+参照: [採用中のsetup-nodeの入力定義](https://github.com/actions/setup-node/blob/a0853c24544627f65ddf259abe73b1d18a591444/action.yml)。
