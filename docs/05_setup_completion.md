@@ -37,3 +37,5 @@ Grok独自hook、dotagents修理、別製品repo変更は対象外。WindowsはP
 - `82e5e13`をmainへ統合・pushした。Windows nativeでは全build/typecheck、導入focused、文書・pack・npm隔離導入、初回空remote・既存remote・再実行・実行パス更新・4 AI MCP検索・設定保持を確認した。これは公開版の実機導入とは別の事前検証である。
 - Windows CIの既存エラー収集試験5件が`store_unsafe`で失敗した。旧PowerShell呼出しをPowerShell 7へ揃え、同環境で存在しない静的ACL APIを`Get-Acl` / `Set-Acl`へ変更した。所有者限定判定は維持し、内部causeに診断を残した。一般ユーザーの実機focusedは17件成功・1件既存skip。第三者Read追加は拒否した。サービスユーザーでのCI再検証は未実施。
 - ACL変更も別ベンダーの境界反証で新規確定欠陥なし。親は実機focusedと突合して採択した。変更後の全build・typecheck・公開前smoke・workspace全試験は成功。
+- `6eabd0a`をmainへpush済み。Mac nativeとWindows nativeのCIが成功し、Windowsのサービスユーザーでも全試験を通過した。SSH先の一般ユーザーでもworkspace全試験と最終pack・npm隔離導入が成功した。旧ACL失敗の内訳は確定していないが、PowerShell 7での処理と拒否契約は実測できた。
+- 残作業はCIの待機ジョブ、npm公開、公開npm版の実機導入とhost smoke。Macのnpm再認証、WindowsのGitHub再認証、MacのSSHリモートログイン有効化を依頼中。公開版はまだ更新しておらず、工場の肩代わり削除は公開後の受入まで保留する。
