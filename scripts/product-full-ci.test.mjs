@@ -37,6 +37,8 @@ test('the local caller always supplies the product-owned documentation check', (
   assert.ok(nodeIndex >= 0 && nodeIndex < dependencyIndex && dependencyIndex < checkIndex,
     'docs Node and dependencies must install before docs check');
   assert.equal(classifySteps[nodeIndex].with?.['node-version'], '22.x');
+  assert.equal(classifySteps[nodeIndex].with?.['package-manager-cache'], false,
+    'pnpm導入前のsetup-nodeはpackage managerを呼び出さない');
   assert.equal(classifySteps[dependencyIndex].run, '${{ inputs.dependency-command }}');
 
   const caller = yaml.load(readFileSync(callerPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
