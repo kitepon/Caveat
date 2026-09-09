@@ -14,7 +14,6 @@
 | [`03_dual_agent_support.md`](03_dual_agent_support.md) | Claude / Codex / Cursor host adapterとsidecar境界 |
 | [`04_release_checklist.md`](04_release_checklist.md) | npm publishからfresh install・host smokeまでのrelease gate |
 | [`../keyserver/README.md`](../keyserver/README.md) | sealed bundleの鍵配布とrotation |
-| [`05_setup_completion.md`](05_setup_completion.md) | 単独導入の完成工程と受入条件（進行中） |
 
 ## 履歴
 
