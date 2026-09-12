@@ -52,7 +52,7 @@ function database(path: string) {
 }
 function codexFeature(codexHome: string) {
   const path = join(codexHome, 'config.toml'); if (!existsSync(path)) return status(false, 'feature_disabled');
-  try { const config = parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>; if (!isRecord(config.features)) return status(false, 'feature_disabled'); const features = config.features as Record<string, unknown>; return status(features.hooks === true && features.codex_hooks === undefined, 'feature_disabled'); } catch { return unverified('config_unreadable'); }
+  try { const config = parseToml(readFileSync(path, 'utf8')) as Record<string, unknown>; if (!isRecord(config.features)) return status(false, 'feature_disabled'); const features = config.features as Record<string, unknown>; return status(features.hooks === true && (features.codex_hooks === undefined || features.codex_hooks === true), 'feature_disabled'); } catch { return unverified('config_unreadable'); }
 }
 function codexHooks(codexHome: string, nodePath: string, cliScriptPath: string) {
   const value: unknown = JSON.parse(readFileSync(join(codexHome, 'hooks.json'), 'utf8')); if (!isRecord(value) || !isRecord(value.hooks)) throw Error('config_unreadable');

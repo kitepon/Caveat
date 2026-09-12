@@ -84,6 +84,26 @@ describe('built factory/runtime CLI contracts', { timeout: process.platform === 
     expect(result.status).toBe(0);
   });
 
+  it.each([
+    ['hooks = true\ncodex_hooks = true', 'ready'],
+    ['hooks = true', 'ready'],
+    ['hooks = false', 'not_ready'],
+    ['hooks = true\ncodex_hooks = false', 'not_ready'],
+    ['hooks = false\ncodex_hooks = true', 'not_ready'],
+    ['hooks = true\ncodex_hooks = "true"', 'not_ready'],
+  ])('Codex設定の有効判定と明示falseを保持する: %s', (features, expected) => {
+    const fixture = isolated(); readyFactory(fixture);
+    const configPath = join(fixture.codexHome, 'config.toml');
+    const config = `[features]\n${features}\n`;
+    writeFileSync(configPath, config);
+    const before = statSync(configPath).mtimeMs;
+    const result = run(['factory-diagnostics', '--json'], fixture.env);
+    expect(json(result).connectors.codex.status).toBe(expected);
+    expect(result.status).toBe(expected === 'ready' ? 0 : 1);
+    expect(readFileSync(configPath, 'utf8')).toBe(config);
+    expect(statSync(configPath).mtimeMs).toBe(before);
+  });
+
   it('keeps a missing isolated home read-only and emits one JSON diagnostic with non-ready exit', () => {
     const fixture = isolated(); const db = join(fixture.caveatHome, 'index', 'caveat.db');
     const result = run(['factory-diagnostics', '--json'], fixture.env);

@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.2] — 2026-09-12
+
+### Fixed
+- Codexの`features.hooks`と旧aliasの`features.codex_hooks`が両方`true`の時、
+  工場診断が誤ってhookを無効と判定する問題を修正する。明示的な`false`の拒否と設定の読取り専用契約を維持する。
+
 ## [0.19.1] — 2026-09-10
 
 ### Fixed
