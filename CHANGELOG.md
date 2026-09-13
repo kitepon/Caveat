@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.3] — 2026-09-13
+
+### 修正
+
+- runtime snapshotへ実発生時の`product_version`を公開する。過去の記録の版を現在の導入版から推測しない。
+
 ## [0.19.2] — 2026-09-12
 
 ### Fixed

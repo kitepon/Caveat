@@ -35,6 +35,16 @@ function childExit(childProcess: ReturnType<typeof spawn>) {
 }
 
 describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, () => {
+  it('発生版は直近の発生で更新し、snapshotの実行版から推測しない', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
+    recordRuntimeError(definition, { env: e, version: '1.0.0', now: '2026-09-01T00:00:00.000Z' });
+    expect(runtimeErrorsSnapshot(0, 256, { env: e, version: '2.0.0' }).runtime_errors[0]?.product_version).toBe('1.0.0');
+    recordRuntimeError(definition, { env: e, version: '2.0.0', now: '2026-09-02T00:00:00.000Z' });
+    const entry = runtimeErrorsSnapshot(0, 256, { env: e, version: '3.0.0' }).runtime_errors[0];
+    expect(entry?.product_version).toBe('2.0.0');
+    expect(entry?.occurrence_count).toBe(2);
+    expect(entry?.last_seen).toBe('2026-09-02T00:00:00.000Z');
+  });
   it('uses the Caveat user config and keeps existing configs disabled until explicitly enabled', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = absentEnv(root); const path = runtimeErrorsConfigPath(e);
     expect(path).toBe(join(root, '.caveatrc.json'));
