@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@caveat/core": "workspace:*",
-    "@hono/node-server": "^2.0.4",
+    "@hono/node-server": "^2.1.0",
     "hono": "^4.12.23",
     "markdown-it": "^14.2.0"
   },
