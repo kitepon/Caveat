@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { envMatch, normalizePath, fingerprint } from '../src/env.js';
+import { envMatch, normalizePath, fingerprint, environmentAppliesToTask } from '../src/env.js';
 
 describe('envMatch', () => {
   it('matches substring for non-semver keys', () => {
@@ -40,5 +40,14 @@ describe('fingerprint', () => {
     expect(typeof fp.os).toBe('string');
     expect(typeof fp.arch).toBe('string');
     expect(fp.node).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+describe('明示された適用OS', () => {
+  it('記録時のOSは制限に使わず、適用OSだけを照合する', () => {
+    expect(environmentAppliesToTask({ os: 'Windows 11' }, 'Macで作業', 'darwin')).toBe(true);
+    expect(environmentAppliesToTask({ os: 'Windows 11', applies_to_os: 'windows' }, 'Pythonの改行問題', 'darwin')).toBe(false);
+    expect(environmentAppliesToTask({ applies_to_os: 'windows' }, 'Windows向けPythonの改行問題', 'darwin')).toBe(true);
+    expect(environmentAppliesToTask({ applies_to_os: 'macos' }, 'Pythonの改行問題', 'darwin')).toBe(true);
   });
 });

@@ -17,13 +17,16 @@ import {
 import { maybeTriggerAutoReindex } from '../autoReindexTrigger.js';
 import { maybeTriggerAutoSync } from '../autoSyncTrigger.js';
 import { detectCodexHookInstallation } from '../codexHookInstall.js';
+import { runJevStruggle, type JevNotice } from '../jevStruggle.js';
+import { prepareSessionDelivery } from '../hookDelivery.js';
 import {
+  acknowledgeSessionReminders,
   buildContextSafely,
-  compactContexts,
-  drainForSession,
+  emitHookContext,
   errorMessage,
   extractToolResponseText,
   parsePayload,
+  peekForSession,
   pendingCleanupFailureText,
   queueStopForSession,
   readStdin,
@@ -371,15 +374,33 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
   if (!sessionId) process.stderr.write('[caveat:codex-hook] missing session_id; pending drain disabled\n');
 
   if (name === 'user-prompt-submit') {
-    const contexts = sessionId ? drainForSession(CODEX_HOST, sessionId) : [];
+    const pending = sessionId ? peekForSession(CODEX_HOST, sessionId) : null;
+    const contexts = pending?.contexts ?? [];
+    const ctx = buildContextSafely(CODEX_HOST);
+    let jevNotice: JevNotice | null = null;
+    if (ctx?.config.jevEnabled) {
+      try {
+        jevNotice = await runJevStruggle(ctx, 'codex', payload);
+        if (jevNotice) contexts.push(jevNotice.text);
+      } catch (err: unknown) {
+        process.stderr.write(`[caveat:codex-hook] Jev判定に失敗: ${errorMessage(err)}\n`);
+      }
+    }
     const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
     const hits = searchCaveatsSafely(CODEX_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
     if (hits.length > 0) {
       contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
     }
-    const compacted = compactContexts(CODEX_HOST, contexts);
-    if (compacted.length > 0) {
-      process.stdout.write(`${codexContextOutput(compacted.join('\n\n'))}\n`);
+    if (ctx) {
+      try {
+        const prepared = prepareSessionDelivery(ctx.caveatHome, sessionId ?? '_unknown', contexts, jevNotice?.ref ? [jevNotice.ref] : []);
+        const sent = prepared.texts.length === 0 || await emitHookContext(CODEX_HOST, `${codexContextOutput(prepared.texts.join('\n\n'))}\n`);
+        if (sent) {
+          prepared.delivered();
+          if (jevNotice && prepared.texts.includes(jevNotice.text)) jevNotice.delivered();
+          if (pending) acknowledgeSessionReminders(CODEX_HOST, pending);
+        }
+      } catch (err: unknown) { process.stderr.write(`[caveat:codex-hook] 配送に失敗: ${errorMessage(err)}\n`); }
     }
     process.exit(0);
   }
@@ -410,6 +431,7 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
       process.stderr.write(`[caveat:codex-hook] auto reindex trigger error: ${errorMessage(err)}\n`);
     }
     if (payload.stop_hook_active === true) process.exit(0);
+    if (buildContextSafely(CODEX_HOST)?.config.jevEnabled) process.exit(0);
     const transcriptPath =
       typeof payload.transcript_path === 'string' ? payload.transcript_path : '';
     const signals = transcriptPath ? loadSignalsSafely(transcriptPath) : null;

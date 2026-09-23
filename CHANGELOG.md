@@ -4,11 +4,21 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
-## [0.19.3] — 2026-09-13
+## [0.19.3] — 2026-09-24
+
+### 追加
+
+- 明示的に有効化したJevがThroughlineの完了3ターンから苦戦と検索語を判定する。Caveatのローカル検索で絞った候補だけをJevで評価し、関連する知見の対処を通知する。
+- `environment.applies_to_os`で対象OSを明示し、記録端末のOSとは分けて通知を絞る。
 
 ### 修正
 
 - runtime snapshotへ実発生時の`product_version`を公開する。過去の記録の版を現在の導入版から推測しない。
+- 同じセッションへの罠と苦戦シグナルの再注入を抑え、件数・経過時間だけの変化では再送しない。通知本文を短くし、pendingの配送成功後に受領する。
+
+### 削除
+
+- 退役するcodex-sidecarのHook助言、手動CLI、publish連携、評価scriptを削除する。
 
 ## [0.19.2] — 2026-09-12
 

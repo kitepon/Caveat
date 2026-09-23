@@ -17,8 +17,7 @@
     "test:product-ci-contract": "node --test scripts/product-full-ci.test.mjs",
     "test:docs-contract": "node --test scripts/docs-contract.test.mjs",
     "check:npm-pack": "node scripts/check-npm-pack.mjs",
-    "check:release-smoke": "node --check scripts/check-npm-pack.mjs && node --check scripts/codex-sidecar-advisory-smoke.mjs && node --check scripts/claude-fresh-session-smoke.mjs && node --check scripts/fixtures/fake-claude-fresh-session.mjs && node --check scripts/test-claude-fresh-session-smoke.mjs && node scripts/check-current-docs.mjs && node --test scripts/product-full-ci.test.mjs scripts/docs-contract.test.mjs scripts/verify-release-commit.test.mjs scripts/process-command.test.mjs && node scripts/pnpm.mjs check:npm-pack && node scripts/pnpm.mjs smoke:codex-sidecar-advisory -- --help",
-    "smoke:codex-sidecar-advisory": "node scripts/codex-sidecar-advisory-smoke.mjs",
+    "check:release-smoke": "node --check scripts/check-npm-pack.mjs && node --check scripts/claude-fresh-session-smoke.mjs && node --check scripts/fixtures/fake-claude-fresh-session.mjs && node --check scripts/test-claude-fresh-session-smoke.mjs && node scripts/check-current-docs.mjs && node --test scripts/product-full-ci.test.mjs scripts/docs-contract.test.mjs scripts/verify-release-commit.test.mjs scripts/process-command.test.mjs && node scripts/pnpm.mjs check:npm-pack",
     "test:claude-fresh-session-smoke": "node scripts/test-claude-fresh-session-smoke.mjs",
     "eval:hook-search": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-hook-search.mjs",
     "eval:hook-provenance": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-hook-provenance.mjs",
@@ -31,13 +30,6 @@
     "test:proposal-study": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/test-proposal-study.mjs",
     "prepare:proposal-execution-review": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/prepare-proposal-execution-review.mjs",
     "eval:proposal-execution": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-proposal-execution.mjs",
-    "prepare:sidecar-advisory-study": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/prepare-codex-sidecar-advisory-study.mjs",
-    "run:sidecar-advisory-eval": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/run-codex-sidecar-advisory-eval.mjs",
-    "test:sidecar-advisory-eval": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/test-codex-sidecar-advisory-eval.mjs",
-    "eval:sidecar-advisory": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-codex-sidecar-advisory.mjs",
-    "prepare:hook-signal-advisory-study": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/prepare-hook-signal-advisory-study.mjs",
-    "eval:hook-signal-advisory": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/eval-hook-signal-advisory.mjs",
-    "test:hook-signal-advisory": "node scripts/pnpm.mjs --filter @caveat/core build && node scripts/test-hook-signal-advisory-eval.mjs",
     "prepare": "husky"
   },
   "devDependencies": {

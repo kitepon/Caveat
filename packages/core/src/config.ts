@@ -7,6 +7,7 @@ export interface CaveatConfig {
   sealedKeyId: string;
   sealedKeyserverUrl: string | null;
   runtimeErrors: boolean;
+  jevEnabled: boolean;
 }
 
 export const DEFAULT_CONFIG: CaveatConfig = {
@@ -16,6 +17,7 @@ export const DEFAULT_CONFIG: CaveatConfig = {
   sealedKeyId: 'v1',
   sealedKeyserverUrl: null,
   runtimeErrors: false,
+  jevEnabled: false,
 };
 
 export function loadConfig(userConfigPath: string): CaveatConfig {

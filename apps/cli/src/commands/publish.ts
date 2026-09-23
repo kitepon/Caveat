@@ -1,14 +1,6 @@
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { publishOwn, PublishScanError, writeUserConfigPatch, type PublishChanges } from '@caveat/core';
+import { publishOwn, PublishScanError, writeUserConfigPatch } from '@caveat/core';
 import type { CliContext } from '../context.js';
 import { askOnce, defaultGitHubRepoUrl, runGh, type GhRunner } from '../ghSetup.js';
-import {
-  formatCodexSidecarAdvisory,
-  formatCodexSidecarAdvisoryUnavailable,
-  runCodexSidecarAdvisory,
-} from './codexSidecarAdvisory.js';
-
 const HTTPS_TARGET_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+?(?:\.git)?\/?$/;
 const SCP_TARGET_RE = /^git@github\.com:[^/]+\/[^/]+?(?:\.git)?$/;
 
@@ -17,8 +9,6 @@ export interface PublishCmdDependencies {
   ghRunner?: GhRunner;
   isTty?: () => boolean;
   confirm?: (question: string) => boolean;
-  hasCodexSidecarConfig?: (projectRoot: string) => boolean;
-  runCodexSidecarAdvisory?: (changes: PublishChanges, projectRoot: string) => string;
 }
 
 export function validatePublishTarget(url: string): string {
@@ -41,22 +31,6 @@ export async function runPublish(ctx: CliContext, opts: PublishCmdOptions, depen
     const ghRunner = dependencies.ghRunner ?? runGh;
     const isTty = dependencies.isTty ?? (() => Boolean(process.stdin.isTTY));
     const confirm = dependencies.confirm ?? askOnce;
-    const projectRoot = process.cwd();
-    const hasCodexSidecarConfig = dependencies.hasCodexSidecarConfig ?? ((root) => existsSync(join(root, '.codex-sidecar.yml')));
-    const publishAdvisory = hasCodexSidecarConfig(projectRoot)
-      ? (changes: PublishChanges) => {
-        try {
-          return dependencies.runCodexSidecarAdvisory?.(changes, projectRoot) ?? formatCodexSidecarAdvisory(runCodexSidecarAdvisory({
-            searchText: changes.lines.join('\n'),
-            limit: Math.max(changes.lines.length, 1),
-            projectRoot,
-            prompt: 'A public Caveat publish is pending. Use Caveat context to give concise advice about privacy or secret risk. Advisory only: do not authorize or block this publish.',
-          }));
-        } catch (err: unknown) {
-          return formatCodexSidecarAdvisoryUnavailable(err);
-        }
-      }
-      : undefined;
     let target = ctx.config.publishTarget;
     if (opts.init !== undefined) {
       target = validatePublishTarget(opts.init);
@@ -76,7 +50,6 @@ export async function runPublish(ctx: CliContext, opts: PublishCmdOptions, depen
       yes: opts.yes,
       allow: opts.allow,
       saveAllow: opts.save,
-      advisory: publishAdvisory,
     });
     if (result.dryRun) ctx.logger.info(`[dry-run] ${result.fileCount} public entry(ies) ready to publish`);
     else if (result.changed) ctx.logger.info(`published ${result.fileCount} public entry(ies)`);

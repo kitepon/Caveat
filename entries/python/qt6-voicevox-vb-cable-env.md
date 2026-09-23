@@ -7,6 +7,7 @@ outcome: resolved
 tags: [python, qt6, voicevox, vb-cable, audio, environment]
 environment:
   os: windows
+  applies_to_os: windows
   pyside6: ">=6.5"
   voicevox: "external server"
   vb-cable: "driver"

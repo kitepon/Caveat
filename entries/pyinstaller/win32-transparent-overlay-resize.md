@@ -8,6 +8,7 @@ tags: [win32, pyside6, transparent-window, overlay]
 environment:
   pyside6: ">=6.5"
   os: windows
+  applies_to_os: windows
 source_project: null
 source_session: "manual/2026-04-19"
 created_at: 2026-04-19

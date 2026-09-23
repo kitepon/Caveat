@@ -10,6 +10,7 @@ environment:
   onnxruntime: "1.24.3"
   cuda: "12.x"
   os: windows
+  applies_to_os: windows
 source_project: null
 source_session: "manual/2026-04-19"
 created_at: 2026-04-19

@@ -17,6 +17,33 @@ export function fingerprint(): Fingerprint {
   };
 }
 
+type TargetOs = 'windows' | 'macos' | 'linux';
+
+function normalizeTargetOs(value: string): TargetOs | null {
+  const lower = value.toLowerCase();
+  if (lower === 'win32' || lower === 'windows') return 'windows';
+  if (lower === 'darwin' || lower === 'macos') return 'macos';
+  if (lower === 'linux') return 'linux';
+  return null;
+}
+
+/** `environment.os`は記録時の観測値で、適用制約は`applies_to_os`だけで指定する。 */
+export function environmentAppliesToTask(environment: Environment, taskText: string, hostPlatform: string): boolean {
+  const requiredRaw = environment.applies_to_os;
+  if (!requiredRaw) return true;
+  const required = normalizeTargetOs(requiredRaw);
+  if (!required) throw new Error(`invalid applies_to_os: ${requiredRaw}`);
+  const targets = new Set<TargetOs>();
+  if (/\b(?:windows|win32)\b/iu.test(taskText)) targets.add('windows');
+  if (/\b(?:mac|macos|darwin)\b/iu.test(taskText)) targets.add('macos');
+  if (/\b(?:linux|ubuntu|wsl)\b/iu.test(taskText)) targets.add('linux');
+  if (targets.size === 0) {
+    const host = normalizeTargetOs(hostPlatform);
+    if (host) targets.add(host);
+  }
+  return targets.has(required);
+}
+
 export function envMatch(
   current: Environment,
   required: Environment,

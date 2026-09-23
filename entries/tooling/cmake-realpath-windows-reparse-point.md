@@ -7,6 +7,7 @@ outcome: resolved
 tags: [cmake, windows, venv, reparse-point, bundling]
 environment:
   os: windows
+  applies_to_os: windows
   cmake: ">=3.20"
   build: pyinstaller / installer bundling
 source_project: null

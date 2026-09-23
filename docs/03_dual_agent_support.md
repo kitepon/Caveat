@@ -29,13 +29,13 @@ of being emitted directly from Stop.
   - Logs diagnostics to stderr with `[caveat:hook]`
 - Stop-hook recursion guard: `payload.stop_hook_active === true` exits silently
 - PostToolUse async behavior:
-  - Foreground hook drains pending reminders
+  - Foreground hook peeks at pending reminders, then acknowledges them after output
   - Tool errors from either `PostToolUse` (`tool_response.is_error`) or
     `PostToolUseFailure` (`error`) enqueue detached worker inspection
   - Worker writes reminders under Caveat pending storage for the next hook tick
 - Stop behavior:
-  - Objective struggle signals enqueue a per-session pending reminder
-  - Unchanged Stop signal digests are not re-queued
+  - Jev無効時は既存の構造化シグナルをpendingへ積む。Jev有効時は3ターン判定に任せる
+  - 件数や経過時間だけの変化ではStopシグナルを再通知しない
   - Stop itself emits no stdout, avoiding final-answer clutter
 - Markdown entry contract:
   - Frontmatter is parsed with `gray-matter` and `js-yaml` `JSON_SCHEMA`
@@ -70,45 +70,26 @@ CodexのMCP登録はCLIまたは設定ディレクトリが存在する場合に
 Windowsでは`HOME`未設定でもOSのユーザーホームを使う。`caveat uninstall`はClaude連携だけを
 解除し、Claude CLIの有無に依存しない。他hostのhook解除は各hostの専用コマンドを使う。
 
-## Codex Adapter
+## Jevによる苦戦判定
 
-`@caveat/core` exposes `caveatEntryToSidecarContextBlock(entry)`, which converts
-a `GetResult` into a plain JSON context block:
+Claude / Codexの`UserPromptSubmit`は、明示的に`caveat jev enable --key-stdin`で有効化した時だけ
+Throughlineの公開`caveat-context`から直近の完了3ターンを読む。各ターンのユーザー発言、回答、取得可能な
+Thinkingだけを送り、toolログは送らない。Codexの暗号化Reasoningは取得できないので空欄のまま扱う。
+Throughlineが未導入、投影待ち、または3ターン未満なら判定を行わない。
 
-```json
-{
-  "kind": "caveat_entry",
-  "source": "caveat",
-  "trust": "local",
-  "summary": "Short warning derived from title and Symptom.",
-  "references": [{ "path": "entries/example.md", "label": "source caveat" }],
-  "data": {
-    "id": "example",
-    "source": "own",
-    "title": "Example caveat",
-    "tags": ["mcp"],
-    "confidence": "confirmed",
-    "visibility": "public",
-    "environment": {}
-  }
-}
-```
+Jevには1回の問い合わせで「同じ問題への試行が繰り返されたか」「一過性でなく明確に苦戦しているか」と、
+ローカル検索に使う語を尋ねる。両スコアが0.85以上の時だけCaveatのFTS5を検索する。知見DB全件は
+Jevへ送らず、最大20件の候補概要と3ターンを2回目の問い合わせへ渡して候補の直接関連性を判定する。
+関連度0.85以上の知見だけ原文の対処を短く通知する。候補が無い場合は一度だけ検索を促す。
+同じ完了ターンは再判定せず、通知済みの知見IDは同一セッションで再通知しない。
 
-The adapter is intentionally separate from Claude hooks and MCP tools. Claude
-continues to consume Caveat through reminders and the Caveat MCP server; Codex
-can consume `caveat_entry` blocks through `codex-sidecar`.
-
-`codex-sidecar` accepts these blocks from both integration surfaces:
-
-- CLI: `--context-file <json>`
-- MCP: `context: [...]` tool input
+この機能は3ターンの文脈と候補の概要をTypeSafe APIへ送る。APIキーはCaveat所有の
+`<caveatHome>/credentials/typesafe.key`に保存し、無効化は`caveat jev disable`、状態確認は
+`caveat jev status`で行う。失敗はhookのstderr診断へ出し、Jev助言を成功扱いしない。
 
 ## Codex Primary Hooks
 
-Codex primary hook support is a separate adapter surface from `codex-sidecar`.
-When Caveat is running inside a primary Codex session, Caveat should use Codex's
-own hook runtime to call `caveat codex-hook ...` directly. It should not call
-`codex-sidecar` just to reach another Codex process.
+Codex primaryではnative hook runtimeから`caveat codex-hook ...`を直接呼ぶ。
 
 The Codex hook adapter uses these commands:
 
@@ -154,11 +135,8 @@ real Codex runs. For that reason, Codex `PostToolUse` performs a bounded
 foreground lookup from `tool_input` + `tool_response` and writes the pending
 file before returning; the next `UserPromptSubmit` drains it.
 
-`codex-sidecar` remains appropriate for Claude-hosted second opinions and for
-Codex-hosted work that has a real boundary, such as an isolated worktree,
-structured result, explicit second pass, or review/risk role separation. The
-completed Codex-hook implementation plan is retained only as history in
-[`archive/CODEX_HOOK_SUPPORT_PLAN.md`](archive/CODEX_HOOK_SUPPORT_PLAN.md).
+完了したCodex-hook実装計画は
+[`archive/CODEX_HOOK_SUPPORT_PLAN.md`](archive/CODEX_HOOK_SUPPORT_PLAN.md)に保管する。
 
 ## Cursor Primary Hooks
 
@@ -192,29 +170,6 @@ command assets, and timeout validation behind
 those rules. Omitting `--require-connector cursor` preserves the v1 aggregate's
 existing Claude/Codex readiness meaning for hosts where Cursor is not required.
 
-## Execution Policy
-
-`decideCodexSidecarExecution` prevents accidental recursive delegation.
-
-| Host agent | Policy |
-|---|---|
-| Claude | Prefer operational Codex sidecar for independent review, exploration, opinion, and risk-check tasks. |
-| Codex | Use Codex sidecar only when there is a clear boundary: isolated worktree, structured result, explicit second pass, or risk/review role separation. |
-| Automation / unknown | Require explicit `sidecar_agent: codex` before delegation. |
-
-Availability levels:
-
-| Level | Meaning |
-|---|---|
-| `disabled` | Sidecar is intentionally off. |
-| `unavailable` | Sidecar is absent, cannot run, or diagnostics failed. |
-| `configured` | Diagnostics can be shaped and attempted, but read-only smoke has not succeeded. |
-| `operational` | Read-only smoke succeeded. |
-| `work-capable` | `codex_work` smoke succeeded and allowed paths are configured. |
-
-`codex_work` requires `work-capable`. Read-only review/explore/opinion/risk-check
-requires `operational` or `work-capable`.
-
 ## Proposal Artifact Evaluation Boundary
 
 Claude と Codex の検索器は共通でも、reminder の配送契約とタイミングは同一ではない。
@@ -237,207 +192,6 @@ consent 済み online observability の境界は
 
 ## Smoke Commands
 
-Release-grade Claude/Codex/Cursor hook installation smoke is tracked in
-[`04_release_checklist.md`](04_release_checklist.md). That checklist is the required
-post-publish path for proving the published npm package can install all host
-hooks and start fresh Claude/Codex sessions. The commands below are sidecar-specific
-diagnostics and do not replace release smoke.
-
-Release state is derived from `apps/cli/package.json`, `CHANGELOG.md`, and the
-release checklist rather than a mutable handoff note. Historical implementation
-and adversarial-audit ledgers are kept under [`archive/`](archive/).
-
-CI runs `corepack pnpm check:release-smoke` to keep release-smoke scripts
-syntactically valid, verify the packed npm manifest has no `workspace:`
-protocol leaks, prove the packed tarball installs with npm, and confirm the
-documented pnpm entrypoint accepts `--` argument forwarding. It intentionally
-does not run authenticated Codex App Server smoke, which remains a release gate
-in the checklist.
-
-Preferred installed-path diagnostics:
-
-```bash
-caveat codex-sidecar diagnostics --project /path/to/repo --preset advisory
-```
-
-Development-path diagnostics:
-
-```bash
-export CODEX_SIDECAR_NODE_CLI=/absolute/path/to/codex-sidecar/packages/cli/dist/index.js
-caveat codex-sidecar diagnostics \
-  --project /path/to/repo \
-  --preset advisory \
-  --node-cli "${CODEX_SIDECAR_NODE_CLI:?set CODEX_SIDECAR_NODE_CLI}"
-```
-
-The `advisory` preset is the hook path and should resolve to
-`gpt-5.6-luna` with low reasoning effort. Manual presets use stronger policy:
-`explore` uses `gpt-5.4-mini` medium; `review` and `opinion` use `gpt-5.5`
-medium; `risk` and `work` use `gpt-5.5` high.
-
-Preset選定とbounded signal評価の根拠値は、完了記録
-[`archive/09_sidecar_hook_signal_contract.md`](archive/09_sidecar_hook_signal_contract.md)を正とする。
-
-Read-only operational smoke:
-
-```bash
-caveat codex-sidecar smoke \
-  --project /path/to/repo \
-  --node-cli "${CODEX_SIDECAR_NODE_CLI:?set CODEX_SIDECAR_NODE_CLI}"
-```
-
-These commands do not silently substitute another sidecar path. The selected
-command is printed before execution.
-
-Work-capable smoke:
-
-```bash
-caveat codex-sidecar work-smoke \
-  --project /path/to/repo \
-  --node-cli "${CODEX_SIDECAR_NODE_CLI:?set CODEX_SIDECAR_NODE_CLI}"
-```
-
-This runs `codex_work` in an isolated git worktree and passes
-`--remove-worktree`; the real repository should not receive the smoke edit. A
-successful result reports `worktreePreserved: false` and a `changedFiles` list
-containing only allowed paths.
-
-## Caveat Context Routing
-
-The read-only routing path is:
-
-```text
-Caveat DB search
-  -> full Caveat entries
-  -> caveat_entry context blocks
-  -> temporary context JSON file
-  -> codex-sidecar --context-file
-  -> structured SidecarResult
-```
-
-CLI form:
-
-```bash
-caveat codex-sidecar run explore \
-  "Use the provided Caveat context to answer this question." \
-  --query "Claude Code hooks settings reload" \
-  --limit 5 \
-  --host-agent claude \
-  --node-cli "${CODEX_SIDECAR_NODE_CLI:?set CODEX_SIDECAR_NODE_CLI}"
-```
-
-Supported read-only workflows are `review`, `explore`, `opinion`, and
-`risk-check` (`risk` is accepted as an alias for `risk-check`). The command
-marks surfaced Caveat entries as retrieval hits, writes only a temporary context
-file, and removes that file after the sidecar process exits.
-
-When policy says not to call Codex sidecar, the command prints an explicit
-`skipped` decision instead of silently falling back:
-
-```json
-{
-  "status": "skipped",
-  "decision": {
-    "route": "claude-compatibility",
-    "reason": "codex-sidecar is not available for this repository."
-  }
-}
-```
-
-For Codex-hosted sessions, `caveat codex-sidecar run ... --host-agent codex`
-will skip unless the call declares a real boundary, such as
-`--structured-result-required`, `--explicit-second-pass`, or
-`--requires-isolation`.
-
-## Result Handling
-
-`codex-sidecar` returns a structured `SidecarResult` JSON object. Caveat does
-not need prose scraping to consume or persist the result.
-
-Any Caveat sidecar command can write the structured result to disk:
-
-```bash
-caveat codex-sidecar run risk-check \
-  "Check the MCP and hook changes." \
-  --query "mcp hooks secrets" \
-  --host-agent claude \
-  --save-result .codex-sidecar/results/risk-check.json
-```
-
-The saved file is parsed and re-serialized JSON from sidecar stdout. The
-`rawEventLogRef` field, when present, points at the durable App Server event log
-under `.codex-sidecar/logs/app-server`.
-
-## Background Task Audit
-
-The current Caveat codebase does not contain a runtime path that calls a Claude
-subagent API for background review or audit work. The existing background
-behavior is the `PostToolUse` detached worker:
-
-```text
-Claude PostToolUse / PostToolUseFailure hook
-  -> detached Caveat worker
-  -> Caveat DB search
-  -> pending reminder for the next hook tick
-```
-
-That worker is tied to Claude hook timing and Claude tool-response / failure
-payloads, so it remains Claude-primary. When `codex-sidecar` is operational,
-the worker can append a Codex advisory to the same pending reminder. The original Caveat
-reminder remains first and unchanged; the Codex text is a second opinion for
-Claude, not a new Caveat decision engine.
-
-`Stop` hook reminders follow the same rule. The existing signal-gated
-`stopReminderText` still decides whether Caveat should speak. If it speaks and
-`codex-sidecar` is enabled, Caveat appends Codex advice about whether Claude
-should update an existing caveat or record a new one.
-
-Hook advisory does not pass raw tool input/output, error text, search queries,
-file paths, transcript paths, or session IDs as the added signal. It passes one
-strictly validated `manual_note` block containing only a closed tool/failure
-kind or bounded Stop counts. Retrieval still uses raw text locally. Existing
-`caveat_entry` blocks—including private entries—remain a separate, pre-existing
-provider boundary and are not newly sanitized by this signal contract. The
-completed contract is archived at `docs/archive/09_sidecar_hook_signal_contract.md`.
-
-The detached tool-error job uses an owner-only reserved temporary root and a
-versioned job schema. POSIX uses `0700` directories and `0600` files; Windows
-uses the current user's temporary directory and inherited Windows ACLs because
-Node's POSIX mode/uid fields do not represent Windows DACLs. Every Claude hook
-invocation sweeps structurally valid jobs older than 24 hours. If the machine
-never runs Caveat again after a worker crash, the private orphan remains until
-the next invocation; there is no independent daemon.
-
-Independent review, exploration, opinion, risk-check, and scoped work also have
-Codex sidecar routes through the commands above.
-
-## Hook Codex Advisory
-
-Hook advisory is controlled by environment variables and is explicit about
-availability:
-
-| Variable | Values | Default | Meaning |
-|---|---|---|---|
-| `CAVEAT_HOOK_CODEX_SIDECAR` | `off`, `auto`, `require` | `auto` | Controls whether hooks ask Codex for a second opinion. |
-| `CAVEAT_CODEX_SIDECAR_NODE_CLI` | path | unset | Development path to a built `codex-sidecar` CLI. |
-| `CAVEAT_CODEX_SIDECAR_COMMAND` | command | unset | Installed command to run instead of the default `codex-sidecar`. |
-| `CAVEAT_HOOK_CODEX_SIDECAR_TIMEOUT_MS` | milliseconds | `120000` | Maximum time for the hook-side advisory call; integer range 1–240000 so it remains below the five-minute single-flight claim TTL. |
-
-`auto` only attempts the advisory when the current project has
-`.codex-sidecar.yml`. `off` preserves the pre-Codex hook behavior. `require`
-attempts the advisory even without a project config and appends an explicit
-`[caveat:codex-sidecar] advisory unavailable: ...` line if it cannot run.
-
-The hook path uses:
-
-```text
-caveat hook post-tool-use / stop
-  -> existing Caveat DB search and reminder construction
-  -> bounded caveat-hook-signal manual_note (raw hook text excluded)
-  -> caveat codex-sidecar run explore --preset advisory --host-agent claude --availability operational
-  -> optional [caveat:codex-sidecar] Codex advisory appended to the reminder
-```
-
-This is not a hidden fallback. If the advisory path was requested and fails,
-the reminder says so. If `auto` sees no sidecar config, Caveat emits only the
-existing reminder text.
+Claude / Codex / Cursorの配布後smokeは[`04_release_checklist.md`](04_release_checklist.md)を正とする。
+`corepack pnpm check:release-smoke`は梱包とinstallを検証する。Jevの苦戦判定は有効化した実機で、
+3ターン投影、FTS候補、通知済みIDの抑止、API失敗診断を確認する。

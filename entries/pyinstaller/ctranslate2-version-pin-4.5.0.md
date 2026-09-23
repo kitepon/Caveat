@@ -10,6 +10,7 @@ environment:
   python: ">=3.10"
   pyinstaller: "bundled"
   os: windows
+  applies_to_os: windows
 source_project: null
 source_session: "manual/2026-04-19"
 created_at: 2026-04-19

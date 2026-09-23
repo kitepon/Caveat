@@ -12,13 +12,15 @@ import {
 import { maybeTriggerAutoReindex } from '../autoReindexTrigger.js';
 import { maybeTriggerAutoSync } from '../autoSyncTrigger.js';
 import { detectCursorHookInstallation } from '../cursorInstall.js';
+import { prepareSessionDelivery } from '../hookDelivery.js';
 import {
+  acknowledgeSessionReminders,
   buildContextSafely,
-  compactContexts,
-  drainForSession,
+  emitHookContext,
   errorMessage,
   extractToolResponseText,
   parsePayload,
+  peekForSession,
   queueStopForSession,
   readStdin,
   searchCaveatsSafely,
@@ -100,7 +102,21 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
   }
   const payload = parsePayload(CURSOR_HOST, raw);
   const sessionId = cursorSessionId(payload);
-  const contexts = name === 'stop' ? [] : drainForSession(CURSOR_HOST, sessionId);
+  const pending = name === 'stop' ? null : peekForSession(CURSOR_HOST, sessionId);
+  const contexts = pending?.contexts ?? [];
+
+  const deliver = async (): Promise<void> => {
+    const ctx = buildContextSafely(CURSOR_HOST);
+    if (!ctx) return;
+    try {
+      const prepared = prepareSessionDelivery(ctx.caveatHome, sessionId, contexts);
+      const sent = prepared.texts.length === 0 || await emitHookContext(CURSOR_HOST, `${cursorContextOutput(prepared.texts.join('\n\n'))}\n`);
+      if (sent) {
+        prepared.delivered();
+        if (pending) acknowledgeSessionReminders(CURSOR_HOST, pending);
+      }
+    } catch (err: unknown) { process.stderr.write(`[caveat:cursor-hook] 配送に失敗: ${errorMessage(err)}\n`); }
+  };
 
   if (name === 'user-prompt-submit') {
     const prompt = cursorPrompt(payload);
@@ -110,10 +126,7 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
       surface: 'user_prompt',
     });
     if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
-    const compacted = compactContexts(CURSOR_HOST, contexts);
-    if (compacted.length > 0) {
-      process.stdout.write(`${cursorContextOutput(compacted.join('\n\n'))}\n`);
-    }
+    await deliver();
     process.exit(0);
   }
 
@@ -129,10 +142,7 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
       });
       if (hits.length > 0) contexts.push(toolErrorReminderText(hits, 'native-cli'));
     }
-    const compacted = compactContexts(CURSOR_HOST, contexts);
-    if (compacted.length > 0) {
-      process.stdout.write(`${cursorContextOutput(compacted.join('\n\n'))}\n`);
-    }
+    await deliver();
     process.exit(0);
   }
 

@@ -7,6 +7,7 @@ outcome: resolved
 tags: [python, argos, stanza, windows, program-files]
 environment:
   os: windows
+  applies_to_os: windows
   argos: "argos-translate + stanza"
   install-location: "C:\\Program Files\\..."
 source_project: null

@@ -42,13 +42,11 @@ Claude Code、Codex、Cursor のいずれかの hook を有効にすると:
 
 1. **プロンプト送信時** → `UserPromptSubmit` hook が **3 段の構造的ゲート**でマッチエントリを surface: 共起 + 症状セクション一致 + rare topical anchor。キーワード allowlist も stopword リストもなし。固有名詞だけの言及 (`RTX 5090 CUDA で何かやってる`) は silent、症状語彙と curated topic anchor (`cudaGetDeviceCount が 0 を返す`) が揃うと正解エントリだけ発火する。([詳細](CHANGELOG.md#0142--2026-05-06))
 2. **ツールがエラー返却したとき** → Claude hook は detached worker を起動して非同期に検索し、結果は次の hook tick で載ります。Codex hook は現行 payload と transcript timing の都合で bounded foreground lookup を行い、次の `UserPromptSubmit` で結果を載せます。現在の Claude Code では failed-tool payload 用に `PostToolUseFailure` も登録します。
-3. **セッション終了時** → `Stop` hook が transcript を解析し、客観的な「もがきシグナル」（ツール失敗、同一ファイル複数編集、Web 検索、Bash 再実行）を抽出。一つでも観測されれば、最終回答を汚さないよう reminder を次の hook tick 向けに compact して積み、次ターンで実行中の agent に既存エントリの更新か新規記録を促します。
+3. **セッション終了時** → `Stop` hook は新しいシグナルの種類と新たに一致した罠だけを次のhook tickへ積みます。Jevを明示的に有効化した場合は、Throughlineの完了3ターンで苦戦を判定し、ローカル知見検索の語も同時に選びます。
 
 Claude は Caveat reminder を `<system-reminder>` として受け取り、MCP tools で
 search / record / update できます。Codex primary session は Codex native hook
-runtime と Codex 用 formatter を使います。この経路は Caveat CLI を直接呼ぶ統合であり、
-`codex-sidecar` を呼ぶ経路ではありません。sidecar は境界のある second opinion、
-review、risk-check、isolated work 用に残します。
+runtime と Codex 用 formatter を使います。この経路はCaveat CLIを直接呼びます。Jevによる苦戦判定は明示的な有効化が必要です。
 
 Cursorはnativeの`beforeSubmitPrompt` / `postToolUse` / `postToolUseFailure` / `stop`
 を使い、既存のCursor hookを残したまま同じ検索・pending reminder契約を適用します。
@@ -136,7 +134,7 @@ flowchart LR
   とし、pending reminder は compact してから 1 つの host-specific context 文字列へ結合します
 - Cursor primary hook adapter は`~/.cursor/hooks.json`へ`beforeSubmitPrompt` / `postToolUse` /
   `postToolUseFailure` / `stop`をupsertし、無関係なhookを保持します
-- Claude-hosted session では、`codex-sidecar` が operational な project に限り、PostToolUse 系 / Stop の既存リマインダー末尾に Codex の second opinion を追記できます。Caveat の発火判定や記録思想は変えず、助言だけを外部化する補助経路です
+- `caveat jev enable --key-stdin`で有効化すると、完了3ターンから苦戦と検索語をJevが判定し、ローカル検索で絞った候補だけを再判定します。APIキーはCaveatのprivateなcredentialsディレクトリで管理します
 
 ## クイックスタート（NPM ユーザ）
 

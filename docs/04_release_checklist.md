@@ -186,77 +186,13 @@ Expected:
 - `$last` contains `caveat-new-session-ok`.
 - No hook invalid/failure lines are present.
 
-## Codex Sidecar Advisory Smoke
+## Jev Hook Smoke
 
-新規Codexセッション試験の後、同じ一時データ領域と`PATH`を使い、
-`CODEX_HOME`だけを認証済みの正規ディレクトリにする。The temporary
-`auth.json` symlink above is accepted by the raw Codex CLI smoke, while
-`codex-sidecar` intentionally opens its canonical auth source with
-`O_NOFOLLOW` before taking a durable snapshot. Passing the symlinked temporary
-home must fail closed with `ELOOP`; do not work around that check by copying
-auth material. This proves the Caveat hook advisory path reaches
-`codex-sidecar`, starts Codex App Server with the `advisory` preset, and binds
-the exact bounded hook-signal block to the matched `turn/start` request and
-completed turn in the raw App Server log.
-
-`codex-sidecar` must be installed on `PATH`, or `CAVEAT_CODEX_SIDECAR_COMMAND`
-must point at the command to use.
-
-```bash
-repo=$(git rev-parse --show-toplevel)
-CODEX_HOME="$REAL_CODEX_HOME" node "$repo/scripts/codex-sidecar-advisory-smoke.mjs" \
-  --repo "$repo" \
-  --surface stop \
-  --caveat-command caveat \
-  --codex-sidecar-command "${CAVEAT_CODEX_SIDECAR_COMMAND:-codex-sidecar}"
-
-CODEX_HOME="$REAL_CODEX_HOME" node "$repo/scripts/codex-sidecar-advisory-smoke.mjs" \
-  --repo "$repo" \
-  --surface tool-error \
-  --caveat-command caveat \
-  --codex-sidecar-command "${CAVEAT_CODEX_SIDECAR_COMMAND:-codex-sidecar}"
-```
-
-Development path equivalent:
-
-```bash
-repo=$(git rev-parse --show-toplevel)
-: "${CAVEAT_CODEX_SIDECAR_NODE_CLI:?set this to the development codex-sidecar dist/index.js}"
-corepack pnpm smoke:codex-sidecar-advisory -- \
-  --repo "$repo" \
-  --surface stop \
-  --caveat-node-cli "$repo/apps/cli/dist/index.js" \
-  --codex-sidecar-node-cli "$CAVEAT_CODEX_SIDECAR_NODE_CLI"
-
-corepack pnpm smoke:codex-sidecar-advisory -- \
-  --repo "$repo" \
-  --surface tool-error \
-  --caveat-node-cli "$repo/apps/cli/dist/index.js" \
-  --codex-sidecar-node-cli "$CAVEAT_CODEX_SIDECAR_NODE_CLI"
-```
-
-The script writes a JSON summary with the verified `rawEventLogRef`. Temporary
-diagnostics and pending reminder files are removed after success unless
-`--keep-temp` is passed; they are always kept on failure.
-
-Expected:
-
-- Diagnostics report `modelPolicy.source: "explicit"`.
-- `normalizedRequest.model` is `gpt-5.6-luna`.
-- `normalizedRequest.modelReasoningEffort` is `low`.
-- The hook pending reminder contains `[caveat:codex-sidecar] Codex advisory:`.
-- Both `stop` and `tool-error` surfaces complete independently.
-- The hook pending reminder does not contain `advisory unavailable`.
-- The raw App Server log contains startup args for `model="gpt-5.6-luna"` and
-  `model_reasoning_effort="low"`.
-- The raw App Server `thread/start` response reports `model: "gpt-5.6-luna"`
-  and `reasoningEffort: "low"`.
-- The matched outbound `turn/start` text contains exactly one canonical
-  `caveat-hook-signal` block for the selected surface.
-- The matched `turn/start` text contains none of the raw error/transcript
-  sentinels or the synthetic session ID.
-- The `turn/start` response and retained `turn/completed` event bind to the
-  same thread and turn IDs.
+公開版を実機へ導入した後、`caveat jev status`で明示的な有効化を確認する。
+既知の同一問題を3ターン続けて試行する隔離セッションで、Throughlineの
+`caveat-context`が完了3ターンを返し、Jevの判定とローカル候補選別を経て
+該当知見が1回だけ通知されることを確認する。新しい問題に切り替えた場合は
+新しい判定が届くことも確かめる。API失敗はstderrへ診断される。
 
 ## New Claude Session Smoke
 

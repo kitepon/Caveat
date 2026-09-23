@@ -411,6 +411,46 @@ export function maybeSweepPendingDirs(
 
 export interface PendingDrainResult { reminders: string[]; cleanupFailures: string[]; }
 
+export interface PendingPeekResult {
+  reminders: Array<{ path: string; text: string }>;
+  readFailures: string[];
+}
+
+/** 削除せずに読み、hookのstdout書込み後だけ受領する。 */
+export function peekPendingRemindersDetailed(caveatHome: string, sessionId: string): PendingPeekResult {
+  const dir = pendingDirFor(caveatHome, sessionId);
+  if (!existsSync(dir)) return { reminders: [], readFailures: [] };
+  return withPendingQueueLock(caveatHome, () => {
+    const reminders: PendingPeekResult['reminders'] = [];
+    const readFailures: string[] = [];
+    const entries = readdirSync(dir).filter((name) => name.endsWith('.txt') || name.endsWith('.ready'));
+    entries.sort((left, right) => {
+      const difference = statSync(join(dir, left)).mtimeMs - statSync(join(dir, right)).mtimeMs;
+      return difference || left.localeCompare(right);
+    });
+    for (const name of entries) {
+      const path = join(dir, name);
+      try { reminders.push({ path, text: readFileSync(path, 'utf8') }); }
+      catch { readFailures.push(name); }
+    }
+    return { reminders, readFailures };
+  });
+}
+
+export function acknowledgePendingReminders(caveatHome: string, paths: string[]): void {
+  if (paths.length === 0) return;
+  const root = join(caveatHome, 'pending');
+  withPendingQueueLock(caveatHome, () => {
+    for (const path of paths) {
+      if (!path.startsWith(`${root}/`) && !path.startsWith(`${root}\\`)) throw new Error('pending path outside root');
+      try { unlinkSync(path); }
+      catch (error: unknown) {
+        if (!(error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT')) throw error;
+      }
+    }
+  });
+}
+
 export function drainPendingRemindersDetailed(
   caveatHome: string,
   sessionId: string,

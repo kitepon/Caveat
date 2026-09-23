@@ -3,10 +3,14 @@ import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  acknowledgePendingReminders,
   buildAndPublishPendingReminder,
   buildPendingSemanticKey,
   defaultSelfIdentityTokens,
   drainPendingRemindersDetailed,
+  environmentAppliesToTask,
+  peekPendingRemindersDetailed,
+  fingerprint,
   findCaveatsForHook,
   findCaveatsForHookSegments,
   logHookQueryMiss,
@@ -106,9 +110,11 @@ export function searchCaveatsSafely(
     const searchOptions = {
       selfIdentity: defaultSelfIdentityTokens(),
     };
-    hits = inputs.length === 1
+    const found = inputs.length === 1
       ? findCaveatsForHook(db, inputs[0]!, searchOptions)
       : findCaveatsForHookSegments(db, inputs, searchOptions);
+    const taskText = inputs.map(({ topicText, failureText }) => `${topicText}\n${failureText}`).join('\n');
+    hits = found.filter((hit) => environmentAppliesToTask(hit.environment, taskText, fingerprint().os));
   } catch (err: unknown) {
     reportHookError(host, 'search error', err);
     return [];
@@ -148,6 +154,37 @@ export function drainForSession(host: HookHost, sessionId: string): string[] {
   return [...local.reminders, ...global.reminders];
 }
 
+export interface PeekedSessionReminders { contexts: string[]; paths: string[]; caveatHome: string | null }
+
+export function peekForSession(host: HookHost, sessionId: string): PeekedSessionReminders {
+  const ctx = buildContextSafely(host);
+  if (!ctx) return { contexts: [], paths: [], caveatHome: null };
+  const local = peekPendingRemindersDetailed(ctx.caveatHome, sessionId);
+  const global = peekPendingRemindersDetailed(ctx.caveatHome, '_global');
+  for (const _failure of [...local.readFailures, ...global.readFailures]) {
+    process.stderr.write(`${pendingCleanupFailureText(host)}\n`);
+  }
+  const reminders = [...local.reminders, ...global.reminders];
+  return { contexts: reminders.map(({ text }) => text), paths: reminders.map(({ path }) => path), caveatHome: ctx.caveatHome };
+}
+
+export function acknowledgeSessionReminders(host: HookHost, peeked: PeekedSessionReminders): void {
+  if (!peeked.caveatHome || peeked.paths.length === 0) return;
+  try { acknowledgePendingReminders(peeked.caveatHome, peeked.paths); }
+  catch (error: unknown) { process.stderr.write(`[${host.stderrTag}] pending reminder cleanup failed: ${errorMessage(error)}\n`); }
+}
+
+export async function emitHookContext(host: HookHost, output: string): Promise<boolean> {
+  try {
+    await new Promise<void>((resolve, reject) => process.stdout.write(output,
+      (error) => error ? reject(error) : resolve()));
+    return true;
+  } catch (error: unknown) {
+    process.stderr.write(`[${host.stderrTag}] stdout write failed: ${errorMessage(error)}\n`);
+    return false;
+  }
+}
+
 function contextDedupeKey(host: HookHost, text: string): string {
   if (text.startsWith(STOP_REMINDER_PREFIX)) return host.stopDedupeKey;
   return text.trim();
@@ -182,13 +219,14 @@ function sanitizeStateId(raw: string): string {
 
 export function stopSignalKey(signals: SessionSignals, related: SearchResult[]): string {
   const body = JSON.stringify({
-    toolFailureCount: signals.toolFailureCount,
-    fileEditCounts: signals.fileEditCounts.map((e) => [e.path, e.count]),
-    webSearchCount: signals.webSearchCount,
-    webFetchCount: signals.webFetchCount,
-    bashRetryCount: signals.bashRetryCount,
-    searchQueries: signals.searchQueries,
-    related: related.map((h) => [h.source, h.id]),
+    signalKinds: [
+      signals.toolFailureCount > 0 && 'tool_failure',
+      signals.fileEditCounts.length > 0 && 'reedit',
+      signals.webSearchCount > 0 && 'web_search',
+      signals.webFetchCount > 0 && 'web_fetch',
+      signals.bashRetryCount > 0 && 'bash_retry',
+    ].filter(Boolean),
+    related: related.map((h) => [h.source, h.id]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
   });
   return createHash('sha256').update(body).digest('hex');
 }

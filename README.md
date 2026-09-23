@@ -42,13 +42,13 @@ With Claude Code, Codex, or Cursor hooks enabled:
 
 1. **You type a prompt** → `UserPromptSubmit` hook surfaces matching entries via three structural gates: **co-occurrence + symptom-section match + rare topical anchor**. No keyword lists. Bare proper-noun mentions (`RTX 5090 CUDA で何かやってる`) stay silent; specific failure vocabulary plus a curated topic anchor (`cudaGetDeviceCount が 0 を返す`) fires the right entry. ([details](CHANGELOG.md#0142--2026-05-06))
 2. **A tool returns an error** → Claude hooks spawn a detached worker that searches in the background; the matching caveat lands on the next hook tick (~20ms foreground latency). Codex hooks do a bounded foreground lookup and surface the result on the next `UserPromptSubmit`. Claude Code also registers `PostToolUseFailure` for current failed-tool payloads.
-3. **The session ends** → `Stop` hook parses the transcript for objective struggle signals (tool failures, repeated edits, web searches, bash retries). If any are present, it queues a compact reminder for the next hook tick so the final answer is not cluttered, then nudges the active agent to update an existing entry or record a new one on the following turn.
+3. **The session ends** → `Stop` queues only new signal kinds and newly matched traps for the next hook tick. With Jev explicitly enabled, the next prompt instead uses three completed Throughline turns to judge repeated struggle and select a local knowledge search term.
 
 Claude receives Caveat reminders as `<system-reminder>` blocks and can use the
 MCP tools to search, record, and update entries. A primary Codex session uses
 Codex's native hook runtime and Codex-formatted hook output. That path calls
-Caveat CLI directly; `codex-sidecar` remains for bounded second opinions,
-review, risk-check, and isolated work.
+Caveat CLI directly. Jev-based struggle detection is opt-in and uses Throughline's
+three-turn context projection.
 
 Cursor uses its native `beforeSubmitPrompt`, `postToolUse`,
 `postToolUseFailure`, and `stop` events. Caveat formats the same retrieval and
@@ -135,8 +135,8 @@ flowchart LR
 - **`visibility: public | private`** is a distribution ceiling. Private repos may contain both tiers; `caveat publish` filters and seals the public boundary.
 - **Agent integrations.** Claude Code gets an MCP server exposing 6 tools (`caveat_search` / `caveat_get` / `caveat_record` / `caveat_update` / `caveat_list_recent` / `caveat_pull`) plus hooks. Codex and Cursor get native hooks through their product-owned installers. All surfaces reuse the same retrieval gates — no hardcoded keyword lists:
   - **UserPromptSubmit** (事前発火): when you submit a prompt, tokenize it (path-stripping + self-identity + pure-hiragana glue removal + CJK group dedup), FTS the DB, and surface entries that pass **three structural gates** — (1) ≥ 2 distinct group matches (co-occurrence), (2) ≥ 1 match in the entry's `## Symptom` section (failure-state evidence), (3) ≥ 1 corpus-rarest prompt token in `topical_text` (title + tags + environment values, topic evidence). Bare proper-noun mentions like `RTX 5090 CUDA で何かやってる` stay silent; only specific failure-state vocabulary plus a curated topic anchor (`cudaGetDeviceCount`, `SQLITE_READONLY`, …) fires the gate. No hardcoded word lists.
-  - **PostToolUse** (+ Claude **PostToolUseFailure**) (実行中発火): when a tool returns `is_error: true` or Claude Code emits a failed-tool `error` payload, Claude spawns a detached worker so the foreground hook returns in ~20ms. Codex performs a bounded foreground lookup because current Codex payloads and transcript timing make detached workers unreliable there. In both cases, the reminder lands on the next hook tick. In Claude-hosted sessions, an operational `codex-sidecar` can append Codex advice after Caveat's original text.
-  - **Stop** (事後発火): parse the session transcript for objective struggle signals (tool failures, repeated file edits, web searches, bash retries). If any are present, queue a compact reminder for the next context-capable hook tick and nudge through that host's available action surface: Caveat MCP for Claude, or the Caveat CLI and own Markdown for Codex/Cursor. In Claude-hosted sessions, optional Codex advice can challenge or sharpen that nudge without replacing Caveat's trigger logic.
+  - **PostToolUse** (+ Claude **PostToolUseFailure**) (実行中発火): when a tool returns `is_error: true` or Claude Code emits a failed-tool `error` payload, Claude spawns a detached worker so the foreground hook returns in ~20ms. Codex performs a bounded foreground lookup because current Codex payloads and transcript timing make detached workers unreliable there. In both cases, the reminder lands on the next hook tick. The next hook tick emits only knowledge not yet delivered in that session.
+  - **Stop** (事後発火): parse the session transcript for objective struggle signals (tool failures, repeated file edits, web searches, bash retries). If any are present, queue a compact reminder for the next context-capable hook tick and nudge through that host's available action surface: Caveat MCP for Claude, or the Caveat CLI and own Markdown for Codex/Cursor. When Jev is enabled, three completed turns replace the Stop signal gate for struggle detection.
 - **Codex primary hook adapter.** `caveat codex-hook install` registers
   `UserPromptSubmit`, `PostToolUse`, and `Stop` in `~/.codex/hooks.json` and
   enables `[features].hooks = true`. Existing `codex_hooks = true` installs are
@@ -165,7 +165,7 @@ apps/cli/             caveat-cli (published to npm) — bundled CLI with subcomm
                         codex-hook install|uninstall|diagnostics|... /
                         cursor-hook install|uninstall|diagnostics|... /
                         factory-diagnostics [--require-connector cursor] /
-                        codex-sidecar diagnostics|smoke|run|work-smoke
+                        jev enable|disable|status
 apps/mcp/             @caveat/mcp — stdio MCP server exposing 6 tools via
                       @modelcontextprotocol/sdk. Imported by caveat-cli as `mcp-server`
 apps/web/             @caveat/web — Hono SSR read-only share portal (/, /g/:id, /community) +
@@ -176,7 +176,7 @@ hooks/                pre-commit-visibility-gate.mjs (run by .husky/pre-commit) 
 docs/00_overview.md      Documentation map and reading order
 docs/01_plan.md          Current product, state, sharing, and ownership contract
 docs/03_dual_agent_support.md
-                      Claude/Codex/Cursor host contracts, sidecar policy, and smoke notes
+                      Claude/Codex/Cursor host contracts, Jev judgment, and smoke notes
 docs/04_release_checklist.md
                       Required publish and post-publish verification checklist
 docs/adr/            Architecture decision records

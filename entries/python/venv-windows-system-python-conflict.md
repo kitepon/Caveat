@@ -7,6 +7,7 @@ outcome: resolved
 tags: [python, venv, windows, pip, site-packages]
 environment:
   os: windows
+  applies_to_os: windows
   python: "3.13"
 source_project: null
 source_session: "manual/2026-04-19"

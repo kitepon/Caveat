@@ -148,7 +148,7 @@ describe('Codex stop hook', () => {
     }
   }, CODEX_HOOK_E2E_TIMEOUT_MS);
 
-  it('dedupes repeated stop reminders and caps user prompt context blocks', async () => {
+  it('旧通知を配送し、同種のStopシグナルは一度にまとめる', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-codex-user-prompt-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -209,12 +209,12 @@ describe('Codex stop hook', () => {
       expect(result.stdout.trim().split('\n')).toHaveLength(1);
       const parsed = JSON.parse(result.stdout);
       const text = parsed.hookSpecificOutput.additionalContext;
-      expect(text).not.toContain('old reminder');
+      expect(text).toContain('old reminder');
       expect(text).not.toContain('tool failure: 1');
-      expect(text).toContain('tool failure: 2');
+      expect(text).toContain('新しい苦戦シグナル: ツール失敗');
       expect(text).toContain('recent reminder 1');
       expect(text).toContain('recent reminder 2');
-      expect(text).toContain('pending reminder 1 件を重複または上限により省略しました');
+      expect(text).not.toContain('pending reminder');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

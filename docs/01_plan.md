@@ -66,40 +66,20 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 | sealed publish / key rotation | [`../keyserver/README.md`](../keyserver/README.md) |
 | npm release | [`04_release_checklist.md`](04_release_checklist.md) |
 
-## 次の作業: Hook通知の削減とcodex-sidecar廃止（未実装）
+## 現行: 通知配送とJev苦戦判定
 
-目的は、同じ情報の再注入と無関係な罠の通知を減らし、新しく該当した罠と新しい種類の
-苦戦シグナルは届け続けること。Claude / Codexの発言あたり注入文字数を、報告済みの
-観測集合と同じ条件でそれぞれ半分以下にする。7日という期間はその比較条件であり、
-検索品質の評価期間は固定しない。
-
-1. **現状を固定する。** 配布済みCLIとsourceの版差、Claude / Codexのhook出力、
-   同一セッション内の再掲、無関係な一致を確認する。個人のraw transcriptとprivate
-   entryは公開repoへ入れず、再現例と集計だけを残す。
-2. **codex-sidecarを廃止する。** CaveatのHook助言、手動CLI、publish経路、coreの
-   sidecar契約、対応するテストと現行文書を撤去する。独立したcodex-sidecar製品は
-   他の利用経路と端末の残存設定を確認し、配布・導入を終了する。repoの移動・削除は
-   この計画には含めない。
-3. **セッションごとの差分だけを通知する。** 共通hookエンジンで、通知済みの罠を
-   `(source, id)`、苦戦シグナルを種類で記録する。件数、経過時間、同じ罠の再検索だけでは
-   再送しない。pendingへの追加と実際の配送を区別し、未配送の新情報は失わない。
-4. **本文を短くする。** 罠の取得・記録・visibilityの説明はClaudeのMCP tool説明と
-   Codex / CursorのCLI案内へ置き、hook本文の案内は1通知1行にする。複数のエラー通知が
-   同時に届く場合は候補を先に統合し、案内文を1回だけ付ける。
-5. **適用環境を判定する。** 現行`environment`には記録端末の自動fingerprintが入るため、
-   それを適用条件とみなして一律除外しない。対象OSなどの明示的な適用条件を記録・照合し、
-   Mac上でWindows向け作業をする事例も含めて誤除外と誤通知を検証する。
-6. **届けて確かめる。** 変更箇所のfocused test、関連test、同じ観測集合での文字数比較、
-   新規シグナル・罠の到達確認を行う。release checklistに従ってpublish、対象端末への
-   install、新規Claude / Codexセッションでの公開後smokeまで完了する。
-
-### 後続検討: Jevによる候補選別（今回の作業対象外）
-
-Jevの導入判断は保留として残す。知見DB全件を渡す設計にはしない。Caveatが索引から
-候補を取得し、Jevが現在の文脈と候補の関連性を判定し、Caveatが元のentryを表示する案を
-評価する。候補段階の取りこぼし、誤通知、hook遅延、入力token費用、private entryの
-外部送信範囲を代表例と別期間の事例で測ってから採否を決める。Hook通知量の半減と
-codex-sidecar廃止の完了をJevの導入待ちにしない。
+- Throughlineの公開CLIが返す完了3ターン（toolログを除き、取得できるThinkingを含む）を
+  Claude / CodexのUserPromptSubmitで利用する。Observerはこの連携に含めない。
+- Jevを明示的に有効化した場合、苦戦と検索語を1回で判定する。高い苦戦スコアの時だけ
+  ローカルFTSで候補を取得し、最大20件の候補概要をJevで選別する。知見DB全件は送らない。
+- 罠の再通知は同一セッションの`(source,id)`で抑止する。Stopシグナルは種類と共起罠が
+  変わった時だけ伝え、件数や経過時間の増加では再送しない。pendingは実際の出力後に受領する。
+- 通知本文は罠IDと要点を短く示す。詳細取得、記録、visibility判定はMCP tool説明で扱う。
+- 記録端末の`environment.os`は適用条件ではない。明示的な`applies_to_os`だけを対象作業の
+  OSと照合する。対象作業のOSが書かれていない場合は現在のhostを使う。
+- codex-sidecarのCaveat連携とCLIは廃止する。製品自体も退役させるが、repoの移動・削除は行わない。
+- 配送量は観測済み通知の同一条件replayと配布後の実測で検証し、新しい知見や新しい
+  シグナルの到達を確認する。
 
 ## 文書寿命
 

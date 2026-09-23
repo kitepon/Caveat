@@ -353,16 +353,7 @@ describe('publishOwn (sealed local bare mirror)', { timeout: GIT_TEST_TIMEOUT_MS
     const token = [...publishSelfIdentityTokens()][0];
     expect(token).toBeDefined();
     writeFileSync(join(fixture.entriesDir, 'leak.md'), entry('leak', 'public', `ssh ${token}@server`));
-    let advisoryCalls = 0;
-
-    await expect(publishOwn({
-      ...publishArgs(),
-      advisory: () => {
-        advisoryCalls++;
-        return 'must not run';
-      },
-    })).rejects.toBeInstanceOf(PublishScanError);
-    expect(advisoryCalls).toBe(0);
+    await expect(publishOwn(publishArgs())).rejects.toBeInstanceOf(PublishScanError);
     expect(existsSync(fixture.mirrorDir)).toBe(false);
   });
 
@@ -429,86 +420,6 @@ describe('publishOwn (sealed local bare mirror)', { timeout: GIT_TEST_TIMEOUT_MS
     const clone2 = cloneMirrorBack();
     expect(readFileSync(join(clone2, 'bundle', 'entries.caveat')).equals(beforeBundle)).toBe(true);
     expect(git(['rev-list', '--count', 'HEAD'], clone2).trim()).toBe('1');
-  });
-
-  it('adds an advisory to the interactive confirmation after scan and diff', async () => {
-    writeFileSync(join(fixture.entriesDir, 'a.md'), entry('a', 'public', 'pending publish'));
-    let receivedQuestion = '';
-    let advisoryCalls = 0;
-
-    await expect(publishOwn({
-      ...publishArgs(),
-      yes: false,
-      isTty: () => true,
-      confirmImpl: (question) => {
-        receivedQuestion = question;
-        return false;
-      },
-      advisory: (changes) => {
-        advisoryCalls++;
-        expect(changes.lines).toEqual(['A a.md']);
-        return '[caveat:codex-sidecar] Codex advisory:\nreview secret exposure';
-      },
-    })).rejects.toThrow('publish cancelled');
-
-    expect(advisoryCalls).toBe(1);
-    expect(receivedQuestion).toContain('review secret exposure');
-    expect(receivedQuestion).toContain('publish 1 entry change(s)? [y/N]');
-  });
-
-  it('keeps human confirmation available when the advisory reports a failure', async () => {
-    writeFileSync(join(fixture.entriesDir, 'a.md'), entry('a', 'public', 'pending publish'));
-    let receivedQuestion = '';
-
-    await expect(publishOwn({
-      ...publishArgs(),
-      yes: false,
-      isTty: () => true,
-      confirmImpl: (question) => {
-        receivedQuestion = question;
-        return false;
-      },
-      advisory: () => '[caveat:codex-sidecar] advisory unavailable: sidecar command failed: unavailable',
-    })).rejects.toThrow('publish cancelled');
-
-    expect(receivedQuestion).toContain('advisory unavailable: sidecar command failed: unavailable');
-    expect(receivedQuestion).toContain('publish 1 entry change(s)? [y/N]');
-  });
-
-  it('keeps human confirmation available when the advisory callback throws', async () => {
-    writeFileSync(join(fixture.entriesDir, 'a.md'), entry('a', 'public', 'pending publish'));
-    const logger = captureLogger();
-    let confirmCalls = 0;
-
-    await expect(publishOwn({
-      ...publishArgs(logger.logger),
-      yes: false,
-      isTty: () => true,
-      confirmImpl: () => {
-        confirmCalls++;
-        return false;
-      },
-      advisory: () => { throw new Error('sidecar temp cleanup failed'); },
-    })).rejects.toThrow('publish cancelled');
-
-    expect(confirmCalls).toBe(1);
-    expect(logger.warn).toContain('publish advisory unavailable: sidecar temp cleanup failed');
-  });
-
-  it('does not invoke the advisory for --yes, dry-run, or no-op publish paths', async () => {
-    writeFileSync(join(fixture.entriesDir, 'a.md'), entry('a', 'public', 'before'));
-    let advisoryCalls = 0;
-    const advisory = () => {
-      advisoryCalls++;
-      return 'should not run';
-    };
-
-    await publishOwn({ ...publishArgs(), advisory });
-    await publishOwn({ ...publishArgs(), advisory, yes: false, isTty: () => true });
-    writeFileSync(join(fixture.entriesDir, 'a.md'), entry('a', 'public', 'after'));
-    await publishOwn({ ...publishArgs(), advisory, dryRun: true, yes: false });
-
-    expect(advisoryCalls).toBe(0);
   });
 
   it('rejects a mirror workdir pointing at a different target', async () => {

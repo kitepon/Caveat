@@ -21,12 +21,6 @@ import { runPull } from './commands/pull.js';
 import { runSync } from './commands/sync.js';
 import { runPublish } from './commands/publish.js';
 import {
-  runCodexSidecarDiagnostics,
-  runCodexSidecarSmoke,
-  runCodexSidecarWithCaveats,
-  runCodexSidecarWorkSmoke,
-} from './commands/codexSidecar.js';
-import {
   runCommunityAdd,
   runCommunityList,
   runCommunityPull,
@@ -36,6 +30,7 @@ import { resolveHookNodePath } from './nodePath.js';
 import { resolveAgentConfigPaths } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrors } from './commands/runtimeErrors.js';
+import { disableJev, enableJev, jevStatus } from './commands/jev.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -63,6 +58,10 @@ program
   });
 
 const runtimeErrors = program.command('runtime-errors').description('Inspect Caveat opt-in runtime errors');
+const jev = program.command('jev').description('Configure Jev struggle detection');
+jev.command('enable').requiredOption('--key-stdin', 'read the TypeSafe API key from stdin').action(async () => { await enableJev(buildContext(stdoutLogger)); });
+jev.command('disable').action(() => { disableJev(buildContext(stdoutLogger)); });
+jev.command('status').action(() => { jevStatus(buildContext(stdoutLogger)); });
 const parseLimit = (value: string) => { const parsed = parseCursor(value); if (parsed < 1 || parsed > 256) throw Error('invalid_limit'); return parsed; };
 runtimeErrors.command('snapshot').requiredOption('--json', 'emit JSON').option('--after-cursor <n>', 'cursor', parseCursor, 0).option('--limit <n>', 'limit', parseLimit, 256).action((opts: { afterCursor?: number; limit?: number }) => { process.stdout.write(`${JSON.stringify(runRuntimeErrors('snapshot', undefined, opts))}\n`); });
 for (const action of ['diagnostics', 'compact'] as const) runtimeErrors.command(action).requiredOption('--json', 'emit JSON').action(() => { process.stdout.write(`${JSON.stringify(runRuntimeErrors(action))}\n`); });
@@ -448,110 +447,6 @@ cursorHook
   .action(async () => {
     await runCursorHook('stop');
   });
-
-const codexSidecar = program
-  .command('codex-sidecar')
-  .description('Check Codex sidecar availability for the current repository');
-
-codexSidecar
-  .command('diagnostics')
-  .description('Run codex-sidecar diagnostics for this repository')
-  .option('--project <path>', 'repository root to check')
-  .option('--preset <preset>', 'codex-sidecar preset', 'review')
-  .option('--command <command>', 'codex-sidecar executable', 'codex-sidecar')
-  .option('--node-cli <path>', 'development path to codex-sidecar CLI JS')
-  .option('--save-result <path>', 'write structured SidecarResult JSON to this path')
-  .action((opts: { project?: string; preset?: string; command?: string; nodeCli?: string; saveResult?: string }) => {
-    runCodexSidecarDiagnostics(stdoutLogger, opts);
-  });
-
-codexSidecar
-  .command('smoke')
-  .description('Run a read-only codex_explore smoke through codex-sidecar')
-  .option('--project <path>', 'repository root to check')
-  .option('--preset <preset>', 'codex-sidecar read-only preset', 'explore')
-  .option('--command <command>', 'codex-sidecar executable', 'codex-sidecar')
-  .option('--node-cli <path>', 'development path to codex-sidecar CLI JS')
-  .option('--save-result <path>', 'write structured SidecarResult JSON to this path')
-  .action((opts: { project?: string; preset?: string; command?: string; nodeCli?: string; saveResult?: string }) => {
-    runCodexSidecarSmoke(stdoutLogger, opts);
-  });
-
-codexSidecar
-  .command('run <workflow> [prompt]')
-  .description('Run read-only codex-sidecar with relevant Caveat entries as context')
-  .option('--project <path>', 'repository root to check')
-  .option('--preset <preset>', 'codex-sidecar preset')
-  .option('--query <query>', 'Caveat search query; defaults to prompt text')
-  .option('--limit <n>', 'maximum caveat entries to pass', (v) => Number(v), 5)
-  .option('--source <source>', 'own | community | all', 'all')
-  .option('--visibility <visibility>', 'public | private | all', 'all')
-  .option('--host-agent <agent>', 'claude | codex | automation | unknown', 'unknown')
-  .option('--availability <level>', 'disabled | unavailable | configured | operational | work-capable', 'operational')
-  .option('--sidecar-agent <agent>', 'codex | disabled | auto')
-  .option('--requires-isolation', 'mark the sidecar call as isolation-bounded', false)
-  .option('--structured-result-required', 'mark structured SidecarResult as the delegation boundary', false)
-  .option('--explicit-second-pass', 'mark the sidecar call as an explicit second-pass review', false)
-  .option('--command <command>', 'codex-sidecar executable', 'codex-sidecar')
-  .option('--node-cli <path>', 'development path to codex-sidecar CLI JS')
-  .option('--save-result <path>', 'write structured SidecarResult JSON to this path')
-  .option('--additional-context-file <path>', 'strictly validated bounded hook-signal context file')
-  .action(
-    (
-      workflow: string,
-      prompt: string | undefined,
-      opts: {
-        project?: string;
-        preset?: string;
-        query?: string;
-        limit: number;
-        source: 'own' | 'community' | 'all';
-        visibility: 'public' | 'private' | 'all';
-        hostAgent: 'claude' | 'codex' | 'automation' | 'unknown';
-        availability: 'disabled' | 'unavailable' | 'configured' | 'operational' | 'work-capable';
-        sidecarAgent?: 'codex' | 'disabled' | 'auto';
-        requiresIsolation: boolean;
-        structuredResultRequired: boolean;
-        explicitSecondPass: boolean;
-        command?: string;
-        nodeCli?: string;
-        saveResult?: string;
-        additionalContextFile?: string;
-      },
-    ) => {
-      const normalized =
-        workflow === 'risk' ? 'risk-check' : workflow;
-      if (
-        normalized !== 'review' &&
-        normalized !== 'explore' &&
-        normalized !== 'opinion' &&
-        normalized !== 'risk-check'
-      ) {
-        process.stderr.write('[caveat:error] workflow must be review | explore | opinion | risk-check\n');
-        process.exit(1);
-      }
-      const ctx = buildContext(stdoutLogger);
-      runCodexSidecarWithCaveats(ctx, normalized, prompt, opts);
-    },
-  );
-
-codexSidecar
-  .command('work-smoke [prompt]')
-  .description('Run codex_work in an isolated worktree and remove it after verification')
-  .option('--project <path>', 'repository root to check')
-  .option('--preset <preset>', 'codex-sidecar work preset', 'work')
-  .option('--command <command>', 'codex-sidecar executable', 'codex-sidecar')
-  .option('--node-cli <path>', 'development path to codex-sidecar CLI JS')
-  .option('--save-result <path>', 'write structured SidecarResult JSON to this path')
-  .action(
-    (
-      prompt: string | undefined,
-      opts: { project?: string; preset?: string; command?: string; nodeCli?: string; saveResult?: string },
-    ) => {
-      const ctx = buildContext(stdoutLogger);
-      runCodexSidecarWorkSmoke(ctx, prompt, opts);
-    },
-  );
 
 const community = program
   .command('community')

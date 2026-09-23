@@ -91,35 +91,6 @@ describe('caveat publish command', () => {
     }));
   });
 
-  it('passes an advisory callback only when the cwd has sidecar config', async () => {
-    core.publishOwn.mockResolvedValue({ fileCount: 1, changed: false, dryRun: false });
-    const withTarget = { ...ctx, config: { ...ctx.config, publishTarget: 'https://github.com/x/Caveat-Public.git' } } as CliContext;
-
-    await runPublish(withTarget, { dryRun: false, yes: false }, { hasCodexSidecarConfig: () => false });
-    expect(core.publishOwn).toHaveBeenLastCalledWith(expect.objectContaining({ advisory: undefined }));
-
-    await runPublish(withTarget, { dryRun: false, yes: false }, {
-      hasCodexSidecarConfig: () => true,
-      runCodexSidecarAdvisory: () => '[caveat:codex-sidecar] Codex advisory:\nreview',
-    });
-    expect(core.publishOwn).toHaveBeenLastCalledWith(expect.objectContaining({ advisory: expect.any(Function) }));
-  });
-
-  it('turns a throwing publish advisory dependency into an unavailable advisory', async () => {
-    core.publishOwn.mockResolvedValue({ fileCount: 1, changed: false, dryRun: false });
-    const withTarget = { ...ctx, config: { ...ctx.config, publishTarget: 'https://github.com/x/Caveat-Public.git' } } as CliContext;
-    const runner = vi.fn(() => { throw new Error('temporary directory cleanup failed'); });
-
-    await runPublish(withTarget, { dryRun: false, yes: false }, {
-      hasCodexSidecarConfig: () => true,
-      runCodexSidecarAdvisory: runner,
-    });
-    const call = core.publishOwn.mock.calls.at(-1)?.[0] as { advisory: (changes: { lines: string[]; added: number; modified: number; deleted: number }) => string };
-    expect(call.advisory({ lines: ['A entry.md'], added: 1, modified: 0, deleted: 0 }))
-      .toBe('[caveat:codex-sidecar] advisory unavailable: temporary directory cleanup failed');
-    expect(runner).toHaveBeenCalledTimes(1);
-  });
-
   it('prints scan findings with copyable allow lines', async () => {
     const err = new core.PublishScanError([{
       relPath: 'entry.md',

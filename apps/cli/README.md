@@ -115,8 +115,7 @@ Codex and Cursor use native hooks rather than MCP for automatic surfacing. A
 native reminder inspects an entry with
 `caveat show <id> --source <source>`, then updates or creates Markdown in the
 own knowledge repo and runs `caveat index`. Community entries are subscriptions
-and are not edited locally. The optional `codex-sidecar` commands remain
-available for bounded second opinions, review, risk-check, and isolated work.
+and are not edited locally. Jev-based struggle detection can be explicitly enabled with `caveat jev enable --key-stdin`.
 
 ## Pointing at a different knowledge repo
 

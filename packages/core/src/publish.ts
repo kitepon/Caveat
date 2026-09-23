@@ -197,7 +197,6 @@ export interface PublishOwnOptions {
   yes?: boolean;
   allow?: string[];
   saveAllow?: boolean;
-  advisory?: (changes: PublishChanges) => string | null;
 }
 export interface PublishResult { fileCount: number; changed: boolean; dryRun: boolean; }
 
@@ -351,15 +350,7 @@ export async function publishOwn(opts: PublishOwnOptions): Promise<PublishResult
   const question = `publish ${changes.lines.length} entry change(s)? [y/N]`;
   if (!opts.yes) {
     if (!(opts.isTty ?? (() => Boolean(process.stdin.isTTY)))()) throw new Error(`${question}; rerun with --yes to approve non-interactively`);
-    let advisory: string | null | undefined;
-    try {
-      advisory = opts.advisory?.(changes);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      opts.logger.warn(`publish advisory unavailable: ${message.replace(/\s+/g, ' ').trim() || 'unknown error'}`);
-    }
-    const questionWithAdvisory = advisory ? `${advisory}\n\n${question}` : question;
-    if (!opts.confirmImpl(questionWithAdvisory)) throw new Error('publish cancelled');
+    if (!opts.confirmImpl(question)) throw new Error('publish cancelled');
   }
 
   await checkoutOrphan(git);

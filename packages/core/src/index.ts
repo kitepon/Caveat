@@ -27,7 +27,6 @@ export * from './sync.js';
 export * from './visibilityGate.js';
 export * from './publish.js';
 export * from './publishScan.js';
-export * from './codexSidecar.js';
 export * from './sealedBundle.js';
 export * from './sealedKeys.js';
 export * from './sealedIndex.js';

@@ -31,28 +31,27 @@ import {
   readSessionSignals,
   runAutoSync,
   stopReminderText,
-  struggleSearchText,
   toolErrorReminderText,
   userPromptSubmitReminderText,
   buildAndPublishPendingReminder,
   buildPendingSemanticKey,
-  buildHookSignalSidecarContextBlock,
   maybeSweepPendingDirs,
-  type CaveatHookSignalSidecarContextBlock,
   type SearchResult,
   type SessionSignals,
 } from '@caveat/core';
 import { maybeTriggerAutoReindex } from '../autoReindexTrigger.js';
 import { maybeTriggerAutoSync } from '../autoSyncTrigger.js';
-import { formatCodexSidecarAdvisory, runCodexSidecarAdvisory } from './codexSidecarAdvisory.js';
+import { runJevStruggle, type JevNotice } from '../jevStruggle.js';
+import { prepareSessionDelivery } from '../hookDelivery.js';
 import {
+  acknowledgeSessionReminders,
   buildContextSafely,
-  compactContexts,
-  drainForSession,
+  emitHookContext,
   errorMessage,
   extractToolResponseText,
   hookSilentLogger,
   parsePayload,
+  peekForSession,
   pendingCleanupFailureText,
   queueStopForSession,
   readStdin,
@@ -126,10 +125,8 @@ interface WorkerJob {
   sessionId: string;
   topicText: string;
   failureText: string;
-  additionalContext?: CaveatHookSignalSidecarContextBlock;
 }
 
-type HookCodexSidecarMode = 'off' | 'auto' | 'require';
 const WORKER_STALE_MS = 24 * 60 * 60 * 1000;
 const WORKER_ROOT = 'caveat-worker-v1';
 const WORKER_MARKER = '.caveat-worker-schema-v1';
@@ -206,7 +203,7 @@ async function runWorker(workFile: string): Promise<void> {
   try {
     result = buildAndPublishPendingReminder(ctx.caveatHome, job.sessionId, buildPendingSemanticKey({
       agent: 'claude', surface: 'tool_error', refs: hits,
-    }), () => buildToolErrorReminder(job, hits));
+    }), () => toolErrorReminderText(hits));
   } catch {
     process.stderr.write('[caveat:hook] pending reminder build or publish failed\n');
     process.exit(0);
@@ -389,98 +386,6 @@ async function runAutoSyncWorker(): Promise<void> {
   }
 }
 
-function buildToolErrorReminder(job: WorkerJob, hits: SearchResult[]): string {
-  const base = toolErrorReminderText(hits);
-  const mode = hookCodexSidecarMode();
-  if (mode === 'off') return base;
-
-  const projectRoot = process.cwd();
-  const hasSidecarConfig = existsSync(join(projectRoot, '.codex-sidecar.yml'));
-  if (mode === 'auto' && !hasSidecarConfig) return base;
-
-  const advisory = runCodexSidecarAdvisory({
-    searchText: job.failureText,
-    limit: hits.length,
-    projectRoot,
-    prompt: [
-      'A Claude Code tool just returned an error.',
-      'Use the provided Caveat context to give concise next-step advice.',
-      'Do not tell Claude to search Caveat again unless the context is insufficient.',
-    ].join(' '),
-    additionalContext: job.additionalContext,
-  });
-  if (advisory.status === 'ok') {
-    return [
-      base,
-      '',
-      formatCodexSidecarAdvisory(advisory),
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  return [
-    base,
-    '',
-    formatCodexSidecarAdvisory(advisory),
-  ].join('\n');
-}
-
-function hookCodexSidecarMode(): HookCodexSidecarMode {
-  const raw = process.env.CAVEAT_HOOK_CODEX_SIDECAR;
-  if (raw === 'off' || raw === 'auto' || raw === 'require') return raw;
-  return 'auto';
-}
-
-function buildStopReminder(
-  signals: SessionSignals,
-  related: SearchResult[],
-): string {
-  const base = stopReminderText(signals, related);
-  const mode = hookCodexSidecarMode();
-  if (mode === 'off') return base;
-
-  const projectRoot = process.cwd();
-  const hasSidecarConfig = existsSync(join(projectRoot, '.codex-sidecar.yml'));
-  if (mode === 'auto' && !hasSidecarConfig) return base;
-
-  const advisory = runCodexSidecarAdvisory({
-    searchText: struggleSearchText(signals),
-    limit: Math.max(related.length, 1),
-    projectRoot,
-    prompt: [
-      'A Claude Code session is ending after objective struggle signals.',
-      'Use the provided Caveat context and structured hook signal context to advise whether Claude should update an existing caveat or record a new one.',
-      'Be concise and preserve Caveat visibility rules.',
-    ].join(' '),
-    additionalContext: buildHookSignalSidecarContextBlock({
-      type: 'stop',
-      toolFailureCount: signals.toolFailureCount,
-      reeditedFileCount: signals.fileEditCounts.length,
-      webSearchCount: signals.webSearchCount,
-      webFetchCount: signals.webFetchCount,
-      bashRetryCount: signals.bashRetryCount,
-      durationMinutes: signals.durationMinutes,
-    }),
-  });
-
-  if (advisory.status === 'ok') {
-    return [
-      base,
-      '',
-      formatCodexSidecarAdvisory(advisory),
-    ]
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  return [
-    base,
-    '',
-    formatCodexSidecarAdvisory(advisory),
-  ].join('\n');
-}
-
 export async function runHook(name: HookName, arg?: string): Promise<void> {
   try { sweepStaleWorkerDirs(); } catch { process.stderr.write('[caveat:hook] worker stale cleanup failed\n'); }
   if (name === 'reindex') {
@@ -507,25 +412,50 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
   const payload = parsePayload(CLAUDE_HOST, raw);
   const sessionId = getSessionId(payload);
 
-  const contexts = name === 'stop' ? [] : drainForSession(CLAUDE_HOST, sessionId);
+  const pending = name === 'stop' ? null : peekForSession(CLAUDE_HOST, sessionId);
+  const contexts = pending?.contexts ?? [];
 
   if (name === 'user-prompt-submit') {
+    const ctx = buildContextSafely(CLAUDE_HOST);
+    let jevNotice: JevNotice | null = null;
+    if (ctx?.config.jevEnabled) {
+      try {
+        jevNotice = await runJevStruggle(ctx, 'claude', payload);
+        if (jevNotice) contexts.push(jevNotice.text);
+      } catch (err: unknown) {
+        process.stderr.write(`[caveat:hook] Jev判定に失敗: ${errorMessage(err)}\n`);
+      }
+    }
     const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
     const hits = searchCaveatsSafely(CLAUDE_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
     if (hits.length > 0) {
       contexts.push(userPromptSubmitReminderText(hits));
     }
-    const compacted = compactContexts(CLAUDE_HOST, contexts);
-    if (compacted.length > 0) {
-      process.stdout.write(`${systemReminderOutput(compacted.join('\n\n'))}\n`);
+    if (ctx) {
+      try {
+        const prepared = prepareSessionDelivery(ctx.caveatHome, sessionId, contexts, jevNotice?.ref ? [jevNotice.ref] : []);
+        const sent = prepared.texts.length === 0 || await emitHookContext(CLAUDE_HOST, `${systemReminderOutput(prepared.texts.join('\n\n'))}\n`);
+        if (sent) {
+          prepared.delivered();
+          if (jevNotice && prepared.texts.includes(jevNotice.text)) jevNotice.delivered();
+          if (pending) acknowledgeSessionReminders(CLAUDE_HOST, pending);
+        }
+      } catch (err: unknown) { process.stderr.write(`[caveat:hook] 配送に失敗: ${errorMessage(err)}\n`); }
     }
     process.exit(0);
   }
 
   if (name === 'post-tool-use') {
-    const compacted = compactContexts(CLAUDE_HOST, contexts);
-    if (compacted.length > 0) {
-      process.stdout.write(`${systemReminderOutput(compacted.join('\n\n'))}\n`);
+    const ctx = buildContextSafely(CLAUDE_HOST);
+    if (ctx) {
+      try {
+        const prepared = prepareSessionDelivery(ctx.caveatHome, sessionId, contexts);
+        const sent = prepared.texts.length === 0 || await emitHookContext(CLAUDE_HOST, `${systemReminderOutput(prepared.texts.join('\n\n'))}\n`);
+        if (sent) {
+          prepared.delivered();
+          if (pending) acknowledgeSessionReminders(CLAUDE_HOST, pending);
+        }
+      } catch (err: unknown) { process.stderr.write(`[caveat:hook] 配送に失敗: ${errorMessage(err)}\n`); }
     }
     // Fast path: we only enqueue on errors. Everything else is just drain.
     if (!isToolError(payload)) process.exit(0);
@@ -533,16 +463,8 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
       payload.tool_response ?? payload.toolResponse ?? payload.error ?? payload,
     );
     if (errText) {
-      const failureKind = payload.hook_event_name === 'PostToolUseFailure'
-        ? 'post-tool-use-failure'
-        : 'error-bearing-post-tool-use';
-      const additionalContext = buildHookSignalSidecarContextBlock({
-        type: 'tool-error',
-        toolName: payload.tool_name ?? payload.toolName,
-        failureKind,
-      });
       const topicText = toolTopicText(payload);
-      spawnWorker({ sessionId, topicText, failureText: errText, ...(additionalContext ? { additionalContext } : {}) });
+      spawnWorker({ sessionId, topicText, failureText: errText });
     }
     process.exit(0);
   }
@@ -570,6 +492,7 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
       }
     }
     if (payload.stop_hook_active === true) process.exit(0);
+    if (ctx?.config.jevEnabled) process.exit(0);
     const transcriptPath =
       typeof payload.transcript_path === 'string' ? payload.transcript_path : '';
     const signals = transcriptPath ? loadSignalsSafely(transcriptPath) : null;
@@ -579,7 +502,7 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
       failureText,
       surface: 'stop' as const,
     })));
-    queueStopForSession(CLAUDE_HOST, sessionId, signals, related, () => buildStopReminder(signals, related));
+    queueStopForSession(CLAUDE_HOST, sessionId, signals, related, () => stopReminderText(signals, related));
     process.exit(0);
   }
 
