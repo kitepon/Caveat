@@ -1,5 +1,6 @@
 # RAG Index
 
+- `jev-struggle-detection/`: coding agentの苦戦・介入に関する一次研究とTypeSafe公式仕様、Caveat向けJev評価仮説（取得日 2026-09-23、確度: 出典確認済み／適用未検証）
 - `windows-git-longpaths/`: Git for Windowsの長いパス設定と追加・cloneの修理前後実測（取得日 2026-09-10、確度: 確認済み）
 - `windows-pwsh-acl/`: PowerShell 7のACL API、所有者限定ACLの適用と第三者権限拒否のWindows実測（取得日 2026-09-10、確度 confirmed）
 
