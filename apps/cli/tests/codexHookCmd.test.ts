@@ -392,6 +392,14 @@ describe('isCodexToolError', () => {
     expect(job?.failureText).toContain('command not found');
   });
 
+  it('成功が明示されたシェル出力を罠検索へ送らない', () => {
+    const captured = readFixture('post-tool-use-bash-failure');
+    const response = '既知の失敗例を記載した文書。command not found の解説を含む。';
+    expect(buildCodexPostToolUseWorkerJob({ ...captured, tool_response: { exit_code: 0, output: response } })).toBeNull();
+    expect(buildCodexPostToolUseWorkerJob({ ...captured, tool_response: `Process exited with code 0\n${response}` })).toBeNull();
+    expect(buildCodexPostToolUseWorkerJob({ ...captured, exit_code: 0, tool_response: response })).toBeNull();
+  });
+
   it('detects explicit exit_code fields', () => {
     expect(isCodexToolError({ exit_code: 1 })).toBe(true);
     expect(isCodexToolError({ exit_code: 0 })).toBe(false);

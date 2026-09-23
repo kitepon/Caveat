@@ -134,6 +134,8 @@ children launched by the hook also did not reliably leave pending reminders in
 real Codex runs. For that reason, Codex `PostToolUse` performs a bounded
 foreground lookup from `tool_input` + `tool_response` and writes the pending
 file before returning; the next `UserPromptSubmit` drains it.
+終了コード0が明示されたツール結果は検索へ送らない。終了状態が得られない既存のBash payloadは
+症状一致による候補検索を維持し、終了コードが非0と判明した結果は失敗として扱う。
 
 完了したCodex-hook実装計画は
 [`archive/CODEX_HOOK_SUPPORT_PLAN.md`](archive/CODEX_HOOK_SUPPORT_PLAN.md)に保管する。

@@ -136,22 +136,27 @@ function toolInputText(input: unknown): string {
   return typeof command === 'string' ? command : '';
 }
 
-export function isCodexToolError(payload: Record<string, unknown>): boolean {
-  if (payload.is_error === true) return true;
-  const topExit = numericExitCode(payload.exit_code ?? payload.exitCode);
-  if (topExit !== null) return topExit !== 0;
+function codexToolStatus(payload: Record<string, unknown>): 'failed' | 'succeeded' | 'unknown' {
+  if (payload.is_error === true) return 'failed';
   const resp = payload.tool_response ?? payload.toolResponse;
+  if (resp !== null && typeof resp === 'object' && !Array.isArray(resp) &&
+    (resp as Record<string, unknown>).is_error === true) return 'failed';
+  const topExit = numericExitCode(payload.exit_code ?? payload.exitCode);
+  if (topExit !== null) return topExit === 0 ? 'succeeded' : 'failed';
   if (resp !== null && typeof resp === 'object' && !Array.isArray(resp)) {
     const r = resp as Record<string, unknown>;
-    if (r.is_error === true) return true;
     const exit = numericExitCode(r.exit_code ?? r.exitCode);
-    if (exit !== null) return exit !== 0;
+    if (exit !== null) return exit === 0 ? 'succeeded' : 'failed';
   }
   const responseExit = processExitCodeFromText(extractToolResponseText(resp));
-  if (responseExit !== null) return responseExit !== 0;
+  if (responseExit !== null) return responseExit === 0 ? 'succeeded' : 'failed';
   const transcriptExit = transcriptExitCode(payload);
-  if (transcriptExit !== null) return transcriptExit !== 0;
-  return false;
+  if (transcriptExit !== null) return transcriptExit === 0 ? 'succeeded' : 'failed';
+  return 'unknown';
+}
+
+export function isCodexToolError(payload: Record<string, unknown>): boolean {
+  return codexToolStatus(payload) === 'failed';
 }
 
 export function buildCodexPostToolUseWorkerJob(
@@ -159,6 +164,8 @@ export function buildCodexPostToolUseWorkerJob(
 ): CodexWorkerJob | null {
   const sessionId = codexSessionId(payload);
   if (!sessionId) return null;
+  const status = codexToolStatus(payload);
+  if (status === 'succeeded') return null;
 
   const transcriptPath =
     typeof payload.transcript_path === 'string' ? payload.transcript_path : undefined;
@@ -173,8 +180,7 @@ export function buildCodexPostToolUseWorkerJob(
     .filter(Boolean)
     .join('\n');
 
-  const knownError = isCodexToolError(payload);
-  if (knownError) {
+  if (status === 'failed') {
     return { sessionId, topicText, failureText, knownError: true, transcriptPath, toolUseId };
   }
 

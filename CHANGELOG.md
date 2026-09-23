@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.5] — 2026-09-24
+
+### 修正
+
+- CodexのPostToolUseで終了コード0が明示された成功ツール出力を罠検索へ送らない。文書やテスト結果に含まれる失敗例が無関係な罠として通知されるのを防ぐ。
+
 ## [0.19.4] — 2026-09-24
 
 ### 修正
