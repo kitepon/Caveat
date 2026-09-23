@@ -26,7 +26,7 @@ const MIN_DISTINCT_TOKEN_MATCHES_CEILING = 2;
 // Hiragana / Katakana / CJK unified ideographs / halfwidth-katakana. Japanese
 // prompts often run together without spaces, so CJK tokens get sliding-window
 // split into 3-char pieces to align with the trigram tokenizer used on the
-// stored side (see CLAUDE.md "FTS5 trigram は 3 文字以上のクエリが必要").
+// stored side (see AGENTS.md "FTS5 trigram は 3 文字以上のクエリが必要").
 const CJK_CHAR = /[぀-ゟ゠-ヿ一-鿿ｦ-ﾟ]/;
 // Pure-hiragana trigrams (`してる`, `のまま`, `になっ`, `るのか`) are
 // conjugational / particle glue — they appear in any Japanese technical body

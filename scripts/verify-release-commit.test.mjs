@@ -61,7 +61,7 @@ test("公開CLI versionは現行文書とCHANGELOGに同期する", async () => 
   for (const [name, url] of [
     ["README.md", new URL("../README.md", import.meta.url)],
     ["README.ja.md", new URL("../README.ja.md", import.meta.url)],
-    ["CLAUDE.md", new URL("../CLAUDE.md", import.meta.url)],
+    ["AGENTS.md", new URL("../AGENTS.md", import.meta.url)],
   ]) {
     const source = await readFile(url, "utf8");
     assert.ok(source.includes(`v${version}`), `${name} must state v${version}`);

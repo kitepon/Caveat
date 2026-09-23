@@ -222,7 +222,7 @@ private が育たないリスクがある。2 方向で対策:
 
 ### CLAUDE.md への波及
 
-01_plan.md にマージするとき、[CLAUDE.md](../../CLAUDE.md) にも以下を反映:
+01_plan.md にマージするとき、[AGENTS.md](../../AGENTS.md) にも以下を反映:
 - 二項基準と「迷ったら private」の方針
 - 明示依頼パターンの存在（「private で記録して」と言われたら即従う）
 - `caveat list --stale` の月次点検の運用
@@ -240,5 +240,5 @@ private が育たないリスクがある。2 方向で対策:
 ## 関連
 
 - [01_plan.md](../01_plan.md) — 設計の真実の源（本メモがマージされるべき先）
-- [CLAUDE.md](../../CLAUDE.md) — hook 実装の現行仕様
+- [AGENTS.md](../../AGENTS.md) — hook 実装の現行仕様
 - [archive/auto-merge-design.md](auto-merge-design.md) — v0.7 転換の背景（自動マージの却下理由）

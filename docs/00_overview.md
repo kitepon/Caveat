@@ -8,8 +8,7 @@
 | 文書 | 所有する判断 |
 |---|---|
 | [`../README.md`](../README.md) / [`../README.ja.md`](../README.ja.md) | install、設定、利用、同期、封緘公開、診断、復旧の利用者入口 |
-| [`../CLAUDE.md`](../CLAUDE.md) | 実装構造、検証コマンド、host・OS境界 |
-| [`../AGENTS.md`](../AGENTS.md) | Claude以外のagent向け入口と文書寿命 |
+| [`../AGENTS.md`](../AGENTS.md) | 実装構造、検証コマンド、host・OS境界、文書寿命 |
 | [`01_plan.md`](01_plan.md) | 製品契約、状態、配布、単独運用、文書所有境界 |
 | [`03_dual_agent_support.md`](03_dual_agent_support.md) | Claude / Codex / Cursor host adapterとsidecar境界 |
 | [`04_release_checklist.md`](04_release_checklist.md) | npm publishからfresh install・host smokeまでのrelease gate |

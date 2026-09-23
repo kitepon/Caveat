@@ -1,6 +1,6 @@
 # Caveat Multi-Host Support
 
-This document is additive to `CLAUDE.md`. `CLAUDE.md` remains the canonical
+This document is additive to `AGENTS.md`. `AGENTS.md` remains the canonical
 description of Caveat's existing Claude Code behavior. Codex and Cursor are
 additive host adapters over the same product-owned retrieval and pending state.
 

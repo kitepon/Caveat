@@ -60,7 +60,7 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 | 判断 | 正規入口 |
 |---|---|
 | install / config / update / uninstall | [`../README.md`](../README.md) |
-| state / schema / migration / source構造 | [`../CLAUDE.md`](../CLAUDE.md)と実装 |
+| state / schema / migration / source構造 | [`../AGENTS.md`](../AGENTS.md)と実装 |
 | host diagnostics | 人の個別修復は`caveat codex-hook diagnostics` / `caveat cursor-hook diagnostics`。機械判定は`caveat factory-diagnostics --json [--require-connector cursor]` |
 | runtime error設定・確認・復旧 | [`../README.md`](../README.md#runtime-error-diagnostics-explicit-opt-in)と`caveat runtime-errors ... --json` |
 | sealed publish / key rotation | [`../keyserver/README.md`](../keyserver/README.md) |

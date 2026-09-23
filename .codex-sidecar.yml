@@ -12,7 +12,7 @@ allowed_paths:
   - CHANGELOG.md
   - CONTRIBUTING.md
   - SECURITY.md
-  - CLAUDE.md
+  - AGENTS.md
   - docs/
   - entries/
   - hooks/

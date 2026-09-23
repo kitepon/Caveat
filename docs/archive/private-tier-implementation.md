@@ -96,7 +96,7 @@ v0.6.2 の「visibility は必ずユーザに聞け、自動分類するな」�
 | ファイル | 変更内容 |
 |---|---|
 | [docs/01_plan.md](../01_plan.md) | 本設計メモを取り込み。private tier / 二項基準 / `caveat list --stale` / 明示依頼パターンの記載 |
-| [CLAUDE.md](../../CLAUDE.md) | 二項基準、明示依頼パターン、月次点検運用の要約を追記 |
+| [AGENTS.md](../../AGENTS.md) | 二項基準、明示依頼パターン、月次点検運用の要約を追記 |
 | メモリ `feedback_visibility_user_decides.md` | 2026-04-23 に更新済（新方針への反転） |
 
 ## 実装の依存関係
@@ -159,4 +159,4 @@ v0.6.2 の「visibility は必ずユーザに聞け、自動分類するな」�
 
 - [private-tier-design.md](private-tier-design.md) — 設計思想と論拠
 - [01_plan.md](../01_plan.md) — 設計の真実の源（本計画完了後にマージ）
-- [CLAUDE.md](../../CLAUDE.md) — 現行仕様（本計画完了後に反映）
+- [AGENTS.md](../../AGENTS.md) — 現行仕様（本計画完了後に反映）
