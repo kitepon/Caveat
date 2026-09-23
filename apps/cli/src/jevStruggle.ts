@@ -130,17 +130,21 @@ export async function rankKnowledge(key: string, turns: ThroughlineTurn[], candi
   const state = {
     turns,
     currentHostOs: fingerprint().os,
-    candidates: candidates.map(({ hit, entry }) => ({
-      title: hit.title,
-      symptom: hit.symptomExcerpt,
-      cause: entry.sections.Cause?.slice(0, 300) ?? '',
-      resolution: entry.sections.Resolution?.slice(0, 600) ?? '',
-      environment: hit.environment,
-    })),
+    candidates: candidates.map(({ hit, entry }) => {
+      const { applies_to_os: appliesToOs = null, ...recordedEnvironment } = hit.environment;
+      return {
+        title: hit.title,
+        symptom: hit.symptomExcerpt,
+        cause: entry.sections.Cause?.slice(0, 300) ?? '',
+        resolution: entry.sections.Resolution?.slice(0, 600) ?? '',
+        recordedEnvironment,
+        appliesToOs,
+      };
+    }),
   };
   const questions = Object.fromEntries(candidates.map((_, index) => [`candidate_${index}`, {
     type: 'noul',
-    instructions: `Does candidates[${index}] directly apply to the unresolved problem shown in the turns and offer a useful resolution? Check the described environment against the task's target environment; currentHostOs is the host OS, which may differ from the target OS.`,
+    instructions: `Does candidates[${index}] directly apply to the unresolved problem shown in the turns and offer a useful resolution? A recordedEnvironment value is where the entry was observed, not a restriction. Only appliesToOs restricts the target OS; null means any OS. currentHostOs may differ from the task's target OS.`,
   }]));
   const response = await ask(key, state, questions);
   let best: KnowledgeCandidate | null = null;

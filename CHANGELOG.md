@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.4] — 2026-09-24
+
+### 修正
+
+- Jevの知見選別で、罠を記録した端末のOSと罠の適用対象OSを区別して渡す。記録端末が異なるだけで関連知見を落とさない。
+
 ## [0.19.3] — 2026-09-24
 
 ### 追加

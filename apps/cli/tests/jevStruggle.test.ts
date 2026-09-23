@@ -30,6 +30,21 @@ describe('Jevの苦戦判定', () => {
     expect(selected).toBe(candidates[0]);
   });
 
+  it('記録時のOSと適用対象OSをJevに区別して渡す', async () => {
+    const candidates = [{
+      hit: { id: 'known-trap', source: 'own', title: '既知の罠', symptomExcerpt: '', environment: { os: 'macos' } },
+      entry: { sections: { Cause: '原因', Resolution: '対処' } },
+    }] as unknown as Parameters<typeof rankKnowledge>[2];
+    const selected = await rankKnowledge('dummy', turns(), candidates, async (_key, state, questions) => {
+      const candidate = (state as { candidates: Array<{ recordedEnvironment: object; appliesToOs: string | null }> }).candidates[0]!;
+      expect(candidate.recordedEnvironment).toEqual({ os: 'macos' });
+      expect(candidate.appliesToOs).toBeNull();
+      expect(JSON.stringify(questions)).toContain('recordedEnvironment value is where the entry was observed, not a restriction');
+      return { answers: { candidate_0: { type: 'noul', noul: 0.89 } } };
+    });
+    expect(selected).toBe(candidates[0]);
+  });
+
   it('同じ一回の問い合わせで苦戦と実在する検索語を選ぶ', async () => {
     let calls = 0;
     const result = await judgeStruggle('dummy', turns(), async (_key, state, questions) => {
