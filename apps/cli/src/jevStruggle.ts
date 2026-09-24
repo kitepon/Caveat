@@ -15,6 +15,7 @@ const API_URL = 'https://api.typesafe.ai/v1/systemone';
 const STRUGGLE_THRESHOLD = 0.85;
 const MATCH_THRESHOLD = 0.8;
 const MAX_TERMS = 48;
+const MAX_SEARCH_TERMS = 3;
 const MAX_CANDIDATES = 20;
 
 export interface ThroughlineTurn {
@@ -72,9 +73,22 @@ function noul(answer: Answer | undefined): number {
   return answer.noul;
 }
 
-function choice(answer: Answer | undefined, allowed: Set<string>): string {
-  if (answer?.type !== 'choice' || !allowed.has(answer.choice)) throw new Error('jev_choice_invalid');
-  return answer.choice;
+function searchTermChoices(answer: Answer | undefined, terms: string[]): string[] {
+  if (answer?.type !== 'choice' || !isRecord(answer.probabilities)) throw new Error('jev_choice_invalid');
+  const keys = terms.map((_, index) => `term_${index}`);
+  const allowed = new Set([...keys, 'none']);
+  if (!allowed.has(answer.choice) || Object.keys(answer.probabilities).length !== allowed.size ||
+    Object.entries(answer.probabilities).some(([key, probability]) => !allowed.has(key) ||
+      typeof probability !== 'number' || !Number.isFinite(probability) || probability < 0 || probability > 1)) {
+    throw new Error('jev_choice_invalid');
+  }
+  if (answer.choice === 'none') return [];
+  const noneProbability = answer.probabilities.none!;
+  return keys.map((key, index) => ({ index, probability: answer.probabilities[key]! }))
+    .filter(({ probability }) => probability > noneProbability)
+    .sort((a, b) => b.probability - a.probability || a.index - b.index)
+    .slice(0, MAX_SEARCH_TERMS)
+    .map(({ index }) => terms[index]!);
 }
 
 export function candidateTerms(turns: ThroughlineTurn[]): string[] {
@@ -98,7 +112,7 @@ export function candidateTerms(turns: ThroughlineTurn[]): string[] {
     .map((item) => item.term);
 }
 
-export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: JevCall = callJev): Promise<{ struggling: boolean; term: string | null }> {
+export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: JevCall = callJev): Promise<{ struggling: boolean; terms: string[] }> {
   const terms = candidateTerms(turns);
   const options = Object.fromEntries(terms.map((term, index) => [`term_${index}`, term]));
   const questions: Record<string, unknown> = {
@@ -107,15 +121,14 @@ export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: 
   };
   if (terms.length > 0) questions.search_term = {
     type: 'choice',
-    instructions: 'If the agent is struggling, which exact term from these options would best retrieve a useful Caveat knowledge entry about the concrete unresolved problem? Select none when no option identifies it.',
+    instructions: 'If the agent is struggling, which exact term from these options would best retrieve a useful Caveat knowledge entry about the concrete unresolved problem? Select none when no option identifies it. The search will use up to three of your highest-ranked terms together as an AND query.',
     criteria: { ...options, none: 'No listed term would retrieve useful knowledge about this problem.' },
   };
   const response = await ask(key, { turns }, questions);
   const struggling = noul(response.answers.repeated_problem) >= STRUGGLE_THRESHOLD &&
     noul(response.answers.clearly_stuck) >= STRUGGLE_THRESHOLD;
-  if (!struggling || terms.length === 0) return { struggling, term: null };
-  const selected = choice(response.answers.search_term, new Set([...Object.keys(options), 'none']));
-  return { struggling, term: selected === 'none' ? null : terms[Number(selected.slice(5))] ?? null };
+  if (!struggling || terms.length === 0) return { struggling, terms: [] };
+  return { struggling, terms: searchTermChoices(response.answers.search_term, terms) };
 }
 
 interface KnowledgeCandidate { hit: SearchResult; entry: GetResult }
@@ -225,12 +238,13 @@ export async function runJevStruggle(
   state.lastTurn = turnKey;
   if (!judgment.struggling) { saveState(ctx.caveatHome, sessionId, state); return null; }
   let candidates: KnowledgeCandidate[] = [];
-  if (judgment.term) {
+  const query = judgment.terms.join(' ');
+  if (query) {
     if (!existsSync(ctx.paths.dbPath)) throw new Error('jev_knowledge_index_missing');
     const db = openDb({ path: ctx.paths.dbPath });
     try {
       const taskText = context.turns.map((turn) => `${turn.user}\n${turn.assistant}\n${turn.thinking}`).join('\n');
-      candidates = search(db, { query: judgment.term, limit: MAX_CANDIDATES })
+      candidates = search(db, { query, limit: MAX_CANDIDATES })
         .filter((hit) => environmentAppliesToTask(hit.environment, taskText, fingerprint().os))
         .map((hit) => ({ hit, entry: get(db, hit.id, hit.source) }))
         .filter((item): item is KnowledgeCandidate => item.entry !== null)
@@ -239,7 +253,7 @@ export async function runJevStruggle(
   }
   const selected = await rankKnowledge(key, context.turns, candidates, ask);
   const id = selected ? `${selected.hit.source}/${selected.hit.id}` : null;
-  const term = judgment.term ?? '_none';
+  const term = query || '_none';
   if (id && (state.deliveredIds.includes(id) || wasHitDelivered(ctx.caveatHome, sessionId, id)) || !id && state.notifiedTerms.includes(term)) {
     saveState(ctx.caveatHome, sessionId, state);
     return null;

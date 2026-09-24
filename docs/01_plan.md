@@ -71,7 +71,8 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 - Throughlineの公開CLIが返す完了3ターン（toolログを除き、取得できるThinkingを含む）を
   Claude / CodexのUserPromptSubmitで利用する。Observerはこの連携に含めない。
 - Jevを明示的に有効化した場合、苦戦と検索語を1回で判定する。高い苦戦スコアの時だけ
-  ローカルFTSで候補を取得し、最大20件の候補概要をJevで選別する。知見DB全件は送らない。
+  JevのChoice確率が「該当語なし」を上回る上位最大3語をAND条件でローカルFTSへ渡す。
+  最大20件の候補概要をJevで選別する。知見DB全件は送らない。
 - 検索語の選択肢はCaveatが3ターンのログを語分割して作る。長いログでは複数ターンに
   現れる語と新しい発言の語を優先し、Jevには原文に存在する候補だけを渡す。
 - Jev有効時はClaude / Codexの旧UserPromptSubmit直接検索、PostToolUseエラー検索、

@@ -42,7 +42,7 @@ With Claude Code, Codex, or Cursor hooks enabled:
 
 1. **You type a prompt** → `UserPromptSubmit` hook surfaces matching entries via three structural gates: **co-occurrence + symptom-section match + rare topical anchor**. No keyword lists. Bare proper-noun mentions (`RTX 5090 CUDA で何かやってる`) stay silent; specific failure vocabulary plus a curated topic anchor (`cudaGetDeviceCount が 0 を返す`) fires the right entry. ([details](CHANGELOG.md#0142--2026-05-06))
 2. **A tool returns an error** → Claude hooks spawn a detached worker that searches in the background; the matching caveat lands on the next hook tick (~20ms foreground latency). Codex hooks do a bounded foreground lookup and surface the result on the next `UserPromptSubmit`. Claude Code also registers `PostToolUseFailure` for current failed-tool payloads.
-3. **The session ends** → `Stop` queues only new signal kinds and newly matched traps for the next hook tick. With Jev explicitly enabled, the next prompt instead uses three completed Throughline turns to judge repeated struggle and select a local knowledge search term.
+3. **The session ends** → `Stop` queues only new signal kinds and newly matched traps for the next hook tick. With Jev explicitly enabled, the next prompt instead uses three completed Throughline turns to judge repeated struggle and select up to three local knowledge search terms for an AND query.
 
 Claude receives Caveat reminders as `<system-reminder>` blocks and can use the
 MCP tools to search, record, and update entries. A primary Codex session uses
@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.19.8. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.19.9. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 

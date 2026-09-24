@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { openDb, upsertEntry } from '@caveat/core';
 import { candidateTerms, judgeStruggle, rankKnowledge, runJevStruggle, type ThroughlineContext, type ThroughlineTurn } from '../src/jevStruggle.js';
 import type { CliContext } from '../src/context.js';
 
@@ -60,7 +61,7 @@ describe('Jevの苦戦判定', () => {
     expect(selected).toBe(candidates[0]);
   });
 
-  it('同じ一回の問い合わせで苦戦と実在する検索語を選ぶ', async () => {
+  it('同じ一回の問い合わせで苦戦と最大3つの検索語を選ぶ', async () => {
     let calls = 0;
     const result = await judgeStruggle('dummy', turns(), async (_key, state, questions) => {
       calls++;
@@ -68,17 +69,67 @@ describe('Jevの苦戦判定', () => {
       expect(Object.keys(questions)).toEqual(['repeated_problem', 'clearly_stuck', 'search_term']);
       const options = (questions.search_term as { criteria: Record<string, string> }).criteria;
       expect(Object.values(options)).toContain('PyInstaller');
+      const probabilities = Object.fromEntries(Object.keys(options).map((key) => [key, 0]));
+      for (const [term, probability] of [['PyInstaller', 0.45], ['起動失敗', 0.3], ['起動問題', 0.18], ['やり直す', 0.04]] as const) {
+        probabilities[Object.entries(options).find(([, value]) => value === term)![0]] = probability;
+      }
+      probabilities.none = 0.03;
       const selected = Object.entries(options).find(([, term]) => term === 'PyInstaller')![0];
       return { answers: {
         repeated_problem: { type: 'noul', noul: 0.94 },
         clearly_stuck: { type: 'noul', noul: 0.91 },
-        search_term: { type: 'choice', choice: selected, probabilities: {}, confidence: 0.9 },
+        search_term: { type: 'choice', choice: selected, probabilities, confidence: 0.9 },
       } };
     });
     expect(calls).toBe(1);
-    expect(result).toEqual({ struggling: true, term: 'PyInstaller' });
+    expect(result).toEqual({ struggling: true, terms: ['PyInstaller', '起動失敗', '起動問題'] });
     expect(candidateTerms(turns())).toContain('PyInstaller');
     expect(candidateTerms([{ ...turns()[0]!, user: 'PyInstallerで起動失敗する' }])).toContain('PyInstaller');
+  });
+
+  it('Jevが選んだ3語をAND検索し、共通する知見だけを再判定する', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-jev-and-'));
+    roots.push(root);
+    const dbPath = join(root, 'index', 'caveat.db');
+    const db = openDb({ path: dbPath });
+    try {
+      for (const [id, title] of [['match', 'RangeError WebSocket workerd'], ['partial', 'RangeError WebSocket']] as const) {
+        const frontmatter = { id, title, environment: {}, updated_at: '2026-09-24' };
+        upsertEntry(db, {
+          id, source: 'own', path: `${id}.md`, title,
+          body: `## Symptom\n${title}\n\n## Resolution\n接続処理を修正する。`,
+          frontmatter_json: JSON.stringify(frontmatter), tags: '[]', confidence: 'reproduced',
+          visibility: 'private', file_mtime: '2026-09-24', indexed_at: '2026-09-24',
+        });
+      }
+    } finally { db.close(); }
+    const contextTurns = turns().map((turn) => ({
+      ...turn, user: 'workerd WebSocket RangeError', assistant: 'RangeError が続き、やり直す。', thinking: 'WebSocket の修正を再試行する。',
+    }));
+    const context: ThroughlineContext = { schema: 'throughline.caveat_context.v1', status: 'ready', turns: contextTurns, thinkingAvailable: true };
+    let calls = 0;
+    const notice = await runJevStruggle({ caveatHome: root, config: { jevEnabled: true }, paths: { dbPath } } as CliContext,
+      'claude', { session_id: 'session-and', transcript_path: '/example/session.jsonl', cwd: root }, {
+        readContext: () => context,
+        readKey: () => 'dummy',
+        ask: async (_key, state, questions) => {
+          calls++;
+          if (calls === 1) {
+            const options = (questions.search_term as { criteria: Record<string, string> }).criteria;
+            const probabilities = Object.fromEntries(Object.entries(options).map(([key, term]) =>
+              [key, ({ RangeError: 0.4, WebSocket: 0.3, workerd: 0.2, none: 0.1 } as Record<string, number>)[term] ?? 0]));
+            return { answers: {
+              repeated_problem: { type: 'noul', noul: 0.95 }, clearly_stuck: { type: 'noul', noul: 0.94 },
+              search_term: { type: 'choice', choice: Object.entries(options).find(([, term]) => term === 'RangeError')![0], probabilities, confidence: 0.6 },
+            } };
+          }
+          expect((state as { candidates: Array<{ title: string }> }).candidates.map((candidate) => candidate.title)).toEqual(['RangeError WebSocket workerd']);
+          expect(Object.keys(questions)).toEqual(['candidate_0']);
+          return { answers: { candidate_0: { type: 'noul', noul: 0.9 } } };
+        },
+      });
+    expect(calls).toBe(2);
+    expect(notice?.text).toContain('own/match');
   });
 
   it('知見候補がなくても一度だけ検索を促し、同じ3ターンでは再送しない', async () => {
@@ -94,12 +145,13 @@ describe('Jevの苦戦判定', () => {
     const deps = {
       readContext: () => context,
       readKey: () => 'dummy',
-      ask: async () => {
+      ask: async (_key: string, _state: unknown, questions: Record<string, unknown>) => {
         calls++;
+        const options = (questions.search_term as { criteria: Record<string, string> }).criteria;
         return { answers: {
           repeated_problem: { type: 'noul' as const, noul: 0.98 },
           clearly_stuck: { type: 'noul' as const, noul: 0.97 },
-          search_term: { type: 'choice' as const, choice: 'none', probabilities: { none: 1 }, confidence: 1 },
+          search_term: { type: 'choice' as const, choice: 'none', probabilities: Object.fromEntries(Object.keys(options).map((key) => [key, key === 'none' ? 1 : 0])), confidence: 1 },
         } };
       },
     };

@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.9] — 2026-09-24
+
+### 修正
+
+- Jevの1回の苦戦判定で得る検索語候補の確率から、最大3語を選ぶ。「該当語なし」より有力な語だけをCaveatのAND検索へ渡し、該当知見を再判定する。
+
 ## [0.19.8] — 2026-09-24
 
 ### 修正

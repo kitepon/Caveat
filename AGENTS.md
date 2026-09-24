@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, and
 
 ## プロジェクトの状態
 
-**v0.19.8**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
+**v0.19.9**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
 既存の`~/.caveatrc.json`で明示的に有効化し、製品文書とrelease gateはCaveat自身が所有する。
 
 **`docs/00_overview.md` が文書の入口、`docs/01_plan.md` が現行の製品契約**。
@@ -236,7 +236,7 @@ MCP stdio サーバは stdout に JSON-RPC 以外を書いてはいけない。`
   - `errorSnippets` / `searchQueries`: リマインダ本文 & FTS 用の raw text
 - **発火ゲート**: `hasAnyStruggleSignal(s)` = 上記 count のいずれか > 0 or fileEditCounts.length > 0。**閾値チューニング無し**の構造的 or 判定（「0 か 1 以上か」のみ）。tool failure 無・編集 1 回だけ・web 検索無しなら完全無音 → 単純編集セッションでリマインダ洪水を起こさない
 - **stop リマインダ本文**: シグナル具体数値を列挙（Y）。既存罠の候補化は各`errorSnippet`を独立した`surface: stop`入力として`findCaveatsForHookSegments`へ渡し、session内の別時点の`searchQueries`や別errorとの語の足し算では発火させない。`searchQueries`はreminder/advisoryの構造化文脈にだけ残す。既存罠に類似があれば`caveat_update`を、なければ`caveat_record`を促す（Z）。Stop hook 自体は stdout に出さず、session pending queue に積んで次の `UserPromptSubmit` / `PostToolUse` で表示する。同一 session / 同一 signal digest は再 enqueue しない
-- **Jev苦戦判定**: `caveat jev enable --key-stdin`で明示有効化する。Claude / CodexのUserPromptSubmitはThroughlineの公開`caveat-context`から完了3ターンを読み、1回のJev問い合わせで反復した未解決問題・明確な苦戦・ローカル検索語を得る。両苦戦スコアが0.85以上ならFTSの最大20件をJevで関連度判定し、0.85以上の原文対処だけを通知する。toolログとDB全件は送らない。Codexの暗号化Reasoningは取得しない。APIキーは`<caveatHome>/credentials/typesafe.key`が所有する。
+- **Jev苦戦判定**: `caveat jev enable --key-stdin`で明示有効化する。Claude / CodexのUserPromptSubmitはThroughlineの公開`caveat-context`から完了3ターンを読み、1回のJev問い合わせで反復した未解決問題・明確な苦戦・ローカル検索語を得る。両苦戦スコアが0.85以上なら、Choice確率が「該当語なし」を上回る上位最大3語をFTSのAND検索へ渡す。最大20件をJevで関連度判定し、0.8以上の原文対処だけを通知する。toolログとDB全件は送らない。Codexの暗号化Reasoningは取得しない。APIキーは`<caveatHome>/credentials/typesafe.key`が所有する。
 - **通知配送**: 同じセッションの`(source,id)`は一度だけ通知する。Stopシグナルは種類と新たな共起罠が変わった時だけ通知し、件数・経過時間だけでは再送しない。pendingは出力成功後に受領する。Jev有効時、Claude / Codexの旧UserPromptSubmit直接検索・PostToolUseエラー検索・Stop構造シグナル通知を止め、切替前のセッション保留通知は破棄する。全体向け同期通知は維持する。
 - **環境適用**: `environment.os`は記録時fingerprintであり、適用条件ではない。明示的な`environment.applies_to_os`のみを対象作業OSと照合し、対象OSが不明ならhost OSを使う。
 - **再帰防止**: `payload.stop_hook_active === true` の場合は stdout 空で即 exit（不変）
