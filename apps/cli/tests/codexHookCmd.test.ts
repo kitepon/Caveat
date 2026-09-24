@@ -41,7 +41,7 @@ describe('Codex hook output formatting', () => {
         process.execPath,
         ['--import', 'tsx', fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'codex-hook', name],
         { cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(payload), encoding: 'utf8',
-          timeout: CODEX_HOOK_CHILD_TIMEOUT_MS, env: { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome } },
+          timeout: CODEX_HOOK_CHILD_TIMEOUT_MS, env: { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome, USERPROFILE: userHome } },
       );
       const tool = run('post-tool-use', { session_id: 'sess-1', is_error: true, tool_name: 'Bash',
         tool_input: { command: 'pnpm install' }, tool_response: 'node-gyp build failed' });

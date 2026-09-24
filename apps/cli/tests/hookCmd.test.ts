@@ -51,11 +51,11 @@ describe('Claude hook output', () => {
       appendPendingReminder(caveatHome, '_global', '[caveat] 同期の通知');
       const tool = runHook('post-tool-use', { session_id: 'sess-1', hook_event_name: 'PostToolUseFailure',
         tool_name: 'Bash', tool_input: { command: 'pnpm install' }, error: 'node-gyp build failed' },
-      { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome });
+      { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome, USERPROFILE: userHome });
       expect(tool.status).toBe(0);
       expect(tool.stdout).toBe('');
       const prompt = runHook('user-prompt-submit', { session_id: 'sess-1', prompt: 'pnpm install node-gyp build failed' },
-        { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome });
+        { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome, USERPROFILE: userHome });
       expect(prompt.status).toBe(0);
       expect(prompt.stdout).toContain('同期の通知');
       expect(prompt.stdout).not.toContain('旧経路の罠');
