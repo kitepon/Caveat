@@ -82,6 +82,8 @@ Jevには1回の問い合わせで「同じ問題への試行が繰り返され�
 Jevへ送らず、最大20件の候補概要と3ターンを2回目の問い合わせへ渡して候補の直接関連性を判定する。
 関連度0.85以上の知見だけ原文の対処を短く通知する。候補が無い場合は一度だけ検索を促す。
 同じ完了ターンは再判定せず、通知済みの知見IDは同一セッションで再通知しない。
+Jev有効時はClaude / Codexの旧プロンプト直接検索とツールエラー検索を実行しない。
+切替前のセッション保留通知は破棄し、全体向け同期通知だけ配送する。Jev無効時は旧経路を維持する。
 
 この機能は3ターンの文脈と候補の概要をTypeSafe APIへ送る。APIキーはCaveat所有の
 `<caveatHome>/credentials/typesafe.key`に保存し、無効化は`caveat jev disable`、状態確認は
@@ -134,6 +136,7 @@ children launched by the hook also did not reliably leave pending reminders in
 real Codex runs. For that reason, Codex `PostToolUse` performs a bounded
 foreground lookup from `tool_input` + `tool_response` and writes the pending
 file before returning; the next `UserPromptSubmit` drains it.
+This legacy lookup runs only while Jev is disabled.
 終了コード0が明示されたツール結果は検索へ送らない。終了状態が得られない既存のBash payloadは
 症状一致による候補検索を維持し、終了コードが非0と判明した結果は失敗として扱う。
 

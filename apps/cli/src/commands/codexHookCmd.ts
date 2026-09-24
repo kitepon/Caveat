@@ -264,6 +264,7 @@ async function processCodexWorkerJob(
   job: CodexWorkerJob,
   opts: { waitForTranscript: boolean } = { waitForTranscript: true },
 ): Promise<void> {
+  if (buildContextSafely(CODEX_HOST)?.config.jevEnabled) return;
   if ((!job.topicText && !job.failureText) || !job.sessionId) return;
   let failureText = job.failureText;
   let knownError = job.knownError === true;
@@ -380,9 +381,9 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
   if (!sessionId) process.stderr.write('[caveat:codex-hook] missing session_id; pending drain disabled\n');
 
   if (name === 'user-prompt-submit') {
-    const pending = sessionId ? peekForSession(CODEX_HOST, sessionId) : null;
-    const contexts = pending?.contexts ?? [];
     const ctx = buildContextSafely(CODEX_HOST);
+    const pending = sessionId ? peekForSession(CODEX_HOST, sessionId, ctx?.config.jevEnabled === true) : null;
+    const contexts = pending?.contexts ?? [];
     let jevNotice: JevNotice | null = null;
     if (ctx?.config.jevEnabled) {
       try {
@@ -392,10 +393,10 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
         process.stderr.write(`[caveat:codex-hook] Jev判定に失敗: ${errorMessage(err)}\n`);
       }
     }
-    const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-    const hits = searchCaveatsSafely(CODEX_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
-    if (hits.length > 0) {
-      contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
+    if (ctx && !ctx.config.jevEnabled) {
+      const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+      const hits = searchCaveatsSafely(CODEX_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
+      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
     }
     if (ctx) {
       try {
@@ -412,6 +413,7 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
   }
 
   if (name === 'post-tool-use') {
+    if (buildContextSafely(CODEX_HOST)?.config.jevEnabled) process.exit(0);
     const job = buildCodexPostToolUseWorkerJob(payload);
     if (job) await processCodexWorkerJob(job, { waitForTranscript: false });
     process.exit(0);

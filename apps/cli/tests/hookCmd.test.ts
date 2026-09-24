@@ -39,6 +39,32 @@ function runHook(
 }
 
 describe('Claude hook output', () => {
+  it('Jev有効時は旧検索と保留罠を止め、全体通知だけ配送する', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-claude-jev-only-'));
+    const caveatHome = join(root, 'caveat-home');
+    const userHome = join(root, 'home');
+    try {
+      mkdirSync(userHome, { recursive: true });
+      writeFileSync(join(userHome, '.caveatrc.json'), JSON.stringify({ jevEnabled: true }));
+      mkdirSync(join(caveatHome, 'index', 'caveat.db'), { recursive: true });
+      appendPendingReminder(caveatHome, 'sess-1', '[caveat] 旧経路の罠');
+      appendPendingReminder(caveatHome, '_global', '[caveat] 同期の通知');
+      const tool = runHook('post-tool-use', { session_id: 'sess-1', hook_event_name: 'PostToolUseFailure',
+        tool_name: 'Bash', tool_input: { command: 'pnpm install' }, error: 'node-gyp build failed' },
+      { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome });
+      expect(tool.status).toBe(0);
+      expect(tool.stdout).toBe('');
+      const prompt = runHook('user-prompt-submit', { session_id: 'sess-1', prompt: 'pnpm install node-gyp build failed' },
+        { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome });
+      expect(prompt.status).toBe(0);
+      expect(prompt.stdout).toContain('同期の通知');
+      expect(prompt.stdout).not.toContain('旧経路の罠');
+      expect(prompt.stdout).not.toContain('新しく該当した罠');
+      expect(prompt.stderr).not.toContain('search error');
+      expect(drainPendingReminders(caveatHome, 'sess-1')).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }, 20_000);
+
   it('sweeps only stale, private worker job directories', () => {
     const testBase = mkdtempSync(join(tmpdir(), 'caveat-worker-test-'));
     const reserved = workerRoot(testBase);

@@ -27,6 +27,36 @@ function readFixture(name: string): Record<string, unknown> {
 }
 
 describe('Codex hook output formatting', () => {
+  it('Jev有効時は旧検索と保留罠を止め、全体通知だけ配送する', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-codex-jev-only-'));
+    const caveatHome = join(root, 'caveat-home');
+    const userHome = join(root, 'home');
+    try {
+      mkdirSync(userHome, { recursive: true });
+      writeFileSync(join(userHome, '.caveatrc.json'), JSON.stringify({ jevEnabled: true }));
+      mkdirSync(join(caveatHome, 'index', 'caveat.db'), { recursive: true });
+      appendPendingReminder(caveatHome, 'sess-1', '[caveat] 旧経路の罠');
+      appendPendingReminder(caveatHome, '_global', '[caveat] 同期の通知');
+      const run = (name: string, payload: Record<string, unknown>) => spawnSync(
+        process.execPath,
+        ['--import', 'tsx', fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'codex-hook', name],
+        { cwd: fileURLToPath(new URL('..', import.meta.url)), input: JSON.stringify(payload), encoding: 'utf8',
+          timeout: CODEX_HOOK_CHILD_TIMEOUT_MS, env: { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome } },
+      );
+      const tool = run('post-tool-use', { session_id: 'sess-1', is_error: true, tool_name: 'Bash',
+        tool_input: { command: 'pnpm install' }, tool_response: 'node-gyp build failed' });
+      expect(tool.status).toBe(0);
+      expect(tool.stderr).not.toContain('search error');
+      const prompt = run('user-prompt-submit', { session_id: 'sess-1', prompt: 'pnpm install node-gyp build failed' });
+      expect(prompt.status).toBe(0);
+      expect(prompt.stdout).toContain('同期の通知');
+      expect(prompt.stdout).not.toContain('旧経路の罠');
+      expect(prompt.stdout).not.toContain('新しく該当した罠');
+      expect(prompt.stderr).not.toContain('search error');
+      expect(drainPendingReminders(caveatHome, 'sess-1')).toEqual([]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }, CODEX_HOOK_E2E_TIMEOUT_MS);
+
   it('probes features from the requested Codex home', () => {
     expect(codexFeatureListEnv('/target/codex', { CODEX_HOME: '/wrong/home', KEEP: 'yes' }))
       .toMatchObject({ CODEX_HOME: '/target/codex', KEEP: 'yes' });

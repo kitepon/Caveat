@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.6] — 2026-09-24
+
+### 修正
+
+- Jev有効時のClaude・Codex Hookで、旧プロンプト直接検索とツールエラー検索を停止する。切替前に保留された罠通知も配送せず、Jevの苦戦判定・知見選別だけを自動通知に使う。全体向け同期通知と明示的なMCP検索は維持する。
+
 ## [0.19.5] — 2026-09-24
 
 ### 修正

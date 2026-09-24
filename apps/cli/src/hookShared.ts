@@ -156,7 +156,7 @@ export function drainForSession(host: HookHost, sessionId: string): string[] {
 
 export interface PeekedSessionReminders { contexts: string[]; paths: string[]; caveatHome: string | null }
 
-export function peekForSession(host: HookHost, sessionId: string): PeekedSessionReminders {
+export function peekForSession(host: HookHost, sessionId: string, discardSession = false): PeekedSessionReminders {
   const ctx = buildContextSafely(host);
   if (!ctx) return { contexts: [], paths: [], caveatHome: null };
   const local = peekPendingRemindersDetailed(ctx.caveatHome, sessionId);
@@ -164,7 +164,11 @@ export function peekForSession(host: HookHost, sessionId: string): PeekedSession
   for (const _failure of [...local.readFailures, ...global.readFailures]) {
     process.stderr.write(`${pendingCleanupFailureText(host)}\n`);
   }
-  const reminders = [...local.reminders, ...global.reminders];
+  if (discardSession) {
+    try { acknowledgePendingReminders(ctx.caveatHome, local.reminders.map(({ path }) => path)); }
+    catch (error: unknown) { process.stderr.write(`[${host.stderrTag}] pending reminder cleanup failed: ${errorMessage(error)}\n`); }
+  }
+  const reminders = discardSession ? global.reminders : [...local.reminders, ...global.reminders];
   return { contexts: reminders.map(({ text }) => text), paths: reminders.map(({ path }) => path), caveatHome: ctx.caveatHome };
 }
 

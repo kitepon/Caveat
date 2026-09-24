@@ -189,6 +189,7 @@ async function runWorker(workFile: string): Promise<void> {
     process.exit(0);
   }
   if (!job.failureText || !job.sessionId) process.exit(0);
+  if (buildContextSafely(CLAUDE_HOST)?.config.jevEnabled) process.exit(0);
 
   const hits = searchCaveatsSafely(CLAUDE_HOST, {
     topicText: job.topicText,
@@ -412,11 +413,10 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
   const payload = parsePayload(CLAUDE_HOST, raw);
   const sessionId = getSessionId(payload);
 
-  const pending = name === 'stop' ? null : peekForSession(CLAUDE_HOST, sessionId);
-  const contexts = pending?.contexts ?? [];
-
   if (name === 'user-prompt-submit') {
     const ctx = buildContextSafely(CLAUDE_HOST);
+    const pending = peekForSession(CLAUDE_HOST, sessionId, ctx?.config.jevEnabled === true);
+    const contexts = pending.contexts;
     let jevNotice: JevNotice | null = null;
     if (ctx?.config.jevEnabled) {
       try {
@@ -426,10 +426,10 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
         process.stderr.write(`[caveat:hook] Jev判定に失敗: ${errorMessage(err)}\n`);
       }
     }
-    const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-    const hits = searchCaveatsSafely(CLAUDE_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
-    if (hits.length > 0) {
-      contexts.push(userPromptSubmitReminderText(hits));
+    if (ctx && !ctx.config.jevEnabled) {
+      const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+      const hits = searchCaveatsSafely(CLAUDE_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
+      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits));
     }
     if (ctx) {
       try {
@@ -447,6 +447,9 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
 
   if (name === 'post-tool-use') {
     const ctx = buildContextSafely(CLAUDE_HOST);
+    if (ctx?.config.jevEnabled) process.exit(0);
+    const pending = peekForSession(CLAUDE_HOST, sessionId);
+    const contexts = pending.contexts;
     if (ctx) {
       try {
         const prepared = prepareSessionDelivery(ctx.caveatHome, sessionId, contexts);
