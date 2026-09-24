@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.8] — 2026-09-24
+
+### 修正
+
+- Jevへ渡す検索語候補をログの語分割から作る。日本語の3文字断片が候補枠を埋める問題を解消し、長いログの後半にある技術語も選択肢へ残す。
+
 ## [0.19.7] — 2026-09-24
 
 ### 修正

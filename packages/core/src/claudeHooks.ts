@@ -35,6 +35,7 @@ const CJK_CHAR = /[぀-ゟ゠-ヿ一-鿿ｦ-ﾟ]/;
 // entries. Require at least one kanji or katakana character in every
 // retained CJK trigram so that semantic content drives matches.
 const HIRAGANA_ONLY = /^[぀-ゟ]+$/;
+const SEARCH_WORD_SEGMENTER = new Intl.Segmenter('ja', { granularity: 'word' });
 
 function isCjkDominated(token: string): boolean {
   return CJK_CHAR.test(token);
@@ -96,8 +97,8 @@ function expandToken(token: string, group: number, out: PromptCandidate[]): void
 function stripFsPaths(s: string): string {
   return s
     .replace(/\\\\[^\s]+/g, ' ')
-    .replace(/(^|\s)[A-Za-z]:[\\/][^\s]*/g, '$1 ')
-    .replace(/(^|\s)\/(?:[^\s/]+\/)+[^\s/]*/g, '$1 ');
+    .replace(/(^|[\s=>"'(])[A-Za-z]:[\\/][^\s]*/g, '$1 ')
+    .replace(/(^|[\s=>"'(])\/(?:[^\s/]+\/)+[^\s/]*/g, '$1 ');
 }
 
 function buildPromptCandidates(prompt: string): PromptCandidate[] {
@@ -133,6 +134,31 @@ function buildPromptCandidates(prompt: string): PromptCandidate[] {
 export function extractPromptCandidates(prompt: unknown): string[] {
   if (typeof prompt !== 'string' || prompt.length === 0) return [];
   return buildPromptCandidates(prompt).map((c) => c.token);
+}
+
+// Jevに渡す検索語候補。prompt hook用の3文字断片は照合用なので流用しない。
+export function extractSearchWordCandidates(text: string): string[] {
+  const clean = stripFsPaths(text)
+    .replace(/(?<=[A-Za-z0-9])(?=[぀-ヿ一-鿿ｦ-ﾟ])|(?<=[぀-ヿ一-鿿ｦ-ﾟ])(?=[A-Za-z0-9])/gu, ' ');
+  const segments = [...SEARCH_WORD_SEGMENTER.segment(clean)]
+    .filter((part) => part.isWordLike);
+  const words: string[] = [];
+  for (let index = 0; index < segments.length; index++) {
+    const part = segments[index]!;
+    const pieces = part.segment.match(/[\p{L}\p{N}]+/gu) ?? [];
+    for (const piece of pieces) {
+      if (piece.length >= 3 && !isPureHiragana(piece)) words.push(piece);
+    }
+    if (CJK_CHAR.test(part.segment) && part.segment.length < 3) {
+      const next = segments[index + 1];
+      if (next && next.index === part.index + part.segment.length &&
+        CJK_CHAR.test(next.segment) && !isPureHiragana(part.segment) && !isPureHiragana(next.segment)) {
+        const joined = part.segment + next.segment;
+        if (joined.length >= 3 && !isPureHiragana(joined)) words.push(joined);
+      }
+    }
+  }
+  return words;
 }
 
 /**

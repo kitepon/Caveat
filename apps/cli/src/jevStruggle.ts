@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  environmentAppliesToTask, extractPromptCandidates, fingerprint, get, isWindows, markHit, openDb, search,
+  environmentAppliesToTask, extractSearchWordCandidates, fingerprint, get, isWindows, markHit, openDb, search,
   type GetResult, type SearchResult,
 } from '@caveat/core';
 import type { CliContext } from './context.js';
@@ -78,29 +78,24 @@ function choice(answer: Answer | undefined, allowed: Set<string>): string {
 }
 
 export function candidateTerms(turns: ThroughlineTurn[]): string[] {
-  const seen = new Set<string>();
-  const terms: string[] = [];
-  const groups = [...turns].reverse().map((turn) =>
-    [turn.user, turn.thinking, turn.assistant].flatMap((part) => extractPromptCandidates(
-      part.replace(/(?<=[A-Za-z0-9])(?=[\u3040-\u30ff\u3400-\u9fff])|(?<=[\u3040-\u30ff\u3400-\u9fff])(?=[A-Za-z0-9])/gu, ' '),
-    )));
-  const add = (term: string) => {
-    const key = term.toLocaleLowerCase();
-    if (seen.has(key) || terms.length >= MAX_TERMS) return;
-    seen.add(key);
-    terms.push(term);
-  };
-  for (const group of groups) {
-    let added = 0;
-    for (const term of group) {
-      const before = terms.length;
-      add(term);
-      if (terms.length > before) added++;
-      if (added === 12) break;
+  const found = new Map<string, { term: string; turns: Set<number>; last: number }>();
+  let position = 0;
+  for (let turnIndex = 0; turnIndex < turns.length; turnIndex++) {
+    const turn = turns[turnIndex]!;
+    for (const part of [turn.user, turn.thinking, turn.assistant]) {
+      for (const term of extractSearchWordCandidates(part)) {
+        const key = term.toLocaleLowerCase();
+        const item = found.get(key) ?? { term, turns: new Set<number>(), last: 0 };
+        item.turns.add(turnIndex);
+        item.last = position++;
+        found.set(key, item);
+      }
     }
   }
-  for (const group of groups) for (const term of group) add(term);
-  return terms;
+  return [...found.values()]
+    .sort((a, b) => b.turns.size - a.turns.size || b.last - a.last)
+    .slice(0, MAX_TERMS)
+    .map((item) => item.term);
 }
 
 export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: JevCall = callJev): Promise<{ struggling: boolean; term: string | null }> {

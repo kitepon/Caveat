@@ -19,6 +19,21 @@ function turns(): ThroughlineTurn[] {
 }
 
 describe('Jevの苦戦判定', () => {
+  it('長いログでも末尾の問題固有語を候補に残す', () => {
+    const longPrefix = Array.from({ length: 100 }, (_, index) => 'noise' + index).join(' ');
+    const context = turns();
+    context[2] = {
+      ...context[2]!,
+      user: longPrefix + ' cwd=/Users/kite/Developer/Caveat/src/main.ts workerdのWebSocketでRangeError',
+      thinking: 'workerdで同じ問題をやり直す',
+    };
+    const terms = candidateTerms(context);
+    expect(terms.length).toBeLessThanOrEqual(48);
+    expect(terms).toEqual(expect.arrayContaining(['workerd', 'WebSocket', 'RangeError']));
+    expect(terms).not.toContain('Users');
+    expect(terms).not.toContain('kite');
+  });
+
   it('関連度が閾値と等しい知見も採用する', async () => {
     const candidates = [{
       hit: { id: 'known-trap', source: 'own', title: '既知の罠', symptomExcerpt: '', environment: {} },

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   defaultSelfIdentityTokens,
   extractPromptCandidates,
+  extractSearchWordCandidates,
   findCaveatsForHook,
   findCaveatsForHookSegments,
   findCaveatsForPrompt,
@@ -119,6 +120,22 @@ describe('extractPromptCandidates', () => {
     const tokens = extractPromptCandidates('check src/foo.ts please');
     expect(tokens).toContain('src');
     expect(tokens).toContain('foo');
+  });
+});
+
+describe('extractSearchWordCandidates', () => {
+  it('日本語を語に分け、技術名をそのまま候補にする', () => {
+    const words = extractSearchWordCandidates('初期化失敗が続く。workerdのWebSocketでRangeErrorが出た。');
+    expect(words).toContain('初期化');
+    expect(words).toContain('workerd');
+    expect(words).toContain('WebSocket');
+    expect(words).toContain('RangeError');
+    expect(words).not.toContain('期化失');
+  });
+
+  it('設定文に埋め込まれた絶対パスを候補へ混ぜない', () => {
+    const words = extractSearchWordCandidates('cwd=/Users/kite/Developer/Caveat/src/main.ts workerd');
+    expect(words).toEqual(['cwd', 'workerd']);
   });
 });
 
