@@ -231,14 +231,16 @@ Expected:
 
 Use Haiku for cost control. Keep the fresh-install package, settings, MCP config,
 and `CAVEAT_HOME` under the temporary release root, but retain the invoking
-Claude user's `HOME`/`USER`/`LOGNAME`: an isolated `HOME` cannot reuse the
-user's keychain authentication. This is a release-only human smoke; CI runs
+Claude user's `HOME`/`USER`/`LOGNAME` and unset `CLAUDE_CONFIG_DIR` for the smoke:
+an isolated config directory cannot reuse the user's authentication. The explicit
+`--settings` and `--mcp-config` arguments keep the tested configuration isolated.
+This is a release-only human smoke; CI runs
 the separate fake CLI contract test and never invokes real Claude.
 
 ```bash
 repo=$(git rev-parse --show-toplevel)
 mkdir -p "$root/caveat-home"
-node "$repo/scripts/claude-fresh-session-smoke.mjs" \
+env -u CLAUDE_CONFIG_DIR node "$repo/scripts/claude-fresh-session-smoke.mjs" \
   --settings "$CLAUDE_CONFIG_DIR/settings.json" \
   --mcp-config "$CLAUDE_CONFIG_DIR/.claude.json" \
   --caveat-home "$root/caveat-home"
