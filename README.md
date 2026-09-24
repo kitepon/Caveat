@@ -350,9 +350,11 @@ cd apps/cli && corepack pnpm pack        # caveat-cli-<ver>.tgz
 npm install -g ./caveat-cli-<ver>.tgz    # now `caveat` is on PATH
 ```
 
-For npm releases, publish from `apps/cli` with `corepack pnpm publish`.
-Do not use `npm publish` directly; pnpm normalizes workspace dev dependencies
-in the packed manifest, while npm leaves `workspace:*` strings intact.
+For npm releases, push an annotated version tag after CI passes. The
+`publish-npm.yml` workflow packs `apps/cli` with pnpm and publishes that tarball
+through npm Trusted Publishing. Do not run `npm publish` on the workspace
+source; pnpm normalizes workspace dev dependencies in the packed manifest,
+while npm leaves `workspace:*` strings intact.
 Release work is not done at publish time: follow
 [`docs/04_release_checklist.md`](docs/04_release_checklist.md) through fresh npm
 install, Claude/Codex new-session smoke, Cursor install/diagnostics smoke, CI,

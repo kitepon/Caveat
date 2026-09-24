@@ -52,8 +52,9 @@ before publishing. `check:npm-pack` packs `apps/cli` with pnpm, fails if
 leak into the tarball, then installs the tarball with npm and verifies
 `caveat --version`. `check:docs` also reads npm's dry-run pack manifest and
 requires every relative link and image in packed Markdown to resolve inside
-that same tarball. Publish from `apps/cli` with pnpm; direct `npm publish` is
-forbidden because it can leave `workspace:*` strings in the packed manifest.
+that same tarball. Pack from `apps/cli` with pnpm. Direct `npm publish` of the
+workspace source is forbidden because it can leave `workspace:*` strings in the
+packed manifest; the release workflow publishes the checked pnpm tarball.
 Derive the release version from that package manifest in the same shell used
 for the remaining release commands.
 
@@ -63,11 +64,34 @@ corepack pnpm check:docs
 corepack pnpm check:npm-pack
 ```
 
+## npm Trusted Publishing (one-time setup)
+
+Before the first workflow release, register `kitepon/Caveat` and the exact
+workflow filename `publish-npm.yml` for `caveat-cli` on npm. Allow direct
+`npm publish`; the default staged-only permission will not publish a release.
+This registration needs one interactive npm 2FA approval. Afterward, the
+GitHub-hosted release workflow uses OIDC and needs no per-release npm approval
+or stored npm publish token. Run once with npm 11.15 or newer:
+
+```bash
+npm trust github caveat-cli --file publish-npm.yml --repo kitepon/Caveat --allow-publish
+npm trust list caveat-cli
+```
+
+The trust relation is bound to this workflow filename. Keep its filename and
+repository identity aligned with npm settings. The workflow uses a GitHub-hosted
+runner, `id-token: write`, Node 24 and npm 11.19.1. If trust setup is not yet
+complete, do not push a new release tag expecting publication to succeed.
+
+## Publish
+
 Commit and push `main`, then wait for that commit's CI. The CLI's
 `prepublishOnly` gate requires a clean release commit that is already an
-ancestor of `origin/main`, so both the publish dry-run and the real publish
-must run only after this landing step. Once CI is green, verify the publish
-payload, create and push the annotated tag, then publish:
+ancestor of `origin/main`; the workflow explicitly runs the same gate before
+packing because publishing a tarball need not run `prepublishOnly`. Once CI is
+green, verify the publish payload, then create and push the annotated tag. The
+tag push starts `.github/workflows/publish-npm.yml`, which builds and checks the
+pnpm tarball and publishes it with npm OIDC:
 
 ```bash
 git status --short --branch
@@ -76,12 +100,21 @@ gh run list --commit "$(git rev-parse HEAD)" --limit 5
 (cd apps/cli && corepack pnpm publish --dry-run)
 git tag -a "v$VERSION" -m "v$VERSION"
 git push origin "v$VERSION"
-(cd apps/cli && corepack pnpm publish)
+gh run list --workflow publish-npm.yml --limit 5
 ```
 
-公開は上記のように`apps/cli`内で実行する。固定pnpm 10は先頭の`--dir`や
-`--no-git-checks`をnpmへ渡すため、npm 12では余分な引数・未知の設定として失敗する。
-cleanなmainから、Git検査を有効にしたまま公開する。
+Workflowを追加する前にpush済みのタグは自動実行されない。信頼先登録後、
+既存タグは手動で1回実行し、完了とnpm登録版を確認する:
+
+```bash
+gh workflow run publish-npm.yml -f tag="v$VERSION"
+gh run list --workflow publish-npm.yml --limit 5
+npm view "caveat-cli@$VERSION" version
+```
+
+固定pnpm 10は先頭の`--dir`や`--no-git-checks`をnpmへ渡すため、npm 12では
+余分な引数・未知の設定として失敗する。Workflowはpnpm packで得たtarballを
+固定npm 11で公開し、タグの注釈・版一致・main祖先・clean treeを事前確認する。
 
 ## Published Package Smoke
 
