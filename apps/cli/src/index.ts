@@ -30,7 +30,7 @@ import { resolveHookNodePath } from './nodePath.js';
 import { resolveAgentConfigPaths } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrors } from './commands/runtimeErrors.js';
-import { disableJev, enableJev, jevStatus } from './commands/jev.js';
+import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -62,6 +62,14 @@ const jev = program.command('jev').description('Configure Jev struggle detection
 jev.command('enable').requiredOption('--key-stdin', 'read the TypeSafe API key from stdin').action(async () => { await enableJev(buildContext(stdoutLogger)); });
 jev.command('disable').action(() => { disableJev(buildContext(stdoutLogger)); });
 jev.command('status').action(() => { jevStatus(buildContext(stdoutLogger)); });
+jev.command('cases').requiredOption('--json', 'emit case records').action(() => { listJevCases(buildContext(stdoutLogger)); });
+jev.command('review <id> <verdict>')
+  .description('Review one case: correct | incorrect | missed | none | unclear')
+  .option('--note <text>', 'short reason for the verdict', '')
+  .action((id: string, verdict: string, opts: { note: string }) => {
+    if (!['correct', 'incorrect', 'missed', 'none', 'unclear'].includes(verdict)) throw new Error('jev_review_verdict_invalid');
+    reviewJevCase(buildContext(stdoutLogger), id, verdict as 'correct' | 'incorrect' | 'missed' | 'none' | 'unclear', opts.note);
+  });
 const parseLimit = (value: string) => { const parsed = parseCursor(value); if (parsed < 1 || parsed > 256) throw Error('invalid_limit'); return parsed; };
 runtimeErrors.command('snapshot').requiredOption('--json', 'emit JSON').option('--after-cursor <n>', 'cursor', parseCursor, 0).option('--limit <n>', 'limit', parseLimit, 256).action((opts: { afterCursor?: number; limit?: number }) => { process.stdout.write(`${JSON.stringify(runRuntimeErrors('snapshot', undefined, opts))}\n`); });
 for (const action of ['diagnostics', 'compact'] as const) runtimeErrors.command(action).requiredOption('--json', 'emit JSON').action(() => { process.stdout.write(`${JSON.stringify(runRuntimeErrors(action))}\n`); });

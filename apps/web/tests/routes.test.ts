@@ -4,11 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
+  jevObservationId,
   openDb,
   recordEntry,
   loadConfig,
   resolvePaths,
   type Logger,
+  writeJevObservation,
+  reviewJevObservation,
 } from '@caveat/core';
 import type { WebContext } from '../src/context.js';
 import { createApp } from '../src/app.js';
@@ -98,6 +101,33 @@ describe('web routes', () => {
       const html = await res.text();
       expect(html).toContain('RTX 5090 issue');
       expect(html).not.toContain('unrelated topic');
+    });
+  });
+
+  describe('GET /jev', () => {
+    it('集計の分母と案件の判定材料を表示する', async () => {
+      const id = jevObservationId('claude', 'session-1', 'session-1:3');
+      writeJevObservation(f.caveatHome, {
+        schema: 'caveat.jev_observation.v1', id, observedAt: '2026-09-24T00:00:00.000Z',
+        host: 'claude', sessionId: 'session-1', projectRoot: '/work', transcriptPath: '/work/transcript.jsonl',
+        turns: [1, 2, 3].map((turnNumber) => ({ originSessionId: 'session-1', turnNumber, truncated: false })),
+        thinkingAvailable: true, model: 'jev-1.13.0', repeatedProblem: 0.95, clearlyStuck: 0.91,
+        struggleThreshold: 0.85, struggling: true, termChoices: [{ term: 'workerd', probability: 0.6 }],
+        noneProbability: 0.1, selectedTerms: ['workerd'], query: 'workerd', ftsHits: ['own/known'],
+        candidates: [{ ref: 'own/known', score: 0.89 }], matchThreshold: 0.8, selectedRef: 'own/known',
+        noticeText: '[caveat] 関連知見: own/known 対処: 接続を修正',
+        decision: 'matched', delivery: 'delivered', review: null,
+      });
+      reviewJevObservation(f.caveatHome, id, 'correct', '症状一致');
+      const res = await f.app.request('/jev');
+      const html = await res.text();
+      expect(res.status).toBe(200);
+      expect(html).toContain('100%');
+      expect(html).toContain('1/1 件を評価');
+      expect(html).toContain('own/known 0.89');
+      expect(html).toContain('session-1 #3');
+      expect(html).toContain('/work/transcript.jsonl');
+      expect(html).toContain('症状一致');
     });
   });
 

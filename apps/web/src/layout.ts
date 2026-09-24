@@ -72,6 +72,15 @@ article code {
 }
 article pre code { background: transparent; padding: 0; }
 article a.wikilink { color: #0a5fff; background: #e6f0ff; padding: 0 0.25rem; border-radius: 2px; }
+.jev-metrics { display: flex; gap: 0.7rem; flex-wrap: wrap; margin: 1rem 0; }
+.jev-metrics div { flex: 1; min-width: 150px; padding: 0.7rem; background: #f4f7fb; border-radius: 4px; }
+.jev-metrics strong { display: block; font-size: 1.4rem; }
+.jev-metrics small { display: block; color: #666; }
+.jev-cases { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.jev-scroll { overflow-x: auto; }
+.jev-cases th, .jev-cases td { padding: 0.5rem; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.jev-cases code { font-size: 0.75rem; }
+.jev-cases pre { max-width: 700px; max-height: 420px; overflow: auto; }
 .meta-grid {
   display: grid;
   grid-template-columns: max-content 1fr;
@@ -121,6 +130,7 @@ export function layout(title: string, body: string): string {
     <a href="/?source=own">own</a>
     <a href="/?source=community">community</a>
     <a href="/community">community repos</a>
+    <a href="/jev">Jev検証</a>
   </nav>
 </header>
 ${body}

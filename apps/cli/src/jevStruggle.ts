@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import {
   environmentAppliesToTask, extractSearchWordCandidates, fingerprint, get, isWindows, markHit, openDb, search,
+  jevObservationId, updateJevDelivery, writeJevObservation, type JevObservation,
   type GetResult, type SearchResult,
 } from '@caveat/core';
 import type { CliContext } from './context.js';
@@ -112,7 +113,10 @@ export function candidateTerms(turns: ThroughlineTurn[]): string[] {
     .map((item) => item.term);
 }
 
-export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: JevCall = callJev): Promise<{ struggling: boolean; terms: string[] }> {
+export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: JevCall = callJev): Promise<{
+  struggling: boolean; terms: string[]; repeatedProblem: number; clearlyStuck: number;
+  termChoices: Array<{ term: string; probability: number }>; noneProbability: number | null;
+}> {
   const terms = candidateTerms(turns);
   const options = Object.fromEntries(terms.map((term, index) => [`term_${index}`, term]));
   const questions: Record<string, unknown> = {
@@ -125,16 +129,22 @@ export async function judgeStruggle(key: string, turns: ThroughlineTurn[], ask: 
     criteria: { ...options, none: 'No listed term would retrieve useful knowledge about this problem.' },
   };
   const response = await ask(key, { turns }, questions);
-  const struggling = noul(response.answers.repeated_problem) >= STRUGGLE_THRESHOLD &&
-    noul(response.answers.clearly_stuck) >= STRUGGLE_THRESHOLD;
-  if (!struggling || terms.length === 0) return { struggling, terms: [] };
-  return { struggling, terms: searchTermChoices(response.answers.search_term, terms) };
+  const repeatedProblem = noul(response.answers.repeated_problem);
+  const clearlyStuck = noul(response.answers.clearly_stuck);
+  const struggling = repeatedProblem >= STRUGGLE_THRESHOLD && clearlyStuck >= STRUGGLE_THRESHOLD;
+  const choice = terms.length > 0 ? response.answers.search_term : undefined;
+  const selected = terms.length > 0 ? searchTermChoices(choice, terms) : [];
+  const termChoices = terms.map((term, index) => ({ term, probability: (choice as ChoiceAnswer).probabilities[`term_${index}`]! }));
+  return { struggling, terms: struggling ? selected : [], repeatedProblem, clearlyStuck, termChoices,
+    noneProbability: choice ? (choice as ChoiceAnswer).probabilities.none! : null };
 }
 
 interface KnowledgeCandidate { hit: SearchResult; entry: GetResult }
 
-export async function rankKnowledge(key: string, turns: ThroughlineTurn[], candidates: KnowledgeCandidate[], ask: JevCall = callJev): Promise<KnowledgeCandidate | null> {
-  if (candidates.length === 0) return null;
+export async function rankKnowledge(key: string, turns: ThroughlineTurn[], candidates: KnowledgeCandidate[], ask: JevCall = callJev): Promise<{
+  selected: KnowledgeCandidate | null; scores: number[];
+}> {
+  if (candidates.length === 0) return { selected: null, scores: [] };
   const state = {
     turns,
     currentHostOs: fingerprint().os,
@@ -157,11 +167,13 @@ export async function rankKnowledge(key: string, turns: ThroughlineTurn[], candi
   const response = await ask(key, state, questions);
   let best: KnowledgeCandidate | null = null;
   let bestScore = MATCH_THRESHOLD;
+  const scores: number[] = [];
   for (let index = 0; index < candidates.length; index++) {
     const score = noul(response.answers[`candidate_${index}`]);
+    scores.push(score);
     if (score >= MATCH_THRESHOLD && (best === null || score > bestScore)) { best = candidates[index]!; bestScore = score; }
   }
-  return best;
+  return { selected: best, scores };
 }
 
 function quotePowerShell(value: string): string { return `'${value.replaceAll("'", "''")}'`; }
@@ -235,37 +247,67 @@ export async function runJevStruggle(
   const key = (deps.readKey ?? readJevKey)(ctx.caveatHome);
   const ask = deps.ask ?? callJev;
   const judgment = await judgeStruggle(key, context.turns, ask);
+  const observationId = jevObservationId(host, sessionId, turnKey);
+  const base: Omit<JevObservation, 'ftsHits' | 'candidates' | 'selectedRef' | 'noticeText' | 'decision' | 'delivery'> = {
+    schema: 'caveat.jev_observation.v1', id: observationId, observedAt: new Date().toISOString(),
+    host, sessionId, projectRoot, transcriptPath,
+    turns: context.turns.map(({ originSessionId, turnNumber, truncated }) => ({ originSessionId, turnNumber, truncated })),
+    thinkingAvailable: context.thinkingAvailable, model: MODEL,
+    repeatedProblem: judgment.repeatedProblem, clearlyStuck: judgment.clearlyStuck,
+    struggleThreshold: STRUGGLE_THRESHOLD, struggling: judgment.struggling,
+    termChoices: judgment.termChoices, noneProbability: judgment.noneProbability,
+    selectedTerms: judgment.terms, query: judgment.terms.join(' '), matchThreshold: MATCH_THRESHOLD,
+    review: null,
+  };
   state.lastTurn = turnKey;
-  if (!judgment.struggling) { saveState(ctx.caveatHome, sessionId, state); return null; }
+  if (!judgment.struggling) {
+    writeJevObservation(ctx.caveatHome, { ...base, ftsHits: [], candidates: [], selectedRef: null, noticeText: null,
+      decision: 'below_struggle_threshold', delivery: 'none' });
+    saveState(ctx.caveatHome, sessionId, state);
+    return null;
+  }
   let candidates: KnowledgeCandidate[] = [];
   const query = judgment.terms.join(' ');
+  let ftsHits: string[] = [];
   if (query) {
     if (!existsSync(ctx.paths.dbPath)) throw new Error('jev_knowledge_index_missing');
     const db = openDb({ path: ctx.paths.dbPath });
     try {
       const taskText = context.turns.map((turn) => `${turn.user}\n${turn.assistant}\n${turn.thinking}`).join('\n');
-      candidates = search(db, { query, limit: MAX_CANDIDATES })
+      const hits = search(db, { query, limit: MAX_CANDIDATES });
+      ftsHits = hits.map((hit) => `${hit.source}/${hit.id}`);
+      candidates = hits
         .filter((hit) => environmentAppliesToTask(hit.environment, taskText, fingerprint().os))
         .map((hit) => ({ hit, entry: get(db, hit.id, hit.source) }))
         .filter((item): item is KnowledgeCandidate => item.entry !== null)
         .filter((item) => Boolean(item.entry.sections.Resolution));
     } finally { db.close(); }
   }
-  const selected = await rankKnowledge(key, context.turns, candidates, ask);
+  const ranked = await rankKnowledge(key, context.turns, candidates, ask);
+  const selected = ranked.selected;
   const id = selected ? `${selected.hit.source}/${selected.hit.id}` : null;
   const term = query || '_none';
-  if (id && (state.deliveredIds.includes(id) || wasHitDelivered(ctx.caveatHome, sessionId, id)) || !id && state.notifiedTerms.includes(term)) {
+  const suppressed = Boolean(id && (state.deliveredIds.includes(id) || wasHitDelivered(ctx.caveatHome, sessionId, id)) || !id && state.notifiedTerms.includes(term));
+  const noticeText = reminder(selected);
+  writeJevObservation(ctx.caveatHome, { ...base, ftsHits,
+    candidates: candidates.map((candidate, index) => ({ ref: `${candidate.hit.source}/${candidate.hit.id}`, score: ranked.scores[index]! })),
+    selectedRef: id, noticeText: suppressed ? null : noticeText,
+    decision: id ? 'matched' : !query ? 'no_terms' : candidates.length === 0 ? 'no_candidates' : 'below_match_threshold',
+    delivery: suppressed ? 'suppressed' : 'pending',
+  });
+  if (suppressed) {
     saveState(ctx.caveatHome, sessionId, state);
     return null;
   }
   return {
-    text: reminder(selected),
+    text: noticeText,
     ref: id,
     delivered: () => {
       const current = loadState(ctx.caveatHome, sessionId);
       current.lastTurn = turnKey;
       if (id && !current.deliveredIds.includes(id)) current.deliveredIds.push(id);
       if (!id && !current.notifiedTerms.includes(term)) current.notifiedTerms.push(term);
+      updateJevDelivery(ctx.caveatHome, observationId);
       saveState(ctx.caveatHome, sessionId, current);
       if (selected) {
         const db = openDb({ path: ctx.paths.dbPath });

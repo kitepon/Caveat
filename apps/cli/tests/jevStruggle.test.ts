@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openDb, upsertEntry } from '@caveat/core';
+import { listJevObservations, openDb, reviewJevObservation, upsertEntry } from '@caveat/core';
 import { candidateTerms, judgeStruggle, rankKnowledge, runJevStruggle, type ThroughlineContext, type ThroughlineTurn } from '../src/jevStruggle.js';
 import type { CliContext } from '../src/context.js';
 
@@ -43,7 +43,8 @@ describe('Jevの苦戦判定', () => {
     const selected = await rankKnowledge('dummy', turns(), candidates, async () => ({
       answers: { candidate_0: { type: 'noul', noul: 0.8 } },
     }));
-    expect(selected).toBe(candidates[0]);
+    expect(selected.selected).toBe(candidates[0]);
+    expect(selected.scores).toEqual([0.8]);
   });
 
   it('記録時のOSと適用対象OSをJevに区別して渡す', async () => {
@@ -58,7 +59,7 @@ describe('Jevの苦戦判定', () => {
       expect(JSON.stringify(questions)).toContain('recordedEnvironment value is where the entry was observed, not a restriction');
       return { answers: { candidate_0: { type: 'noul', noul: 0.89 } } };
     });
-    expect(selected).toBe(candidates[0]);
+    expect(selected.selected).toBe(candidates[0]);
   });
 
   it('同じ一回の問い合わせで苦戦と最大3つの検索語を選ぶ', async () => {
@@ -82,7 +83,8 @@ describe('Jevの苦戦判定', () => {
       } };
     });
     expect(calls).toBe(1);
-    expect(result).toEqual({ struggling: true, terms: ['PyInstaller', '起動失敗', '起動問題'] });
+    expect(result).toMatchObject({ struggling: true, terms: ['PyInstaller', '起動失敗', '起動問題'],
+      repeatedProblem: 0.94, clearlyStuck: 0.91, noneProbability: 0.03 });
     expect(candidateTerms(turns())).toContain('PyInstaller');
     expect(candidateTerms([{ ...turns()[0]!, user: 'PyInstallerで起動失敗する' }])).toContain('PyInstaller');
   });
@@ -130,6 +132,19 @@ describe('Jevの苦戦判定', () => {
       });
     expect(calls).toBe(2);
     expect(notice?.text).toContain('own/match');
+    let observed = listJevObservations(root);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({
+      host: 'claude', selectedTerms: ['RangeError', 'WebSocket', 'workerd'],
+      ftsHits: ['own/match'], candidates: [{ ref: 'own/match', score: 0.9 }],
+      selectedRef: 'own/match', decision: 'matched', delivery: 'pending', review: null,
+    });
+    expect(observed[0]?.noticeText).toContain('接続処理を修正する');
+    expect(observed[0]?.turns.map((turn) => turn.turnNumber)).toEqual([1, 2, 3]);
+    notice?.delivered();
+    observed = listJevObservations(root);
+    expect(observed[0]?.delivery).toBe('delivered');
+    expect(reviewJevObservation(root, observed[0]!.id, 'correct', '症状と対処が一致').review?.verdict).toBe('correct');
   });
 
   it('知見候補がなくても一度だけ検索を促し、同じ3ターンでは再送しない', async () => {
@@ -162,5 +177,33 @@ describe('Jevの苦戦判定', () => {
     notice?.delivered();
     expect(await runJevStruggle(ctx, 'claude', payload, deps)).toBeNull();
     expect(calls).toBe(2);
+    const observed = listJevObservations(root);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({ decision: 'no_terms', delivery: 'delivered', selectedRef: null });
+    expect(reviewJevObservation(root, observed[0]!.id, 'none').review?.verdict).toBe('none');
+  });
+
+  it('苦戦判定で落ちた3ターンも点数と元ターン参照を残す', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-jev-silent-'));
+    roots.push(root);
+    const context: ThroughlineContext = { schema: 'throughline.caveat_context.v1', status: 'ready', turns: turns(), thinkingAvailable: true };
+    const payload = { session_id: 'session-silent', transcript_path: '/example/session.jsonl', cwd: root };
+    const ctx = { caveatHome: root, config: { jevEnabled: true }, paths: { dbPath: join(root, 'missing.db') } } as CliContext;
+    const notice = await runJevStruggle(ctx, 'codex', payload, {
+      readContext: () => context, readKey: () => 'dummy',
+      ask: async (_key, _state, questions) => ({ answers: {
+        repeated_problem: { type: 'noul', noul: 0.84 }, clearly_stuck: { type: 'noul', noul: 0.92 },
+        search_term: { type: 'choice', choice: 'none', confidence: 1,
+          probabilities: Object.fromEntries(Object.keys((questions.search_term as { criteria: Record<string, string> }).criteria)
+            .map((key) => [key, key === 'none' ? 1 : 0])) },
+      } }),
+    });
+    expect(notice).toBeNull();
+    const [item] = listJevObservations(root);
+    expect(item).toMatchObject({ host: 'codex', repeatedProblem: 0.84, clearlyStuck: 0.92,
+      decision: 'below_struggle_threshold', delivery: 'none', query: '', noticeText: null });
+    expect(item?.turns).toHaveLength(3);
+    expect(reviewJevObservation(root, item!.id, 'missed', '適切な知見あり').review?.verdict).toBe('missed');
+    expect(() => reviewJevObservation(root, item!.id, 'correct')).toThrow('jev_review_verdict_invalid');
   });
 });

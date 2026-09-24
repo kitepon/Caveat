@@ -76,9 +76,16 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.19.9. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.19.10. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
+
+With Jev enabled, Caveat stores each completed three-turn judgment, search terms,
+candidate scores, and delivery outcome locally under `<caveatHome>/jev-observations/`.
+Run `caveat serve` and open `/jev` to inspect cases and reviewed accuracy. Use
+`caveat jev review <case-id> correct|incorrect|missed|none|unclear --note "reason"`
+to label a case. Caveat stores references to the source turns rather than copying
+their conversation text.
 
 <details>
 <summary><strong>Why no central shared DB?</strong> (v0.7 pivot)</summary>

@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { writeUserConfigPatch } from '@caveat/core';
+import { listJevObservations, reviewJevObservation, writeUserConfigPatch, type JevReviewVerdict } from '@caveat/core';
 import type { CliContext } from '../context.js';
 import { readStdin } from '../hookShared.js';
 import { jevKeyPath, writeJevKey } from '../jevCredential.js';
@@ -28,4 +28,13 @@ export function jevStatus(ctx: CliContext): void {
     enabled: ctx.config.jevEnabled,
     credential: existsSync(jevKeyPath(ctx.caveatHome)) ? 'present' : 'missing',
   })}\n`);
+}
+
+export function listJevCases(ctx: CliContext): void {
+  process.stdout.write(`${JSON.stringify({ schema: 'caveat.jev_cases.v1', cases: listJevObservations(ctx.caveatHome) })}\n`);
+}
+
+export function reviewJevCase(ctx: CliContext, id: string, verdict: JevReviewVerdict, note: string): void {
+  const item = reviewJevObservation(ctx.caveatHome, id, verdict, note);
+  process.stdout.write(`${JSON.stringify({ id: item.id, review: item.review })}\n`);
 }

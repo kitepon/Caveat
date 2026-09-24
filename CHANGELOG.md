@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.10] — 2026-09-24
+
+### 追加
+
+- Jevの各3ターン判定について点数、検索語、候補、通知文、配送状態と元セッション参照を端末内に保存する。通知しなかった判定も残し、レビューCLIとWeb画面で提案の正誤と取りこぼしを評価できるようにする。
+
 ## [0.19.9] — 2026-09-24
 
 ### 修正

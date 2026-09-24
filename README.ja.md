@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.19.9。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.19.10。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -135,6 +135,7 @@ flowchart LR
 - Cursor primary hook adapter は`~/.cursor/hooks.json`へ`beforeSubmitPrompt` / `postToolUse` /
   `postToolUseFailure` / `stop`をupsertし、無関係なhookを保持します
 - `caveat jev enable --key-stdin`で有効化すると、完了3ターンから苦戦と検索語をJevが判定します。候補から選んだ最大3語をAND検索し、絞った知見だけを再判定します。APIキーはCaveatのprivateなcredentialsディレクトリで管理します
+- 判定ごとの点数・検索語・候補・通知文・配送状態は`<caveatHome>/jev-observations/`に端末内保存します。`caveat serve`の`/jev`で集計と案件を確認し、`caveat jev review <案件ID> correct|incorrect|missed|none|unclear --note "理由"`で正誤を記録します。元の3ターンの本文は複製せず、セッションとターン番号を参照します
 
 ## クイックスタート（NPM ユーザ）
 
