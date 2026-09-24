@@ -25,7 +25,7 @@ describe('Jevの苦戦判定', () => {
       entry: { sections: { Cause: '原因', Resolution: '対処' } },
     }] as unknown as Parameters<typeof rankKnowledge>[2];
     const selected = await rankKnowledge('dummy', turns(), candidates, async () => ({
-      answers: { candidate_0: { type: 'noul', noul: 0.85 } },
+      answers: { candidate_0: { type: 'noul', noul: 0.8 } },
     }));
     expect(selected).toBe(candidates[0]);
   });

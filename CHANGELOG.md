@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.7] — 2026-09-24
+
+### 修正
+
+- Jevが検索した知見を提案する関連度の閾値を0.85から0.80へ下げる。苦戦判定の閾値は維持する。
+
 ## [0.19.6] — 2026-09-24
 
 ### 修正

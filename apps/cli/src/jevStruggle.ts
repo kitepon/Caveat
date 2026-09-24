@@ -13,7 +13,7 @@ import { wasHitDelivered } from './hookDelivery.js';
 const MODEL = 'jev-1.13.0';
 const API_URL = 'https://api.typesafe.ai/v1/systemone';
 const STRUGGLE_THRESHOLD = 0.85;
-const MATCH_THRESHOLD = 0.85;
+const MATCH_THRESHOLD = 0.8;
 const MAX_TERMS = 48;
 const MAX_CANDIDATES = 20;
 
