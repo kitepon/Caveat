@@ -49,7 +49,7 @@ program
   .requiredOption('--json', 'emit the versioned JSON contract')
   .option('--require-connector <name>', 'include a connector in overall readiness (repeatable)', collectRepeatable, [])
   .action((opts: { json: boolean; requireConnector: string[] }) => {
-    const unsupported = opts.requireConnector.filter((name) => name !== 'cursor');
+    const unsupported = opts.requireConnector.filter((name) => name !== 'cursor' && name !== 'grok');
     if (unsupported.length > 0) throw new Error(`unsupported factory connector: ${unsupported.join(', ')}`);
     const requiredConnectors = [...new Set(opts.requireConnector)] as FactoryConnector[];
     const output = factoryDiagnostics(buildContext(stdoutLogger), undefined, requiredConnectors);

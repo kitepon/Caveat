@@ -66,6 +66,9 @@ output also exposes `connectors.cursor.compatibility_status` for diagnosis,
 but callers do not duplicate Caveat's Cursor event set, command rules, or
 timeout checks. Without `--require-connector cursor`, the v1 aggregate keeps
 its existing Claude/Codex readiness semantics.
+For Grok, use `caveat factory-diagnostics --json --require-connector grok` to
+check the enabled Caveat MCP registration and executable paths. A live MCP and
+model smoke remain separate checks.
 
 With either host enabled, Caveat surfaces matching entries at three moments:
 before prompts, after failed tools, and after struggle-heavy sessions. Stop
@@ -87,6 +90,8 @@ caveat uninstall                    # reverse `caveat init` Claude integration
 caveat codex-hook diagnostics       # inspect Codex hook availability/install state
 caveat factory-diagnostics --json --require-connector cursor
                                     # machine gate for a host that requires Cursor
+caveat factory-diagnostics --json --require-connector grok
+                                    # machine gate for a host that requires Grok MCP
 ```
 
 ## Sharing: two boundaries, two commands

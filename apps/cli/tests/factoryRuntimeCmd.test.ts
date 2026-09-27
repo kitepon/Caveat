@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb, recordRuntimeError, runtimeErrorsConfigPath, runtimeErrorsStatePath } from '@caveat/core';
+import { stringify as stringifyToml } from 'smol-toml';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const cli = join(repo, 'apps', 'cli', 'dist', 'caveat.js');
@@ -25,7 +26,7 @@ function isolated() {
   const configHome = join(root, 'xdg-config'); const stateHome = join(root, 'xdg-state'); const localAppData = join(root, 'local-app-data');
   mkdirSync(home, { recursive: true }); mkdirSync(caveatHome, { recursive: true });
   const codexHome = join(root, 'codex');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: localAppData, CAVEAT_HOME: caveatHome, CODEX_HOME: codexHome, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, PATH: process.env.PATH ?? '' };
+  const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: localAppData, CAVEAT_HOME: caveatHome, CODEX_HOME: codexHome, GROK_HOME: join(root, 'grok'), XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, PATH: process.env.PATH ?? '' };
   const runtimeConfig = runtimeErrorsConfigPath(env);
   mkdirSync(dirname(runtimeConfig), { recursive: true });
   writeFileSync(runtimeConfig, JSON.stringify({ runtimeErrors: true }));
@@ -53,7 +54,35 @@ function readyCursor(fixture: ReturnType<typeof isolated>) {
   const cursorDir = join(fixture.home, '.cursor'); mkdirSync(cursorDir, { recursive: true }); writeFileSync(join(cursorDir, 'hooks.json'), JSON.stringify({ version: 1, hooks: { beforeSubmitPrompt: [cursorHook('user-prompt-submit')], postToolUse: [cursorHook('post-tool-use')], postToolUseFailure: [cursorHook('post-tool-use')], stop: [cursorHook('stop')] } }));
 }
 
-describe('built factory/runtime CLI contracts', { timeout: process.platform === 'win32' ? 30_000 : 5_000 }, () => {
+function readyGrok(fixture: ReturnType<typeof isolated>) {
+  const grokHome = fixture.env.GROK_HOME!;
+  mkdirSync(grokHome, { recursive: true });
+  const configPath = join(grokHome, 'config.toml');
+  writeFileSync(configPath, stringifyToml({ mcp_servers: { caveat: {
+    command: process.execPath,
+    args: ['--disable-warning=ExperimentalWarning', cli, 'mcp-server'],
+    enabled: true,
+  } } }));
+  return configPath;
+}
+
+describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
+  it('Grok MCPを任意の必須connectorとして判定し、無効化と偽の実行先を拒否する', () => {
+    const fixture = isolated(); readyFactory(fixture);
+    const missing = run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env);
+    expect(json(missing)).toMatchObject({ overall: { status: 'not_ready' }, connectors: { grok: { mcp: { reason_code: 'not_registered' } } } });
+    const configPath = readyGrok(fixture);
+    const ready = run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env);
+    expect(ready.status).toBe(0);
+    expect(json(ready)).toMatchObject({ overall: { status: 'ready' }, connectors: { grok: { status: 'ready' } } });
+    const config = { mcp_servers: { caveat: { command: process.execPath, args: ['--disable-warning=ExperimentalWarning', cli, 'mcp-server'], enabled: false } } };
+    writeFileSync(configPath, stringifyToml(config));
+    expect(json(run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env))).toMatchObject({ connectors: { grok: { mcp: { reason_code: 'disabled' } } } });
+    config.mcp_servers.caveat.enabled = true;
+    config.mcp_servers.caveat.args[2] = 'not-mcp-server';
+    writeFileSync(configPath, stringifyToml(config));
+    expect(json(run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env))).toMatchObject({ overall: { status: 'not_ready' }, connectors: { grok: { mcp: { reason_code: 'not_registered' } } } });
+  });
   it('独自のClaude・Cursor設定先を導入と同じ場所で診断する', () => {
     const fixture = isolated(); readyFactory(fixture); readyCursor(fixture);
     const claudeDir = join(fixture.root, 'claude-custom');

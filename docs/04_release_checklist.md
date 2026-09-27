@@ -6,6 +6,11 @@ checks for Claude/Codex/Cursor and the available new-session host smokes.
 
 MCP登録はGrokも含めて確認する。`caveat init`を隔離した設定先で二度実行し、Claude / Codex /
 Grokの公開CLIによる読戻し、CursorのJSON、登録したcommandによるMCP接続と検索を確認する。
+Grokの必須判定は`caveat factory-diagnostics --json --require-connector grok`で行い、
+`grok mcp doctor caveat --json`でハンドシェイクとツール検出を見る。AitermのComposerは
+`grok-cli`と`grok-composer-2.5-fast`で実際にCaveatを呼ぶ。モデルの認証・回答結果は
+登録診断と分けて記録する。指定モデルが`grok models`に無ければComposerは失敗とし、
+別のGrokモデルやCursorのComposerで代用しない。
 既存の環境変数・timeout・無効化指定・別サーバーが保持され、不正な既存設定は変更されず失敗すること。
 
 公開版の実機導入は永続PTYから実行する。作業中の端末はローカルで、別端末はSSHで接続する。

@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.19.10。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.19.11。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -196,6 +196,8 @@ diagnosticsはCodex hook runtimeが使えるかと、Caveat-owned hooksがinstal
 呼出し側は`schema`を検証してtop-levelの`overall.status`とexit statusだけでgateを判定します。
 必要hook集合、command形、timeoutはCaveatが所有し、`~/.cursor/hooks.json`やhook別fieldを外側で
 再解釈しません。
+Grokを必須とする環境では`caveat factory-diagnostics --json --require-connector grok`を使います。
+有効なMCP登録と実行先を判定します。接続とモデルからの呼び出しは実機で別に確認してください。
 
 ### runtime errorの診断（明示opt-in）
 

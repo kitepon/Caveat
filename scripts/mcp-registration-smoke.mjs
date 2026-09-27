@@ -23,6 +23,7 @@ for (const [client, path, format, key] of targets) {
   const source = readFileSync(path, 'utf8');
   const config = (format === 'toml' ? parse(source) : JSON.parse(source))[key]?.caveat;
   assert.ok(config, `${client}: Caveat登録がありません`);
+  assert.ok(config.enabled === undefined || config.enabled === true, `${client}: Caveat登録が無効です`);
   const child = spawn(config.command, config.args, {
     env: { ...process.env, ...config.env }, stdio: ['pipe', 'pipe', 'pipe'],
   });

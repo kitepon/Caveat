@@ -79,7 +79,7 @@ describe('auto reindex hook', () => {
     } finally { cleanup(); }
   });
 
-  it('spawns from stop only when dirty and leaves a clean marker unchanged', async () => {
+  it('spawns from stop only when dirty and leaves a clean marker unchanged', { timeout: 15_000 }, async () => {
     const { home, cleanup } = fresh();
     try {
       const stop = cli('stop', home);

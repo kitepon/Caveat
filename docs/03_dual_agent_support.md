@@ -64,6 +64,9 @@ Reminderの検索結果と発火判定はhost間で共有するが、次の操�
 NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録を保持する。
 `CODEX_HOME` / `GROK_HOME` / `CURSOR_HOME`で設定先を変更でき、Claudeは`CLAUDE_CONFIG_DIR`を使う。
 Grokは設定ディレクトリがある場合のMCP登録だけを追加し、hook契約は増やさない。
+`caveat factory-diagnostics --json --require-connector grok`は登録が有効で、NodeとCaveat CLIの
+実行先が正規形であることを判定する。MCPハンドシェイクとモデル実行は実機smokeで確認する。
+ComposerはAitermでGrok CLIへ`grok-composer-2.5-fast`を指定する経路で、MCP登録はGrokと共通。
 
 CodexのMCP登録はCLIまたは設定ディレクトリが存在する場合に行う。hook導入の可用性判定と
 明示的な拒否は維持する。設定先は`installShared.ts`で解決し、初期化・解除・診断が共用する。

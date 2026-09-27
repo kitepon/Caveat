@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.19.10. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.19.11. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -171,7 +171,7 @@ apps/cli/             caveat-cli (published to npm) — bundled CLI with subcomm
                         stats / serve / mcp-server / hook <name> / community add|pull|list /
                         codex-hook install|uninstall|diagnostics|... /
                         cursor-hook install|uninstall|diagnostics|... /
-                        factory-diagnostics [--require-connector cursor] /
+                        factory-diagnostics [--require-connector cursor|grok] /
                         jev enable|disable|status
 apps/mcp/             @caveat/mcp — stdio MCP server exposing 6 tools via
                       @modelcontextprotocol/sdk. Imported by caveat-cli as `mcp-server`
@@ -259,6 +259,9 @@ non-ready and the command exit non-zero. Consumers validate `schema`, then use
 only top-level `overall.status` and the exit status for the gate. Caveat owns
 the required Cursor hook set, command shape, and timeout; callers do not
 reconstruct those details from `~/.cursor/hooks.json` or the per-hook fields.
+For a Grok host, use `caveat factory-diagnostics --json --require-connector grok`.
+This checks the enabled MCP registration and its executable paths. Run an MCP
+connection smoke and a model session separately to verify live use.
 
 ### Runtime error diagnostics (explicit opt-in)
 
