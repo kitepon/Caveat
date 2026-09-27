@@ -2,7 +2,7 @@ import { constants, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from '@caveat/core';
 import { claudeMcpConfigPath, commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup } from './installShared.js';
-import { installMcpClient, uninstallMcpClient } from './mcpInstall.js';
+import { installMcpClient, isCaveatStdioMcpRegistration, uninstallMcpClient } from './mcpInstall.js';
 
 export interface ClaudeInstallOptions {
   claudeDir: string;
@@ -135,9 +135,7 @@ export function isCaveatClaudeMcpRegistration(value: unknown, nodePath: string, 
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
   const server = value as Record<string, unknown>;
   return ['args', 'command', 'env', 'type'].every((key) => Object.hasOwn(server, key))
-    && server.type === 'stdio' && isCanonicalAsset(server.command, nodePath, constants.X_OK) && Array.isArray(server.args)
-    && server.args.length === 3 && server.args[0] === '--disable-warning=ExperimentalWarning'
-    && isCanonicalAsset(server.args[1], cliScriptPath, constants.R_OK) && server.args[2] === 'mcp-server'
+    && server.type === 'stdio' && isCaveatStdioMcpRegistration(server, nodePath, cliScriptPath)
     && server.env !== null && typeof server.env === 'object' && !Array.isArray(server.env) && Object.values(server.env).every((value) => typeof value === 'string');
 }
 

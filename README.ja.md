@@ -196,6 +196,8 @@ diagnosticsはCodex hook runtimeが使えるかと、Caveat-owned hooksがinstal
 呼出し側は`schema`を検証してtop-levelの`overall.status`とexit statusだけでgateを判定します。
 必要hook集合、command形、timeoutはCaveatが所有し、`~/.cursor/hooks.json`やhook別fieldを外側で
 再解釈しません。
+Grokを必須とする環境では`caveat factory-diagnostics --json --require-connector grok`を使います。
+有効なMCP登録と実行先を判定します。接続とモデルからの呼び出しは実機で別に確認してください。
 
 ### runtime errorの診断（明示opt-in）
 

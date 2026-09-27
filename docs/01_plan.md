@@ -51,6 +51,9 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
   `caveat factory-diagnostics --json --require-connector cursor`を使う。Caveatが
   `connectors.cursor.compatibility_status`とoverall、exitを決める。呼出し側はschemaとtop-level
   `overall.status`、exitだけで合否を決め、Cursorのhook名、必要集合、command、timeoutを複製しない。
+- Grokを必須とするhostは`caveat factory-diagnostics --json --require-connector grok`を使う。
+  `connectors.grok.mcp`は登録の有無、有効状態、実行先の正規性を診断する。ComposerもGrok CLIの
+  MCP登録を使うが、モデル認証と回答は実機smokeで別に確認する。
 
 詳細なhost契約は[`03_dual_agent_support.md`](03_dual_agent_support.md)、利用手順は
 [`../README.md`](../README.md)と[`../README.ja.md`](../README.ja.md)を正とする。

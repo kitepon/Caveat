@@ -9,9 +9,10 @@ import { diagnoseCursorHookConnector } from '../cursorInstall.js';
 import type { CliContext } from '../context.js';
 import { CAVEAT_VERSION } from '../version.js';
 import { resolveAgentConfigPaths } from '../installShared.js';
+import { isCaveatStdioMcpRegistration } from '../mcpInstall.js';
 
 type Status = 'ready' | 'not_ready' | 'unverified';
-export type FactoryConnector = 'cursor';
+export type FactoryConnector = 'cursor' | 'grok';
 const status = (ok: boolean, reason: string): { status: Status; reason_code: string } => ({ status: ok ? 'ready' : 'not_ready', reason_code: ok ? 'ready' : reason });
 const unverified = (reason: string): { status: Status; reason_code: string } => ({ status: 'unverified', reason_code: reason });
 function hook(present: boolean) { return status(present, 'not_installed'); }
@@ -24,6 +25,18 @@ function claudeRegistration(path: string, nodePath: string, cliScriptPath: strin
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (!isRecord(value) || !isRecord(value.mcpServers)) return status(false, 'not_registered');
     return status(isCaveatClaudeMcpRegistration(value.mcpServers.caveat, nodePath, cliScriptPath), 'not_registered');
+  } catch { return unverified('config_unreadable'); }
+}
+function grokRegistration(path: string, nodePath: string, cliScriptPath: string) {
+  if (!existsSync(path)) return status(false, 'not_registered');
+  try {
+    const config: unknown = parseToml(readFileSync(path, 'utf8'));
+    if (!isRecord(config) || !isRecord(config.mcp_servers)) return status(false, 'not_registered');
+    const server = config.mcp_servers.caveat;
+    if (!isRecord(server)) return status(false, 'not_registered');
+    if (server.enabled === false) return status(false, 'disabled');
+    if (server.enabled !== undefined && server.enabled !== true) return unverified('config_invalid');
+    return status(isCaveatStdioMcpRegistration(server, nodePath, cliScriptPath), 'not_registered');
   } catch { return unverified('config_unreadable'); }
 }
 function claudeHooks(claudeDir: string, nodePath: string, cliScriptPath: string) {
@@ -85,16 +98,18 @@ export function factoryDiagnostics(
   codexHome = resolveAgentConfigPaths(ctx.userHome).codexHome,
   requiredConnectors: readonly FactoryConnector[] = [],
 ) {
-  const { claudeDir, claudeMcp, cursorDir } = resolveAgentConfigPaths(ctx.userHome);
+  const { claudeDir, claudeMcp, cursorDir, grokHome } = resolveAgentConfigPaths(ctx.userHome);
   const nodePath = process.execPath; const cliScriptPath = process.argv[1] ?? '';
   const db = database(ctx.paths.dbPath); const feature = codexFeature(codexHome); let installedCodexHooks: { userPromptSubmit: boolean; postToolUse: boolean; stop: boolean } | null = null; try { installedCodexHooks = codexHooks(codexHome, nodePath, cliScriptPath); } catch {}
   const codexHook = (present: boolean | undefined) => present === undefined ? unverified('config_unreadable') : !present ? hook(false) : feature.status === 'ready' ? hook(true) : { ...feature };
-  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(claudeMcp, nodePath, cliScriptPath), hooks: claudeHooks(claudeDir, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(cursorDir, nodePath, cliScriptPath) } };
+  const grokMcp = grokRegistration(join(grokHome, 'config.toml'), nodePath, cliScriptPath);
+  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(claudeMcp, nodePath, cliScriptPath), hooks: claudeHooks(claudeDir, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(cursorDir, nodePath, cliScriptPath), grok: { status: grokMcp.status, mcp: grokMcp } } };
   const aggregate = (all: Status[]): Status => all.includes('not_ready') ? 'not_ready' : all.includes('unverified') ? 'unverified' : 'ready';
   const connectorStatus = (connector: { mcp?: { status: Status }; hooks: Record<string, { status: Status }> }): Status => aggregate([...Object.values(connector.hooks), ...(connector.mcp ? [connector.mcp] : [])].map((v) => v.status));
   output.connectors.claude.status = connectorStatus(output.connectors.claude); output.connectors.codex.status = connectorStatus(output.connectors.codex);
   const statuses = [output.database.status, output.sync.status, output.connectors.claude.status, output.connectors.codex.status];
   if (requiredConnectors.includes('cursor')) statuses.push(output.connectors.cursor.compatibility_status);
+  if (requiredConnectors.includes('grok')) statuses.push(output.connectors.grok.status);
   output.overall.status = aggregate(statuses);
   return output;
 }

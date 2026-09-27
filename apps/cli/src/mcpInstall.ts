@@ -1,9 +1,20 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { constants, existsSync, readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { parse, stringify } from 'smol-toml';
-import { writeFileWithBackup } from './installShared.js';
+import { isCanonicalAsset, writeFileWithBackup } from './installShared.js';
 
 export type McpClient = 'claude' | 'codex' | 'grok' | 'cursor';
+
+/** Verify the executable and arguments shared by every stdio registration. */
+export function isCaveatStdioMcpRegistration(value: unknown, nodePath: string, cliScriptPath: string): boolean {
+  if (!object(value)) return false;
+  return isCanonicalAsset(value.command, nodePath, constants.X_OK)
+    && Array.isArray(value.args)
+    && value.args.length === 3
+    && value.args[0] === '--disable-warning=ExperimentalWarning'
+    && isCanonicalAsset(value.args[1], cliScriptPath, constants.R_OK)
+    && value.args[2] === 'mcp-server';
+}
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
