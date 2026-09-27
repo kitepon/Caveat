@@ -4,6 +4,16 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.11] — 2026-09-27
+
+### 追加
+
+- `caveat factory-diagnostics --json --require-connector grok`でGrokのMCP登録の有効状態と実行先を診断できるようにする。Composerのモデル実行は対象外で、指定モデルがGrok CLIのcatalogに無ければ未対応と判定する。
+
+### 修正
+
+- 配布後のMCP接続試験で、無効化された登録を成功として扱わない。
+
 ## [0.19.10] — 2026-09-24
 
 ### 追加
