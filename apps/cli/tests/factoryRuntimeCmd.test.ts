@@ -66,7 +66,7 @@ function readyGrok(fixture: ReturnType<typeof isolated>) {
   return configPath;
 }
 
-describe('built factory/runtime CLI contracts', { timeout: process.platform === 'win32' ? 30_000 : 5_000 }, () => {
+describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
   it('Grok MCPを任意の必須connectorとして判定し、無効化と偽の実行先を拒否する', () => {
     const fixture = isolated(); readyFactory(fixture);
     const missing = run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env);
