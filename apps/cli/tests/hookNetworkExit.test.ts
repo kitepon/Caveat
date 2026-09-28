@@ -15,7 +15,7 @@ for (const host of ['claude','codex']) it(`${host} hook drains HTTP cleanup afte
     writeFileSync(join(userHome,'.caveatrc.json'),JSON.stringify({jevEnabled:true}));
     writeJevKey(caveatHome,'fixture-key-not-a-real-credential');
     const result=spawnSync(process.execPath,[
-      '--import','tsx','--import',fileURLToPath(new URL('./fixtures/hook-network-exit.mjs',import.meta.url)),
+      '--import','tsx','--import',new URL('./fixtures/hook-network-exit.mjs',import.meta.url).href,
       fileURLToPath(new URL('../src/index.ts',import.meta.url)),host==='claude'?'hook':'codex-hook','user-prompt-submit',
     ],{encoding:'utf8',timeout:20000,cwd:fileURLToPath(new URL('..',import.meta.url)),
       input:JSON.stringify({session_id:'fixture',cwd:root,transcript_path:join(root,'transcript.jsonl'),prompt:'continue'}),
