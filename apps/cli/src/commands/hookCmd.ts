@@ -442,7 +442,8 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
         }
       } catch (err: unknown) { process.stderr.write(`[caveat:hook] 配送に失敗: ${errorMessage(err)}\n`); }
     }
-    process.exit(0);
+    // Let pending HTTP cleanup finish; forced exit can abort libuv on Windows.
+    return;
   }
 
   if (name === 'post-tool-use') {

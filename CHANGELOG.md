@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.13] — 2026-09-28
+
+### 修正
+
+- Claude・CodexのUserPromptSubmitを自然終了させ、WindowsでJevのHTTP判定直後に強制終了した際のlibuv assertionを防ぐ。苦戦判定と知見提案の閾値は0.80を維持する。
+
 ## [0.19.12] — 2026-09-28
 
 ### 修正
