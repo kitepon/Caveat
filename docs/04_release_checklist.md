@@ -189,6 +189,7 @@ caveat cursor-hook diagnostics
 対象のCaveat hookが残っていないことを確認する。Cursor has no
 repository-owned live-session smoke harness; its release gate is the focused
 installer/adapter tests plus this packed-package install/diagnostics smoke.
+実機のCursor会話は下記の手動試験で確かめる。
 
 ## New Codex Session Smoke
 
@@ -260,6 +261,30 @@ Expected:
 - No Caveat hook invalid/failure lines are present.
 - If `claude auth status` is unavailable or unauthenticated, the script exits
   unavailable rather than treating the smoke as a pass; authenticate and rerun.
+
+## New Cursor Session Smoke
+
+公開版を導入した実機で、通常のCursor設定のまま新しい会話を1回行う。`~/.cursor`は変更しない。
+一時workspaceの`.cursor/hooks.json`にだけ、`caveat cursor-hook user-prompt-submit` /
+`post-tool-use` / `stop`を包んで終了コード、stdoutのJSON妥当性、stderrの有無を記録するwrapperを置く。
+
+- 対話セッションで行う。Cursor CLI 2026.09.26の`-p`では`postToolUse`だけが発火し、
+  `beforeSubmitPrompt`と`stop`は呼ばれない。
+- macOSでは、素のSSHセッションからだとログインキーチェーンがロック扱いになり、`cursor-agent`が起動しない。
+  GUIログイン側で動いている端末（Aitermのtmux serverなど）から実行する。
+- Cursorの月間利用上限に達したモデルは使えない。その場合は`--model auto`で試す。
+
+```bash
+cursor-agent --model auto --approve-mcps --trust
+# prompt: Call the caveat MCP server's search tool exactly once with query "git".
+#         Do not use any other tool. Then reply exactly: caveat-cursor-session-ok
+```
+
+Expected:
+
+- `caveat_search`のMCP呼出しが成功し、回答が`caveat-cursor-session-ok`になる。
+- `beforeSubmitPrompt`、`postToolUse`、`stop`の3 hookがすべて終了0で、stderrが空。
+- 試験後に一時workspaceとwrapperを削除する。
 
 After the published-package and available host smokes pass, publish the GitHub
 Release for the already-pushed annotated tag:
