@@ -20,6 +20,25 @@ function turns(): ThroughlineTurn[] {
 }
 
 describe('Jevの苦戦判定', () => {
+  it.each([
+    [0.8, 0.8, true],
+    [0.79, 0.92, false],
+    [0.92, 0.79, false],
+  ])('両苦戦スコアが0.80以上の時だけ検索語を渡す（%s, %s）', async (repeatedProblem, clearlyStuck, struggling) => {
+    const result = await judgeStruggle('dummy', turns(), async (_key, _state, questions) => {
+      const options = (questions.search_term as { criteria: Record<string, string> }).criteria;
+      const selected = Object.entries(options).find(([, term]) => term === 'PyInstaller')![0];
+      return { answers: {
+        repeated_problem: { type: 'noul', noul: repeatedProblem },
+        clearly_stuck: { type: 'noul', noul: clearlyStuck },
+        search_term: { type: 'choice', choice: selected, confidence: 0.9,
+          probabilities: Object.fromEntries(Object.keys(options).map((key) => [key, key === selected ? 0.9 : key === 'none' ? 0.1 : 0])) },
+      } };
+    });
+    expect(result.struggling).toBe(struggling);
+    expect(result.terms).toEqual(struggling ? ['PyInstaller'] : []);
+  });
+
   it('長いログでも末尾の問題固有語を候補に残す', () => {
     const longPrefix = Array.from({ length: 100 }, (_, index) => 'noise' + index).join(' ');
     const context = turns();
@@ -135,7 +154,7 @@ describe('Jevの苦戦判定', () => {
     let observed = listJevObservations(root);
     expect(observed).toHaveLength(1);
     expect(observed[0]).toMatchObject({
-      host: 'claude', selectedTerms: ['RangeError', 'WebSocket', 'workerd'],
+      host: 'claude', struggleThreshold: 0.8, selectedTerms: ['RangeError', 'WebSocket', 'workerd'],
       ftsHits: ['own/match'], candidates: [{ ref: 'own/match', score: 0.9 }],
       selectedRef: 'own/match', decision: 'matched', delivery: 'pending', review: null,
     });
@@ -192,7 +211,7 @@ describe('Jevの苦戦判定', () => {
     const notice = await runJevStruggle(ctx, 'codex', payload, {
       readContext: () => context, readKey: () => 'dummy',
       ask: async (_key, _state, questions) => ({ answers: {
-        repeated_problem: { type: 'noul', noul: 0.84 }, clearly_stuck: { type: 'noul', noul: 0.92 },
+        repeated_problem: { type: 'noul', noul: 0.79 }, clearly_stuck: { type: 'noul', noul: 0.92 },
         search_term: { type: 'choice', choice: 'none', confidence: 1,
           probabilities: Object.fromEntries(Object.keys((questions.search_term as { criteria: Record<string, string> }).criteria)
             .map((key) => [key, key === 'none' ? 1 : 0])) },
@@ -200,7 +219,7 @@ describe('Jevの苦戦判定', () => {
     });
     expect(notice).toBeNull();
     const [item] = listJevObservations(root);
-    expect(item).toMatchObject({ host: 'codex', repeatedProblem: 0.84, clearlyStuck: 0.92,
+    expect(item).toMatchObject({ host: 'codex', repeatedProblem: 0.79, clearlyStuck: 0.92, struggleThreshold: 0.8,
       decision: 'below_struggle_threshold', delivery: 'none', query: '', noticeText: null });
     expect(item?.turns).toHaveLength(3);
     expect(reviewJevObservation(root, item!.id, 'missed', '適切な知見あり').review?.verdict).toBe('missed');

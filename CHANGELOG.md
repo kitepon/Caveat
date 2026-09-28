@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.19.12] — 2026-09-28
+
+### 修正
+
+- 保存済みの実利用記録を比較し、Jevの苦戦判定の閾値を0.85から0.80へ下げる。同じ問題の反復と明確な苦戦の両スコアに適用し、知見提案の関連度閾値0.80は維持する。
+
 ## [0.19.11] — 2026-09-27
 
 ### 追加
