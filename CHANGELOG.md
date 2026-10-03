@@ -4,6 +4,12 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.20.1] — 2026-10-03
+
+### 修正
+
+- hookの入力の先頭にUTF-8のBOMが付いていても読めるようにした。WindowsのCursor CLI（2026.10.01）はhookへ渡すJSONの先頭にBOMを付けるため、CursorからのCaveatのhook（Cursor用と、Cursorが読み込むClaude用）がJSONとして読めず、検索も通知もしないまま終わっていた。hook自体は終了0で、Cursorの動作は止めていなかった。Claude・Codex・Cursorのhookで共通の読み込みを直した。
+
 ## [0.20.0] — 2026-10-03
 
 ### 追加
