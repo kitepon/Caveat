@@ -60,7 +60,9 @@ export async function readStdin(): Promise<string> {
   for await (const chunk of process.stdin) {
     chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
   }
-  return Buffer.concat(chunks).toString('utf-8');
+  // Cursor CLI on Windows prefixes the hook payload with a UTF-8 BOM, which
+  // JSON.parse rejects; without this every hook from that host is a no-op.
+  return Buffer.concat(chunks).toString('utf-8').replace(/^\uFEFF/, '');
 }
 
 export function errorMessage(err: unknown): string {
