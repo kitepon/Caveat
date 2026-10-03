@@ -4,6 +4,16 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.20.0] — 2026-10-03
+
+### 追加
+
+- runtime errorを自分のcollectorへ送る明示opt-inの入口を追加。`~/.caveatrc.json`で`runtimeErrors: true`に加えて`runtimeErrorReportCredentialFile`へcredentialの絶対パスを書いた時だけ送る。既定では通信せず、パッケージに宛先は無い。
+- 報告はHMAC-SHA256で署名し、秘密は送信しない。本文は未受領の固定記録（fingerprint、error code、component、定型文、severity、status、回数、時刻、発生時の版）と解決記録だけ。
+- 受領済みにするのは、`200`・`accepted: true`・同じ`report_id`・受領署名の一致がそろった時だけ。redirectには従わず、それ以外の応答では記録を残して後で送り直す。
+- 送信は切り離したworkerが行い、hookは通信を待たない。hook失敗の直後とsession終了時に、未受領がある場合だけ起動する。
+- `caveat runtime-errors report --json`（今すぐ送る）と`caveat runtime-errors report-status --json`（直近の結果）を追加。既存の`snapshot` / `diagnostics`の形は変更なし。
+
 ## [0.19.13] — 2026-09-28
 
 ### 修正

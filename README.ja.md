@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.19.13。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.20.0。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -227,6 +227,50 @@ state fileはPOSIXでは`$XDG_STATE_HOME/caveat/runtime-errors.json`（既定
 `%LOCALAPPDATA%\caveat\runtime-errors.json`です。diagnosticsが`unavailable`なら、所有者・権限を
 直すか、壊れたfileを調査用に退避してから記録を再開します。knowledge DBの再indexやhookの
 再installでは、この独立したruntime error storeは直りません。
+
+#### runtime errorを自分のcollectorへ送る（明示opt-in）
+
+Caveatは既定ではruntime errorをどこにも送りません。パッケージに宛先は入っていません。
+署名付き報告のcredentialを発行するcollectorを自分で運用している場合だけ、同じユーザー設定へ
+credential fileの場所を書きます。
+
+```json
+{
+  "runtimeErrors": true,
+  "runtimeErrorReportCredentialFile": "/absolute/path/to/caveat.json"
+}
+```
+
+両方のキーが必要です。`runtimeErrors: true`が無ければ記録されず、絶対パスのcredentialが
+無ければ送信されません。credential fileはcollectorが発行し、`url`・`key_id`・`secret`を
+持ちます。通常のfile（symlinkではない）で、本人だけが読める場合に限って使います。POSIXでは
+所有者が本人でgroup・otherの権限が無いこと、Windowsでは所有者が本人またはAdministratorsで、
+本人・SYSTEM・Administrators以外に権限が無いことです。満たさなければ何も送りません。
+
+報告は`url`への1回の`POST`です。本文は`schema_version`・`report_id`・`product_id`・
+`installed_version`・`observed_at`と、未受領の`runtime_errors`（fingerprint、error code、
+component、固定のmessage template、severity、status、回数、初回と最終の時刻、発生時の版）、
+`resolutions`だけです。prompt、entryやfileの内容、path、host名、stack trace、stderrは
+入りません。secretは送信しません。リクエストには
+`Authorization: BugHub-HMAC-SHA256 key_id=<key_id>, ts=<UNIX秒>, sig=<16進>`を付け、`sig`は
+`HMAC-SHA256(secret, ts + "\n" + 本文のSHA-256の16進)`です。
+
+記録を受領済みにするのは、collectorが`200`で`accepted: true`、同じ`report_id`、
+`HMAC-SHA256(secret, report_id + "\n" + received_at)`と一致する`sig`を返した時だけです。
+署名の無い`200`やredirectを含むそれ以外の応答では、記録は未受領のまま残り、後で送り直します。
+送信の失敗そのものはruntime errorとして記録しません。
+
+送信は切り離したworkerが行い、hookは通信を待ちません。hookが失敗した直後とsession終了時に、
+未受領の記録がある場合だけ起動します。受領のあとは1時間、通信やserverの失敗のあとは10分、
+時刻のずれのあとは1時間、credentialや報告の拒否のあとは6時間あけます。すぐ送る時と、
+直近の結果を見る時は次を使います。
+
+```sh
+caveat runtime-errors report --json          # 送信に失敗した時は終了コード1
+caveat runtime-errors report-status --json
+```
+
+`runtimeErrorReportCredentialFile`を消せば送信は止まります。localの収集には影響しません。
 
 ### 共有 — 2 つの境界、2 つのコマンド
 

@@ -7,6 +7,8 @@ export interface CaveatConfig {
   sealedKeyId: string;
   sealedKeyserverUrl: string | null;
   runtimeErrors: boolean;
+  /** Absolute path of the host-issued runtime error report credential. null = never send. */
+  runtimeErrorReportCredentialFile: string | null;
   jevEnabled: boolean;
 }
 
@@ -17,6 +19,7 @@ export const DEFAULT_CONFIG: CaveatConfig = {
   sealedKeyId: 'v1',
   sealedKeyserverUrl: null,
   runtimeErrors: false,
+  runtimeErrorReportCredentialFile: null,
   jevEnabled: false,
 };
 

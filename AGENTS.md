@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, and
 
 ## プロジェクトの状態
 
-**v0.19.13**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
+**v0.20.0**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
 既存の`~/.caveatrc.json`で明示的に有効化し、製品文書とrelease gateはCaveat自身が所有する。
 
 **`docs/00_overview.md` が文書の入口、`docs/01_plan.md` が現行の製品契約**。
@@ -89,6 +89,8 @@ Project-local `.claude/settings.json` は端末固有の permission allowlist �
 **caveatHome の解決**: `findCaveatHome(userHome)` → `process.env.CAVEAT_HOME ?? join(userHome, '.caveat')`。NPM グローバルインストール時、tool の実体は `node_modules/caveat-cli/` に置かれるが、**ユーザーデータ（DB・own repo）は常に `~/.caveat/` 側**。テストは `CAVEAT_HOME` override で一時ディレクトリに隔離する。
 
 **runtime error収集**: opt-inの正本は既存`~/.caveatrc.json`の`runtimeErrors: boolean`（既定false）だけ。状態はPOSIXの`$XDG_STATE_HOME/caveat/runtime-errors.json`またはWindowsの`%LOCALAPPDATA%\caveat\runtime-errors.json`へ置き、外部productのconfigを読まない。公開するsnapshot / diagnostics JSON shapeは`packages/core/src/runtimeErrors.ts`が所有する。
+
+**runtime errorの送信**: 既定では通信しない。`runtimeErrors: true`に加えて`runtimeErrorReportCredentialFile`へ絶対パスを書いた時だけ、[packages/core/src/runtimeErrorReport.ts](packages/core/src/runtimeErrorReport.ts)が未受領の記録を送る。宛先と署名の秘密はそのcredential file（`url`・`key_id`・`secret`）だけが持ち、パッケージと`~/.caveatrc.json`には入れない。fileは本人だけが読める通常fileでなければ拒否する。cursorを進めるのは、200・`accepted: true`・同じ`report_id`・受領署名の一致がそろった時だけ。redirectには従わない。送信の失敗は`runtime-error-report.json`へ固定のoutcomeとして残し、runtime errorには数えない（数えると送信失敗が自分を増やし続ける）。発火点はhook失敗の直後（`hookShared.ts`の`reportHookError`）と各hostのStopで、どちらも`runtimeErrorReportDue`の軽い判定のあと切り離したworker（`caveat runtime-errors report --json --background`）を起動する。hookの中で通信もACL検査もしない。既存の`snapshot` / `diagnostics`のJSON shapeは変えず、送信状態は`report-status`で別に出す。
 
 **source 名前空間**: 全行が `source ∈ {'own', 'community/<handle>'}` を持つ。PK は `(source, id)` 複合 — community 取り込みで `own` と衝突しないための必須条件。`packages/core/src/schema.sql` 参照。
 

@@ -16,6 +16,7 @@ import {
 } from '@caveat/core';
 import { maybeTriggerAutoReindex } from '../autoReindexTrigger.js';
 import { maybeTriggerAutoSync } from '../autoSyncTrigger.js';
+import { maybeTriggerRuntimeErrorReport } from '../runtimeErrorReportTrigger.js';
 import { detectCodexHookInstallation } from '../codexHookInstall.js';
 import { runJevStruggle, type JevNotice } from '../jevStruggle.js';
 import { prepareSessionDelivery } from '../hookDelivery.js';
@@ -434,6 +435,11 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
           maybeTriggerAutoSync(ctx);
         } catch (err: unknown) {
           process.stderr.write(`[caveat:codex-hook] auto sync trigger error: ${errorMessage(err)}\n`);
+        }
+        try {
+          maybeTriggerRuntimeErrorReport();
+        } catch (err: unknown) {
+          process.stderr.write(`[caveat:codex-hook] runtime error report trigger error: ${errorMessage(err)}\n`);
         }
       }
     } catch (err: unknown) {

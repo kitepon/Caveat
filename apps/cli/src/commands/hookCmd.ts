@@ -41,6 +41,7 @@ import {
 } from '@caveat/core';
 import { maybeTriggerAutoReindex } from '../autoReindexTrigger.js';
 import { maybeTriggerAutoSync } from '../autoSyncTrigger.js';
+import { maybeTriggerRuntimeErrorReport } from '../runtimeErrorReportTrigger.js';
 import { runJevStruggle, type JevNotice } from '../jevStruggle.js';
 import { prepareSessionDelivery } from '../hookDelivery.js';
 import {
@@ -493,6 +494,11 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
         maybeTriggerAutoSync(ctx);
       } catch (err: unknown) {
         process.stderr.write(`[caveat:hook] auto sync trigger error: ${errorMessage(err)}\n`);
+      }
+      try {
+        maybeTriggerRuntimeErrorReport();
+      } catch (err: unknown) {
+        process.stderr.write(`[caveat:hook] runtime error report trigger error: ${errorMessage(err)}\n`);
       }
     }
     if (payload.stop_hook_active === true) process.exit(0);
