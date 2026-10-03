@@ -29,7 +29,7 @@ import {
 import { resolveHookNodePath } from './nodePath.js';
 import { resolveAgentConfigPaths } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
-import { parseCursor, runRuntimeErrors } from './commands/runtimeErrors.js';
+import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
 
 const program = new Command();
@@ -72,7 +72,12 @@ jev.command('review <id> <verdict>')
   });
 const parseLimit = (value: string) => { const parsed = parseCursor(value); if (parsed < 1 || parsed > 256) throw Error('invalid_limit'); return parsed; };
 runtimeErrors.command('snapshot').requiredOption('--json', 'emit JSON').option('--after-cursor <n>', 'cursor', parseCursor, 0).option('--limit <n>', 'limit', parseLimit, 256).action((opts: { afterCursor?: number; limit?: number }) => { process.stdout.write(`${JSON.stringify(runRuntimeErrors('snapshot', undefined, opts))}\n`); });
-for (const action of ['diagnostics', 'compact'] as const) runtimeErrors.command(action).requiredOption('--json', 'emit JSON').action(() => { process.stdout.write(`${JSON.stringify(runRuntimeErrors(action))}\n`); });
+for (const action of ['diagnostics', 'compact', 'report-status'] as const) runtimeErrors.command(action).requiredOption('--json', 'emit JSON').action(() => { process.stdout.write(`${JSON.stringify(runRuntimeErrors(action))}\n`); });
+runtimeErrors.command('report').description('Send unacknowledged runtime errors to the configured receiver').requiredOption('--json', 'emit JSON').option('--background', 'honour the retry window (used by the hook worker)').action(async (opts: { background?: boolean }) => {
+  const output = await runRuntimeErrorReport(opts.background === true);
+  process.stdout.write(`${JSON.stringify(output)}\n`);
+  if (output.status === 'failed') process.exitCode = 1;
+});
 runtimeErrors.command('ack <cursor>').requiredOption('--json', 'emit JSON').action((cursor: string) => { process.stdout.write(`${JSON.stringify(runRuntimeErrors('ack', cursor))}\n`); });
 for (const action of ['resolve', 'reopen'] as const) runtimeErrors.command(`${action} <fingerprint>`).requiredOption('--json', 'emit JSON').action((fingerprint: string) => { process.stdout.write(`${JSON.stringify(runRuntimeErrors(action, fingerprint))}\n`); });
 

@@ -146,6 +146,15 @@ are `ack <cursor>`, `resolve <fingerprint>`, `reopen <fingerprint>`, and
 boolean `true` keeps collection disabled. Runtime state lives under Caveat's
 own state directory, independently of the knowledge index and host hook files.
 
+Nothing is sent anywhere by default and the package contains no destination.
+To report to a collector you operate, also set
+`"runtimeErrorReportCredentialFile"` to the absolute path of the credential
+file it issued (`url`, `key_id`, `secret`; readable only by you). Reports are
+HMAC-signed, carry only the fixed error records, and are acknowledged locally
+only after a signed receipt. Use `caveat runtime-errors report --json` to send
+now and `caveat runtime-errors report-status --json` to see the last outcome.
+See the repository README for the wire format and retry intervals.
+
 ## Requirements
 
 - Node 22.5+ (for built-in `node:sqlite`)

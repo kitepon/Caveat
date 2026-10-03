@@ -16,6 +16,8 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 - 自分の知識は既定で`~/.caveat/own/`、indexは`~/.caveat/index/caveat.db`。
 - ユーザー設定の正本は`~/.caveatrc.json`だけ。`knowledgeRepo`で知識repoの場所を変更でき、
   `runtimeErrors: true`でlocal runtime error収集を明示的に有効化できる（既定false）。
+  `runtimeErrorReportCredentialFile`へcredentialの絶対パスを書いた時だけ、未受領の記録を
+  そのcredentialが指すcollectorへ署名付きで送る（既定null。パッケージに宛先は無い）。
 - `CAVEAT_HOME`でCaveatのdata rootを明示変更できる。
 - entryの主キーはsourceとidの組。sourceは`own`または`community/<handle>`。
 - schemaとmigrationは`packages/core/src/schema.sql`と`packages/core/src/migrations/`が所有する。

@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.19.13. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.20.0. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -295,6 +295,57 @@ The state file is
 `unavailable`, repair that file's owner/permissions or move a corrupt file aside
 for inspection before recording again. Re-indexing the knowledge database or
 reinstalling hooks does not repair this independent runtime error store.
+
+#### Sending runtime errors to your own collector (explicit opt-in)
+
+Caveat sends runtime errors nowhere by default, and the package contains no
+destination. If you run a collector that issues signed-report credentials, name
+the credential file in the same user config:
+
+```json
+{
+  "runtimeErrors": true,
+  "runtimeErrorReportCredentialFile": "/absolute/path/to/caveat.json"
+}
+```
+
+Both keys are required: without `runtimeErrors: true` nothing is recorded, and
+without an absolute credential path nothing is sent. The credential file is
+issued by the collector and holds `url`, `key_id`, and `secret`. Caveat
+refuses it, and sends nothing, unless it is a regular file (not a symlink) that
+only you can read: on POSIX, owned by you with no group or other permission
+bits; on Windows, owned by you or Administrators with no access for anyone
+other than you, SYSTEM, and Administrators.
+
+A report is one `POST` to `url` carrying `schema_version`, `report_id`,
+`product_id`, `installed_version`, `observed_at`, the unacknowledged
+`runtime_errors` (fingerprint, error code, component, fixed message template,
+severity, status, occurrence count, first/last seen, the version it occurred
+on) and `resolutions`. It never contains prompts, entry or file contents,
+paths, host names, stack traces, or stderr. The secret is not transmitted: the
+request is signed with
+`Authorization: BugHub-HMAC-SHA256 key_id=<key_id>, ts=<unix seconds>, sig=<hex>`,
+where `sig` is `HMAC-SHA256(secret, ts + "\n" + hex(SHA-256(body)))`.
+
+Records stay pending until the collector answers `200` with `accepted: true`,
+the same `report_id`, and a receipt `sig` equal to
+`HMAC-SHA256(secret, report_id + "\n" + received_at)`. Any other answer,
+including an unsigned `200` and a redirect, leaves them pending for a later
+attempt, and a failed send is never itself recorded as a runtime error.
+
+A detached worker sends after a hook failure and at session stop, only when
+something is pending, so hooks never wait on the network. After an accepted
+report the worker waits one hour; after a network or server failure, ten
+minutes; after a clock mismatch, one hour; after a credential or report
+rejection, six hours. To send immediately or inspect the last outcome:
+
+```sh
+caveat runtime-errors report --json          # exit 1 when the send failed
+caveat runtime-errors report-status --json
+```
+
+Remove `runtimeErrorReportCredentialFile` to stop sending; local collection is
+unaffected.
 
 ### Sharing: two boundaries, two commands
 

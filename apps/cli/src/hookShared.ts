@@ -24,6 +24,7 @@ import {
 } from '@caveat/core';
 import { buildContext, type CliContext } from './context.js';
 import { CAVEAT_VERSION } from './version.js';
+import { maybeTriggerRuntimeErrorReport } from './runtimeErrorReportTrigger.js';
 
 /**
  * Claude / Codex / Cursor の hook コマンドで共有するベンダー中立エンジン。
@@ -69,6 +70,13 @@ export function errorMessage(err: unknown): string {
 function reportHookError(host: HookHost, phase: string, err: unknown): void {
   observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION });
   process.stderr.write(`[${host.stderrTag}] ${phase}: ${errorMessage(err)}\n`);
+  // A hook that fails this early never reaches the stop-time trigger, so a
+  // Caveat that is broken outright would record errors and never send them.
+  try {
+    maybeTriggerRuntimeErrorReport();
+  } catch {
+    // Reporting is best-effort; the record stays pending for the next trigger.
+  }
 }
 
 export function parsePayload(host: HookHost, raw: string): Record<string, unknown> {
