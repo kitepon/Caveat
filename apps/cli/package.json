@@ -50,7 +50,7 @@
     "prepublishOnly": "node ../../scripts/verify-release-commit.mjs"
   },
   "dependencies": {
-    "commander": "^14.0.3",
+    "commander": "^15.0.0",
     "smol-toml": "1.7.0"
   },
   "devDependencies": {
