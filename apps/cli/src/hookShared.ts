@@ -17,6 +17,8 @@ import {
   markHit,
   openDb,
   observeRuntimeError,
+  observeHookDiagnostic,
+  type HookDiagnosticPhase,
   type Logger,
   type HookSearchInput,
   type SearchResult,
@@ -69,8 +71,9 @@ export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function reportHookError(host: HookHost, phase: string, err: unknown): void {
+function reportHookError(host: HookHost, phase: HookDiagnosticPhase, err: unknown): void {
   observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION });
+  observeHookDiagnostic(host.errorCode, phase, err, { version: CAVEAT_VERSION });
   process.stderr.write(`[${host.stderrTag}] ${phase}: ${errorMessage(err)}\n`);
   // A hook that fails this early never reaches the stop-time trigger, so a
   // Caveat that is broken outright would record errors and never send them.

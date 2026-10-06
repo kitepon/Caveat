@@ -34,6 +34,7 @@ export * from './proposalEval.js';
 export * from './proposalExecution.js';
 export * from './proposalExecutionCompiler.js';
 export * from './runtimeErrors.js';
+export * from './hookDiagnostics.js';
 export * from './runtimeErrorReport.js';
 export * from './jevObservations.js';
 export * from './platform.js';
