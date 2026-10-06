@@ -1,9 +1,10 @@
-import { acknowledgeRuntimeErrors, compactRuntimeErrors, runtimeErrorReportStatus, runtimeErrorsDiagnostics, runtimeErrorsSnapshot, sendRuntimeErrorReport, setRuntimeErrorStatus } from '@caveat/core';
+import { acknowledgeRuntimeErrors, compactRuntimeErrors, localHookDiagnostics, runtimeErrorReportStatus, runtimeErrorsDiagnostics, runtimeErrorsSnapshot, sendRuntimeErrorReport, setRuntimeErrorStatus } from '@caveat/core';
 import { CAVEAT_VERSION } from '../version.js';
 export function runRuntimeErrors(action: string, value?: string, opts: { afterCursor?: number; limit?: number } = {}) {
   const runtime = { version: CAVEAT_VERSION };
   if (action === 'snapshot') return runtimeErrorsSnapshot(opts.afterCursor ?? 0, opts.limit ?? 256, runtime);
   if (action === 'diagnostics') return runtimeErrorsDiagnostics(runtime);
+  if (action === 'hook-details') return localHookDiagnostics(runtime);
   if (action === 'report-status') return runtimeErrorReportStatus(runtime);
   if (action === 'ack') return acknowledgeRuntimeErrors(parseCursor(value), runtime);
   if (action === 'resolve') return setRuntimeErrorStatus(value ?? '', 'resolved', runtime);

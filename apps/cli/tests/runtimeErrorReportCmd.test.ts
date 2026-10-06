@@ -108,6 +108,10 @@ describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 30_0
     while (reports.length === 0 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 100));
     expect(reports).toHaveLength(1);
     expect(reports[0]!.runtime_errors).toMatchObject([{ error_code: 'CAVEAT.CLAUDE_HOOK_FAILED', component: 'claude_hook', status: 'open', occurrence_count: 1 }]);
+    const details = await run(['runtime-errors', 'hook-details', '--json'], env);
+    expect(details.status).toBe(0);
+    expect(lastLine(details.stdout)).toMatchObject({ schema: 'caveat.local_hook_diagnostics.v1', status: 'ready', records: [{ error_code: 'CAVEAT.CLAUDE_HOOK_FAILED', phase: 'json parse error', kind: 'invalid_json' }] });
+    expect(JSON.stringify(reports[0])).not.toMatch(/hook-details|invalid_json|json parse error/);
     // workerが受領を書き終えるまで待つ。
     let status: Record<string, any> = {};
     while (Date.now() < deadline) { status = lastLine((await run(['runtime-errors', 'report-status', '--json'], env)).stdout); if (status.last_outcome === 'accepted') break; await new Promise((resolve) => setTimeout(resolve, 200)); }

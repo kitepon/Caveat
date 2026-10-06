@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.20.1. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.20.2. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -282,6 +282,7 @@ Inspect and maintain the bounded local store with:
 ```sh
 caveat runtime-errors diagnostics --json
 caveat runtime-errors snapshot --json
+caveat runtime-errors hook-details --json
 caveat runtime-errors ack <cursor> --json
 caveat runtime-errors resolve <fingerprint> --json
 caveat runtime-errors reopen <fingerprint> --json
@@ -295,6 +296,16 @@ The state file is
 `unavailable`, repair that file's owner/permissions or move a corrupt file aside
 for inspection before recording again. Re-indexing the knowledge database or
 reinstalling hooks does not repair this independent runtime error store.
+
+For hook failures, `hook-details` reads the latest 64 local diagnostics from
+`hook-diagnostics.json` beside that state file. Each diagnostic contains only
+the time, version, host error code, failed phase, and a fixed cause category
+(for example, `sqlite_busy`). Exception messages, prompts, paths, and stack
+traces are never stored there. Collection uses the same `runtimeErrors` opt-in;
+these details are excluded from snapshots and collector reports. Earlier
+versions did not save these details, so old failures cannot be reconstructed.
+Concurrent index writes wait up to one second per SQLite operation before
+reporting a lock failure; longer contention still produces an error.
 
 #### Sending runtime errors to your own collector (explicit opt-in)
 

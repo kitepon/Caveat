@@ -29,19 +29,28 @@ export function openDb(opts: OpenDbOptions): DatabaseSync {
   const parent = dirname(opts.path);
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
   const db = new DatabaseSync(opts.path);
-  db.exec('PRAGMA journal_mode = WAL');
-  db.exec('PRAGMA foreign_keys = ON');
+  try {
+    // Native hooks and MCP share this index. A simultaneous markHit/reindex
+    // write must get a bounded chance to finish instead of failing immediately.
+    // Keep this below the shortest installed hook deadline (5 seconds).
+    db.exec('PRAGMA busy_timeout = 1000');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA foreign_keys = ON');
 
-  const { user_version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
+    const { user_version } = db.prepare('PRAGMA user_version').get() as { user_version: number };
 
-  if (user_version === 0) {
-    db.exec(readFileSync(SCHEMA_PATH, 'utf-8'));
-  } else {
-    applyMigrations(db, user_version);
-    backfillRoleTexts(db);
+    if (user_version === 0) {
+      db.exec(readFileSync(SCHEMA_PATH, 'utf-8'));
+    } else {
+      applyMigrations(db, user_version);
+      backfillRoleTexts(db);
+    }
+
+    return db;
+  } catch (error) {
+    db.close();
+    throw error;
   }
-
-  return db;
 }
 
 // Recompute topical_text / symptom_text for any pre-v3 rows that were carried

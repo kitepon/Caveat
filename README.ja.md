@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.20.1。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.20.2。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -227,6 +227,14 @@ state fileはPOSIXでは`$XDG_STATE_HOME/caveat/runtime-errors.json`（既定
 `%LOCALAPPDATA%\caveat\runtime-errors.json`です。diagnosticsが`unavailable`なら、所有者・権限を
 直すか、壊れたfileを調査用に退避してから記録を再開します。knowledge DBの再indexやhookの
 再installでは、この独立したruntime error storeは直りません。
+
+hookの失敗箇所は`caveat runtime-errors hook-details --json`で確認します。
+同じstate directoryの`hook-diagnostics.json`に直近64件の時刻・版・hostのerror code・
+失敗箇所・固定の原因分類（例: `sqlite_busy`）を保存します。例外の本文、会話、path、
+stack traceは保存しません。収集は同じ`runtimeErrors`の設定に従い、この詳細はsnapshotや
+collectorへの報告に含めません。旧版の失敗には詳細が無く、あとから復元できません。
+DB更新が重なると、SQLiteの各操作で最大1秒待ってからlockの失敗を報告します。
+長くlockされた場合はエラーが残ります。
 
 #### runtime errorを自分のcollectorへ送る（明示opt-in）
 

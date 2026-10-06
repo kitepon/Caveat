@@ -4,6 +4,16 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## Unreleased
 
+## [0.20.2] — 2026-10-06
+
+### 修正
+
+- hookとMCPなどが同じindexを更新する時、SQLiteの操作が最大1秒待つようにした。短い更新の競合で`last_hit_at`の記録などが直ちに`database is locked`となる問題を防ぐ。長くlockされた場合は失敗を報告する。DB初期化に失敗した場合は接続も閉じる。
+
+### 追加
+
+- `runtimeErrors: true`の時、hookの失敗箇所と固定の原因分類を端末へ直近64件残す。`caveat runtime-errors hook-details --json`で読む。会話や例外の本文、pathは保存せず、snapshotやcollectorへの報告の形も変更しない。旧版の記録から過去の原因を復元する機能は無い。
+
 ## [0.20.1] — 2026-10-03
 
 ### 修正
