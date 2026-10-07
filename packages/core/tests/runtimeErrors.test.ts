@@ -35,6 +35,26 @@ function childExit(childProcess: ReturnType<typeof spawn>) {
 }
 
 describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, () => {
+  it('uses observed impact, keeps unresolved serious impact, and preserves historical identity/counts', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
+    const opts = { env: e, version: '0.20.3' };
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
+    const initial = runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]!;
+    expect(initial.severity).toBe('warn');
+    for (let i = 0; i < 3; i++) recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]).toMatchObject({ severity: 'warn', occurrence_count: 4 });
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'recovery_failed' });
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]).toMatchObject({ severity: 'high', occurrence_count: 6, fingerprint: initial.fingerprint, first_seen: initial.first_seen });
+    setRuntimeErrorStatus(initial.fingerprint, 'resolved', opts);
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]).toMatchObject({ severity: 'warn', occurrence_count: 7, fingerprint: initial.fingerprint, first_seen: initial.first_seen });
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'mutation_outcome_unverified' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]?.severity).toBe('high');
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'data_lost' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]?.severity).toBe('fatal');
+  });
+
   it('発生版は直近の発生で更新し、snapshotの実行版から推測しない', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
     recordRuntimeError(definition, { env: e, version: '1.0.0', now: '2026-09-01T00:00:00.000Z' });

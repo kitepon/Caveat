@@ -12,20 +12,34 @@ const STATE_VERSION = '1.0';
 const MAX_RECORDS = 256;
 const RETENTION_MS = 30 * 86_400_000;
 const definitions = {
-  'CAVEAT.DATABASE_OPEN_FAILED': { component: 'database', severity: 'high', template: 'Caveat database open failed' },
-  'CAVEAT.INDEX_FAILED': { component: 'index', severity: 'high', template: 'Caveat index operation failed' },
-  'CAVEAT.SYNC_FAILED': { component: 'sync', severity: 'high', template: 'Caveat own sync failed' },
-  'CAVEAT.MCP_SERVER_FAILED': { component: 'mcp', severity: 'high', template: 'Caveat MCP server failed' },
-  'CAVEAT.MCP_TOOL_FAILED': { component: 'mcp_tool', severity: 'high', template: 'Caveat MCP tool handler failed' },
-  'CAVEAT.CLAUDE_HOOK_FAILED': { component: 'claude_hook', severity: 'high', template: 'Caveat Claude hook failed' },
-  'CAVEAT.CODEX_HOOK_FAILED': { component: 'codex_hook', severity: 'high', template: 'Caveat Codex hook failed' },
-  'CAVEAT.CURSOR_HOOK_FAILED': { component: 'cursor_hook', severity: 'high', template: 'Caveat Cursor hook failed' },
+  'CAVEAT.DATABASE_OPEN_FAILED': { component: 'database', template: 'Caveat database open failed' },
+  'CAVEAT.INDEX_FAILED': { component: 'index', template: 'Caveat index operation failed' },
+  'CAVEAT.SYNC_FAILED': { component: 'sync', template: 'Caveat own sync failed' },
+  'CAVEAT.MCP_SERVER_FAILED': { component: 'mcp', template: 'Caveat MCP server failed' },
+  'CAVEAT.MCP_TOOL_FAILED': { component: 'mcp_tool', template: 'Caveat MCP tool handler failed' },
+  'CAVEAT.CLAUDE_HOOK_FAILED': { component: 'claude_hook', template: 'Caveat Claude hook failed' },
+  'CAVEAT.CODEX_HOOK_FAILED': { component: 'codex_hook', template: 'Caveat Codex hook failed' },
+  'CAVEAT.CURSOR_HOOK_FAILED': { component: 'cursor_hook', template: 'Caveat Cursor hook failed' },
 } as const;
 export type RuntimeErrorCode = keyof typeof definitions;
+// Local assessment input; the wire keeps the existing severity field.
+// Missing assessment retains legacy high pending review. It is not evidence of
+// a defect. Built-in producers supply the impact they actually observed.
+export type RuntimeErrorImpact = 'operation_failed' | 'feature_unavailable' | 'recovery_failed' | 'data_lost' | 'mutation_outcome_unverified';
+export function runtimeErrorSeverity(impact?: RuntimeErrorImpact): 'fatal' | 'high' | 'warn' {
+  if (impact === 'data_lost') return 'fatal';
+  if (impact === 'operation_failed') return 'warn';
+  if (impact === undefined || impact === 'feature_unavailable' || impact === 'recovery_failed' || impact === 'mutation_outcome_unverified') return 'high';
+  throw Error('invalid_runtime_impact');
+}
 type Status = 'open' | 'resolved';
 type RecordEntry = { product: 'caveat'; product_version: string; component: string; error_code: RuntimeErrorCode; message_template: string; severity: string; fingerprint: string; count: number; first_seen: string; last_seen: string; state_schema_version: typeof STATE_VERSION; os: string; arch: string; status: Status; resolved_at: string | null; reason_code: 'operator_resolved' | null; sequence: number };
 type Store = { schema: typeof RUNTIME_ERRORS_SCHEMA; next_sequence: number; acknowledged_through: number; records: RecordEntry[] };
-export type RuntimeErrorOptions = { env?: NodeJS.ProcessEnv; configPath?: string; storePath?: string; now?: string; version?: string; os?: string; arch?: string; isWindows?: (env: NodeJS.ProcessEnv) => boolean; aclRunner?: (path: string, directory: boolean, apply: boolean) => void };
+export type RuntimeErrorOptions = { impact?: RuntimeErrorImpact; env?: NodeJS.ProcessEnv; configPath?: string; storePath?: string; now?: string; version?: string; os?: string; arch?: string; isWindows?: (env: NodeJS.ProcessEnv) => boolean; aclRunner?: (path: string, directory: boolean, apply: boolean) => void };
+function highestSeverity(previous: string, current: string) {
+  const rank = ['info', 'warn', 'high', 'fatal'];
+  return rank.indexOf(previous) >= rank.indexOf(current) ? previous : current;
+}
 function normalizeOptions(options: RuntimeErrorOptions | NodeJS.ProcessEnv = {}): RuntimeErrorOptions {
   return ('env' in options || 'configPath' in options || 'storePath' in options || 'version' in options || 'isWindows' in options) ? options as RuntimeErrorOptions : { env: options as NodeJS.ProcessEnv };
 }
@@ -93,7 +107,7 @@ function validate(store: unknown): asserts store is Store {
   for (const record of checked.records) {
     if (!plain(record) || !exact(record, ['product','product_version','component','error_code','message_template','severity','fingerprint','count','first_seen','last_seen','state_schema_version','os','arch','status','resolved_at','reason_code','sequence'])) throw Error('state_invalid');
     const code = typeof record.error_code === 'string' ? record.error_code as RuntimeErrorCode : undefined; const d = code && definitions[code];
-    if (!d || record.product !== 'caveat' || !validVersion(record.product_version) || record.component !== d.component || record.message_template !== d.template || record.severity !== d.severity || record.fingerprint !== fingerprint(code) || seen.has(record.fingerprint) || !Number.isSafeInteger(record.count) || record.count < 1 || !validTime(record.first_seen) || !validTime(record.last_seen) || Date.parse(record.first_seen) > Date.parse(record.last_seen) || record.state_schema_version !== STATE_VERSION || !validOs(record.os) || !validArch(record.arch) || !Number.isSafeInteger(record.sequence) || record.sequence <= previous || record.sequence >= checked.next_sequence || !['open','resolved'].includes(record.status as string) || (record.status === 'open' && (record.resolved_at !== null || record.reason_code !== null)) || (record.status === 'resolved' && (typeof record.resolved_at !== 'string' || !validTime(record.resolved_at) || Date.parse(record.resolved_at) < Date.parse(record.last_seen) || record.reason_code !== 'operator_resolved'))) throw Error('state_invalid');
+    if (!d || record.product !== 'caveat' || !validVersion(record.product_version) || record.component !== d.component || record.message_template !== d.template || !['fatal', 'high', 'warn', 'info'].includes(record.severity as string) || record.fingerprint !== fingerprint(code) || seen.has(record.fingerprint) || !Number.isSafeInteger(record.count) || record.count < 1 || !validTime(record.first_seen) || !validTime(record.last_seen) || Date.parse(record.first_seen) > Date.parse(record.last_seen) || record.state_schema_version !== STATE_VERSION || !validOs(record.os) || !validArch(record.arch) || !Number.isSafeInteger(record.sequence) || record.sequence <= previous || record.sequence >= checked.next_sequence || !['open','resolved'].includes(record.status as string) || (record.status === 'open' && (record.resolved_at !== null || record.reason_code !== null)) || (record.status === 'resolved' && (typeof record.resolved_at !== 'string' || !validTime(record.resolved_at) || Date.parse(record.resolved_at) < Date.parse(record.last_seen) || record.reason_code !== 'operator_resolved'))) throw Error('state_invalid');
     seen.add(record.fingerprint); previous = record.sequence;
   }
 }
@@ -119,10 +133,10 @@ export function runtimeErrorsDiagnostics(options: RuntimeErrorOptions = {}) {
 }
 export function recordRuntimeError(code: RuntimeErrorCode, options: RuntimeErrorOptions = {}) {
   if (!collectionEnabled(options)) return { status: 'disabled' as const };
-  const { path, isWin } = optionsFor(options); return lock(path, isWin, () => { const store = readStore(path, isWin, options); const definition = definitions[code]; if (!definition) throw Error('unknown_runtime_code'); const key = fingerprint(code); const sequence = store.next_sequence++; const time = now(options); const existing = store.records.find((r) => r.fingerprint === key);
+  const { path, isWin } = optionsFor(options); return lock(path, isWin, () => { const store = readStore(path, isWin, options); const definition = definitions[code]; if (!definition) throw Error('unknown_runtime_code'); const key = fingerprint(code); const severity = runtimeErrorSeverity(options.impact); const sequence = store.next_sequence++; const time = now(options); const existing = store.records.find((r) => r.fingerprint === key);
     const version = options.version ?? '0.0.0'; const os = normalizeOs(options.os ?? hostPlatform()); const arch = options.arch ?? hostArch(); if (!validVersion(version) || !validOs(os) || !validArch(arch)) throw Error('invalid_runtime_metadata');
-    if (existing) { existing.product_version = version; existing.os = os; existing.arch = arch; existing.count += 1; existing.last_seen = time; existing.sequence = sequence; existing.status = 'open'; existing.resolved_at = null; existing.reason_code = null; }
-    else { if (store.records.length >= MAX_RECORDS) throw Error('store_overflow'); store.records.push({ product: 'caveat', product_version: version, component: definition.component, error_code: code, message_template: definition.template, severity: definition.severity, fingerprint: key, count: 1, first_seen: time, last_seen: time, state_schema_version: STATE_VERSION, os, arch, status: 'open', resolved_at: null, reason_code: null, sequence }); }
+    if (existing) { existing.product_version = version; existing.os = os; existing.arch = arch; existing.count += 1; existing.severity = existing.status === 'resolved' ? severity : highestSeverity(existing.severity, severity); existing.last_seen = time; existing.sequence = sequence; existing.status = 'open'; existing.resolved_at = null; existing.reason_code = null; }
+    else { if (store.records.length >= MAX_RECORDS) throw Error('store_overflow'); store.records.push({ product: 'caveat', product_version: version, component: definition.component, error_code: code, message_template: definition.template, severity, fingerprint: key, count: 1, first_seen: time, last_seen: time, state_schema_version: STATE_VERSION, os, arch, status: 'open', resolved_at: null, reason_code: null, sequence }); }
     store.records.sort((a, b) => a.sequence - b.sequence); writeStore(path, store, isWin, options); return { status: 'recorded' as const, fingerprint: key, sequence }; }, options);
 }
 export function observeRuntimeError(code: RuntimeErrorCode, options: RuntimeErrorOptions = {}) { try { recordRuntimeError(code, options); } catch { try { process.stderr.write('[caveat:runtime-errors] store_unavailable\n'); } catch {} } }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initOwnSync, KNOWLEDGE_GITIGNORE, preflightSync, syncOwn, SyncError, type ProbeImpl } from '../src/sync.js';
@@ -97,6 +97,17 @@ describe('preflightSync', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
     ).rejects.toMatchObject({ code: 'REMOTE_PUBLIC' });
   });
 
+  it('refuses an already active rebase before committing or touching the remote', async () => {
+    git(['init', fixture.own]); configureIdentity(fixture.own);
+    git(['remote', 'add', 'origin', fixture.remote], fixture.own);
+    mkdirSync(join(fixture.own, '.git', 'rebase-merge'));
+    const entry = join(fixture.own, 'unsaved.md'); writeFileSync(entry, '# retained input\n');
+    const probe = async () => { throw Error('must not probe'); };
+    await expect(preflightSync(fixture.own, { probeImpl: probe })).rejects.toMatchObject({ code: 'REBASE_IN_PROGRESS' });
+    expect(readFileSync(entry, 'utf8')).toBe('# retained input\n');
+    expect(existsSync(join(fixture.own, '.git', 'rebase-merge'))).toBe(true);
+  });
+
   it('probes every push URL and rejects if any additional pushurl is public', async () => {
     git(['init', fixture.own]);
     configureIdentity(fixture.own);
@@ -147,6 +158,48 @@ describe('initOwnSync / syncOwn (local bare remote)', { timeout: GIT_TEST_TIMEOU
     expect(result.pushed).toBe(true);
     expect(existsSync(join(fixture.home, 'index', '.entries-digest'))).toBe(true);
     expect(git(['log', '-1', '--format=%s'], fixture.own).trim()).toBe('caveat sync: 1 changed file');
+  });
+
+  it('retains committed input after a remote inspection failure and resumes without duplicate commits', async () => {
+    git(['clone', fixture.remote, fixture.own]);
+    configureIdentity(fixture.own);
+    git(['checkout', '-b', 'main'], fixture.own);
+    mkdirSync(fixture.paths.entriesDir, { recursive: true });
+    const entry = join(fixture.paths.entriesDir, 'entry.md');
+    const content = '# local input must survive\n';
+    writeFileSync(entry, content);
+    const moved = fixture.remote + '.offline';
+    renameSync(fixture.remote, moved);
+    const opts = { ownDir: fixture.own, caveatHome: fixture.home, paths: fixture.paths, logger, probeImpl: denied };
+    try {
+      await expect(syncOwn(opts)).rejects.toMatchObject({ name: 'SyncRemoteError', phase: 'inspect' });
+      expect(readFileSync(entry, 'utf8')).toBe(content);
+      expect(git(['rev-list', '--count', 'HEAD'], fixture.own).trim()).toBe('1');
+    } finally { renameSync(moved, fixture.remote); }
+    expect(await syncOwn(opts)).toMatchObject({ committed: false, pushed: true });
+    expect(git(['rev-list', '--count', 'main'], fixture.remote).trim()).toBe('1');
+    expect(readFileSync(entry, 'utf8')).toBe(content);
+  });
+
+  it('aborts a real conflicting rebase and retains local input and commit', async () => {
+    await initOwnSync({ ownDir: fixture.own, url: fixture.remote, caveatHome: fixture.home, paths: fixture.paths, logger, probeImpl: denied });
+    configureIdentity(fixture.own);
+    const branch = git(['branch', '--show-current'], fixture.own).trim();
+    const entry = join(fixture.paths.entriesDir, 'entry.md');
+    writeFileSync(entry, '# base\n');
+    const opts = { ownDir: fixture.own, caveatHome: fixture.home, paths: fixture.paths, logger, probeImpl: denied };
+    await syncOwn(opts);
+    const other = join(fixture.root, 'other');
+    git(['clone', '-b', branch, fixture.remote, other]);
+    configureIdentity(other);
+    writeFileSync(join(other, 'entries', 'entry.md'), '# remote change\n');
+    git(['add', '-A'], other); git(['commit', '-m', 'remote change'], other); git(['push'], other);
+    writeFileSync(entry, '# local change\n');
+    await expect(syncOwn(opts)).rejects.toMatchObject({ name: 'SyncError', code: 'SYNC_CONFLICT' });
+    expect(readFileSync(entry, 'utf8')).toBe('# local change\n');
+    expect(existsSync(join(fixture.own, '.git', 'rebase-merge'))).toBe(false);
+    expect(existsSync(join(fixture.own, '.git', 'rebase-apply'))).toBe(false);
+    expect(git(['status', '--porcelain'], fixture.own).trim()).toBe('');
   });
 
   it('refuses --init against an anonymous-readable remote (init-path boundary)', async () => {

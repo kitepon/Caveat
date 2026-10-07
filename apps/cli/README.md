@@ -146,6 +146,14 @@ are `ack <cursor>`, `resolve <fingerprint>`, `reopen <fingerprint>`, and
 boolean `true` keeps collection disabled. Runtime state lives under Caveat's
 own state directory, independently of the knowledge index and host hook files.
 
+Handled sync cancellation and remote failures retain local input and show a
+non-zero result without automatic app repair registration. Failed recovery is
+still reported. Severity uses observed impact (`warn` for a failed operation,
+`high` for an unavailable feature or failed recovery, `fatal` for confirmed data
+loss); occurrence counts do not raise it. Existing serious unresolved records
+remain unchanged until reviewed. Cause and recovery need diagnostic evidence.
+See the [reporting contract](https://github.com/kitepon/Caveat/blob/main/docs/01_plan.md#通信失敗の報告と重大度).
+
 Nothing is sent anywhere by default and the package contains no destination.
 To report to a collector you operate, also set
 `"runtimeErrorReportCredentialFile"` to the absolute path of the credential

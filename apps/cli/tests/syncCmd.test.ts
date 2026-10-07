@@ -6,8 +6,9 @@ const core = vi.hoisted(() => ({
   observeRuntimeError: vi.fn(),
 }));
 
-vi.mock('@caveat/core', () => core);
+vi.mock('@caveat/core', async (original) => ({ ...await original<typeof import('@caveat/core')>(), ...core }));
 
+import { SyncError, SyncRemoteError, SyncRecoveryError } from '@caveat/core';
 import { runSync } from '../src/commands/sync.js';
 import type { CliContext } from '../src/context.js';
 
@@ -31,6 +32,40 @@ afterEach(() => {
 });
 
 describe('caveat sync command', () => {
+  it('keeps cancellation visible without creating a repair report', async () => {
+    await runSync(ctx, { init: true, dryRun: false, trustRemotePrivate: false, yes: false }, {
+      ghRunner: (args) => args[0] === 'repo' && args[1] === 'view'
+        ? { status: 1, stdout: '', stderr: '' } : { status: 0, stdout: 'alice', stderr: '' },
+      isTty: () => true, confirm: () => false,
+    });
+    expect(process.exitCode).toBe(1);
+    expect(messages.join('\n')).toContain('cancelled');
+    expect(core.initOwnSync).not.toHaveBeenCalled();
+    expect(core.observeRuntimeError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new SyncError('REMOTE_VISIBILITY_INDETERMINATE', 'privacy probe failed'),
+    new SyncError('SYNC_CONFLICT', 'rebase was aborted'),
+    new SyncRemoteError('push', Error('connection interrupted')),
+  ])('surfaces a handled sync failure without an app repair record: %s', async (error) => {
+    core.syncOwn.mockRejectedValue(error);
+    await runSync(ctx, { dryRun: false, trustRemotePrivate: false, yes: false });
+    expect(process.exitCode).toBe(1);
+    expect(messages.join('\n')).toContain(error.message);
+    expect(core.observeRuntimeError).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new SyncRecoveryError(Error('abort failed')), 'recovery_failed'],
+    [Error('unexpected local failure'), 'operation_failed'],
+  ] as const)('reports actual operation/recovery failures with impact: %s', async (error, impact) => {
+    core.syncOwn.mockRejectedValue(error);
+    await runSync(ctx, { dryRun: false, trustRemotePrivate: false, yes: false });
+    expect(process.exitCode).toBe(1);
+    expect(core.observeRuntimeError).toHaveBeenCalledWith('CAVEAT.SYNC_FAILED', expect.objectContaining({ impact }));
+  });
+
   it('uses --repo without invoking gh', async () => {
     core.initOwnSync.mockResolvedValue({ message: 'initialized' });
     const runner = vi.fn();
