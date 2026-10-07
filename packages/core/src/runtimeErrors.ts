@@ -25,11 +25,11 @@ export type RuntimeErrorCode = keyof typeof definitions;
 // Local assessment input; the wire keeps the existing severity field.
 // Missing assessment retains legacy high pending review. It is not evidence of
 // a defect. Built-in producers supply the impact they actually observed.
-export type RuntimeErrorImpact = 'operation_failed' | 'feature_unavailable' | 'recovery_failed' | 'data_lost';
+export type RuntimeErrorImpact = 'operation_failed' | 'feature_unavailable' | 'recovery_failed' | 'data_lost' | 'mutation_outcome_unverified';
 export function runtimeErrorSeverity(impact?: RuntimeErrorImpact): 'fatal' | 'high' | 'warn' {
   if (impact === 'data_lost') return 'fatal';
   if (impact === 'operation_failed') return 'warn';
-  if (impact === undefined || impact === 'feature_unavailable' || impact === 'recovery_failed') return 'high';
+  if (impact === undefined || impact === 'feature_unavailable' || impact === 'recovery_failed' || impact === 'mutation_outcome_unverified') return 'high';
   throw Error('invalid_runtime_impact');
 }
 type Status = 'open' | 'resolved';

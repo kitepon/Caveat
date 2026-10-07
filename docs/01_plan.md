@@ -83,7 +83,8 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
   commitを同期する。pullの復旧失敗はhighで登録し、再試行前にrebaseの確認を求める。
 - 重大度の入力は実害。1操作の失敗はwarn、機能利用不能と復旧失敗はhigh、確認したデータ喪失は
   fatal。検索結果を返せるmarkHit/query log失敗はwarn、検索・contextを作れないhookはhigh。
-  MCPの単一tool失敗はwarn、server起動不能とindex利用不能はhigh。
+  MCPの読み取り1操作の失敗はwarn、server起動不能とindex利用不能はhigh。
+  MCPの記録・更新失敗は書き込み結果を確認できないためhighを保ち、再試行前にentryを照合する。
 - 原因未確定の登録はアプリ欠陥の確定を意味しない。rootの責任・復帰の可否・影響範囲は
   hook-details、report-status、autosync状態、操作時の診断と担当調査で確認する。
   未解決の重大な影響は後の軽い発生で下げない。旧版の証拠不足のhighは保持し、

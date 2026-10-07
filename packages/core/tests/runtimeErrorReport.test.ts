@@ -74,6 +74,18 @@ describe('runtime error report', { timeout: windowsHost ? 60_000 : 10_000 }, () 
     expect(existsSync(join(dirname(runtimeErrorsStatePath(env)), 'runtime-error-report.json'))).toBe(false);
   });
 
+  it('sends assessed warn/high impact using only the existing wire fields', async () => {
+    const { url, requests } = await receiver(accept);
+    const { env } = host(url);
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...at('2026-10-03T07:00:00.000Z', env), impact: 'operation_failed' });
+    recordRuntimeError('CAVEAT.MCP_TOOL_FAILED', { ...at('2026-10-03T07:01:00.000Z', env), impact: 'mutation_outcome_unverified' });
+    expect(await sendRuntimeErrorReport(at('2026-10-03T08:00:00.000Z', env))).toMatchObject({ status: 'sent', outcome: 'accepted', acknowledged_through: 2 });
+    const report = JSON.parse(requests[0]!.body.toString('utf8'));
+    expect(report.runtime_errors.map((r: { severity: string }) => r.severity)).toEqual(['warn', 'high']);
+    for (const row of report.runtime_errors) expect(Object.keys(row).sort()).toEqual(['component','error_code','fingerprint','first_seen','last_seen','message_template','occurrence_count','product_version','severity','state_schema_version','status'].sort());
+    expect(pending(env)).toBe(0);
+  });
+
   it('未受領の記録だけを署名して送り、署名付きの受領でだけcursorを進める', async () => {
     const { url, requests } = await receiver(accept);
     const { root, env } = host(url);

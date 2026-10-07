@@ -49,6 +49,8 @@ describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_
     setRuntimeErrorStatus(initial.fingerprint, 'resolved', opts);
     recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
     expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]).toMatchObject({ severity: 'warn', occurrence_count: 7, fingerprint: initial.fingerprint, first_seen: initial.first_seen });
+    recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'mutation_outcome_unverified' });
+    expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]?.severity).toBe('high');
     recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'data_lost' });
     expect(runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]?.severity).toBe('fatal');
   });
