@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.20.2. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.20.3. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -306,6 +306,16 @@ these details are excluded from snapshots and collector reports. Earlier
 versions did not save these details, so old failures cannot be reconstructed.
 Concurrent index writes wait up to one second per SQLite operation before
 reporting a lock failure; longer contention still produces an error.
+
+Handled sync cancellation, protected refusals, safely aborted conflicts and
+surfaced remote failures do not automatically create app repair records. Sync
+shows a failure, retains local entries and states that the remote result/cause
+may be unknown. Failed rebase recovery is still reported as high impact.
+Severity follows observed impact: one failed operation is `warn`, unavailable
+features or failed recovery are `high`, and confirmed data loss is `fatal`.
+Counts never raise severity. Serious unresolved impact and legacy history are
+preserved; cause and recovery still require investigation. See the
+[product reporting contract](docs/01_plan.md#通信失敗の報告と重大度).
 
 #### Sending runtime errors to your own collector (explicit opt-in)
 

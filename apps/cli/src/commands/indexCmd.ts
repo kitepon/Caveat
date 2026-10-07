@@ -30,7 +30,7 @@ export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<voi
   try {
     db = openDb({ path: ctx.paths.dbPath, logger: ctx.logger });
   } catch (error) {
-    observeRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { version: CAVEAT_VERSION });
+    observeRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { version: CAVEAT_VERSION, impact: 'feature_unavailable' });
     throw error;
   }
   try {
@@ -49,7 +49,7 @@ export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<voi
     }
     writeDigestMarker(ctx.caveatHome, computeEntriesDigest(ctx.paths));
   } catch (error) {
-    observeRuntimeError('CAVEAT.INDEX_FAILED', { version: CAVEAT_VERSION });
+    observeRuntimeError('CAVEAT.INDEX_FAILED', { version: CAVEAT_VERSION, impact: 'feature_unavailable' });
     throw error;
   } finally {
     db.close();

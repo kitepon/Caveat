@@ -19,6 +19,7 @@ export type SyncErrorCode =
   | 'REMOTE_PUBLIC'
   | 'REMOTE_VISIBILITY_INDETERMINATE'
   | 'SYNC_CONFLICT'
+  | 'REBASE_IN_PROGRESS'
   | 'OWN_REPO_EXISTS'
   | 'BOTH_HAVE_ENTRIES';
 
@@ -27,6 +28,33 @@ export class SyncError extends Error {
     super(message);
     this.name = 'SyncError';
   }
+}
+
+/** A failed remote command is an observation, not proof of an app defect. */
+export class SyncRemoteError extends Error {
+  constructor(public readonly phase: 'inspect' | 'pull' | 'push' | 'fetch', cause: unknown) {
+    super(`sync ${phase} did not complete; local entries are retained; remote result may be unknown: ${errorMessage(cause)}`, { cause });
+    this.name = 'SyncRemoteError';
+  }
+}
+
+export class SyncRecoveryError extends Error {
+  constructor(cause: unknown) {
+    super('sync recovery failed; inspect the local rebase before retrying', { cause });
+    this.name = 'SyncRecoveryError';
+  }
+}
+
+async function remoteOperation<T>(phase: SyncRemoteError['phase'], run: () => Promise<T>): Promise<T> {
+  try { return await run(); } catch (cause) { throw new SyncRemoteError(phase, cause); }
+}
+
+async function activeRebase(git: SimpleGit, ownDir: string): Promise<boolean> {
+  for (const name of ['rebase-merge', 'rebase-apply']) {
+    const path = (await git.raw(['rev-parse', '--git-path', name])).trim();
+    if (existsSync(resolve(ownDir, path))) return true;
+  }
+  return false;
 }
 
 export type ProbeImpl = (probeUrl: string | undefined) => Promise<RemoteAccess>;
@@ -143,6 +171,10 @@ export async function preflightSync(
     throw new SyncError('EXTERNAL_TOPLEVEL', `EXTERNAL_TOPLEVEL: own directory must be the repository root: ${requested} (root: ${root})`);
   }
 
+  if (await activeRebase(git, requested)) {
+    throw new SyncError('REBASE_IN_PROGRESS', 'a rebase is already active; inspect and finish or abort it before syncing');
+  }
+
   // symbolic-ref succeeds on an unborn branch (fresh init, no commits yet),
   // where `rev-parse --abbrev-ref HEAD` errors out. It fails on detached HEAD.
   let branch: string;
@@ -195,25 +227,29 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
     committed = true;
   }
 
-  const remoteBranch = (await git.raw(['ls-remote', '--heads', 'origin', preflight.branch])).trim();
+  const remoteBranch = (await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', 'origin', preflight.branch]))).trim();
   let pulled = false;
   if (remoteBranch) {
     try {
       await git.pull('origin', preflight.branch, ['--rebase']);
       pulled = true;
     } catch (err) {
+      // Pull may fail before rebase starts. Do not call every transport error
+      // a conflict, or claim recovery succeeded if an active rebase remains.
+      let rebasing: boolean;
+      try { rebasing = await activeRebase(git, preflight.ownDir); } catch (cause) { throw new SyncRecoveryError(cause); }
+      if (!rebasing) throw new SyncRemoteError('pull', err);
       try {
         await git.raw(['rebase', '--abort']);
-      } catch {
-        // A pull can fail before rebase begins; retain the original failure.
-      }
+        if (await activeRebase(git, preflight.ownDir)) throw Error('rebase still active');
+      } catch (cause) { throw new SyncRecoveryError(cause); }
       const detail = err instanceof Error ? err.message : String(err);
       throw new SyncError('SYNC_CONFLICT', `sync rebase failed and was aborted: ${detail}`);
     }
   }
 
   await reindexAndMark(opts);
-  await git.push('origin', preflight.branch, ['-u']);
+  await remoteOperation('push', () => git.push('origin', preflight.branch, ['-u']));
   return {
     ...preflight,
     committed,
@@ -270,10 +306,10 @@ function removeCanonicalScaffoldBeforeCheckout(ownDir: string): void {
 }
 
 async function defaultRemoteBranch(git: SimpleGit, url: string): Promise<string> {
-  const symref = await git.raw(['ls-remote', '--symref', url, 'HEAD']);
+  const symref = await remoteOperation('inspect', () => git.raw(['ls-remote', '--symref', url, 'HEAD']));
   const match = /^ref: refs\/heads\/([^\s]+)\s+HEAD$/m.exec(symref);
   if (match) return match[1]!;
-  const heads = await git.raw(['ls-remote', '--heads', url]);
+  const heads = await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', url]));
   const first = /refs\/heads\/([^\s]+)\s*$/m.exec(heads);
   if (!first) throw new Error(`remote has refs but no branch heads: ${url}`);
   return first[1]!;
@@ -290,7 +326,7 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
   }
 
   const inspector = createGit(ownDir);
-  const refs = (await inspector.raw(['ls-remote', '--heads', opts.url])).trim();
+  const refs = (await remoteOperation('inspect', () => inspector.raw(['ls-remote', '--heads', opts.url]))).trim();
   const entryCount = countMarkdownEntries(ownDir);
   if (refs && entryCount > 0) {
     throw new SyncError('BOTH_HAVE_ENTRIES', 'local and remote both contain entries; resolve the ownership conflict before initializing sync');
@@ -310,13 +346,13 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
       await git.add('-A');
       await git.commit(`caveat sync: initial import (${entryCount} entries)`);
       const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-      await git.push('origin', branch, ['-u']);
+      await remoteOperation('push', () => git.push('origin', branch, ['-u']));
       await reindexAndMark(opts);
       return { ownDir, branch, remoteWasEmpty: true };
     }
 
     const branch = await defaultRemoteBranch(git, opts.url);
-    await git.fetch('origin', branch);
+    await remoteOperation('fetch', () => git.fetch('origin', branch));
     // `caveat init --sync` scaffolds this exact file before it discovers an
     // existing remote. Remove only the product-generated byte-for-byte copy so
     // checkout can restore the remote's tracked scaffold without overwriting
@@ -330,9 +366,7 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
     // by OWN_REPO_EXISTS. Only remove the .git we just created; leave entries.
     try {
       rmSync(createdGitDir, { recursive: true, force: true });
-    } catch {
-      // Best-effort cleanup; surface the original failure below.
-    }
+    } catch (cause) { throw new SyncRecoveryError(cause); }
     throw err;
   }
 }

@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.20.2。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.20.3。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -235,6 +235,13 @@ stack traceは保存しません。収集は同じ`runtimeErrors`の設定に従
 collectorへの報告に含めません。旧版の失敗には詳細が無く、あとから復元できません。
 DB更新が重なると、SQLiteの各操作で最大1秒待ってからlockの失敗を報告します。
 長くlockされた場合はエラーが残ります。
+
+正常な同期の取消、設定・privacyの拒否、abort済みの競合、表示と入力保持ができた
+リモート操作失敗は、自動のアプリ修理登録へ上げません。失敗は非0終了で示し、
+通信失敗の原因と共有先の結果は未確定と明示します。rebaseの復旧失敗はhighで報告します。
+重大度は1操作の失敗がwarn、機能利用不能・復旧失敗がhigh、確認したデータ喪失がfatal。
+件数で引き上げず、未解決の重大な影響と旧履歴を保持します。根因・復帰・影響範囲は
+[製品の報告契約](docs/01_plan.md#通信失敗の報告と重大度)と既存診断を使って確認します。
 
 #### runtime errorを自分のcollectorへ送る（明示opt-in）
 

@@ -23,7 +23,7 @@ import {
 } from './remoteVisibility.js';
 import { createKeyserverKeyProvider } from './sealedKeys.js';
 import { prewarmSealedKeys } from './sealedIndex.js';
-import { SyncError, syncOwn } from './sync.js';
+import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn } from './sync.js';
 
 // Knowledge is worthless to the other terminals until it reaches the private
 // remote, so the periodic cycle runs on a human-scale interval. A cycle is one
@@ -148,6 +148,7 @@ export function classifyOwnSyncOutcome(
       return 'skip';
     case 'REMOTE_PUBLIC':
     case 'SYNC_CONFLICT':
+    case 'REBASE_IN_PROGRESS':
       return 'fail';
     case 'REMOTE_VISIBILITY_INDETERMINATE':
       return lastProbe?.kind === 'indeterminate' && lastProbe.reason === PROBE_REQUEST_FAILED_REASON
@@ -156,13 +157,20 @@ export function classifyOwnSyncOutcome(
   }
 }
 
+function syncFailureCode(err: unknown): string {
+  if (err instanceof SyncError) return err.code;
+  if (err instanceof SyncRemoteError) return `REMOTE_${err.phase.toUpperCase()}_FAILED`;
+  if (err instanceof SyncRecoveryError) return 'RECOVERY_FAILED';
+  return 'UNKNOWN';
+}
+
 export function ownSyncFailureSignature(err: unknown): string {
   // Code-only on purpose. SyncError messages for SYNC_CONFLICT embed raw git
   // rebase output (commit shas, changing file lists) that varies run to run;
   // hashing the message would mint a fresh signature every cycle, so the
   // consecutive-failure counter would never reach the suspend threshold on a
   // *persistent* conflict — exactly when E-5's escape hatch must fire.
-  const code = err instanceof SyncError ? err.code : 'UNKNOWN';
+  const code = syncFailureCode(err);
   return sha256(code);
 }
 
@@ -289,8 +297,8 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
         ownSyncState = { consecutiveFailureSignature: null, consecutiveFailureCount: 0 };
       } catch (err: unknown) {
         const disposition = classifyOwnSyncOutcome(err, lastProbe);
-        const code = err instanceof SyncError ? err.code : undefined;
-        own = { disposition, code };
+        const code = syncFailureCode(err);
+        own = { disposition, code: code === 'UNKNOWN' ? undefined : code };
         if (disposition === 'fail') {
           const failureSignature = ownSyncFailureSignature(err);
           const consecutiveFailureCount =

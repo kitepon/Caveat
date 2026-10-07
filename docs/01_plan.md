@@ -71,6 +71,32 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 | sealed publish / key rotation | [`../keyserver/README.md`](../keyserver/README.md) |
 | npm release | [`04_release_checklist.md`](04_release_checklist.md) |
 
+## 通信失敗の報告と重大度
+
+通信環境の事象、アプリの対処不良、原因未確定を分ける。通信コードや件数だけで欠陥や
+重大度を決めない。BugHubの通信判断契約は
+[NETWORK_REPORTING.md](https://github.com/kitepon/ServerManager/blob/main/bughub/NETWORK_REPORTING.md)。
+
+- 手動syncの正常な取消、設定・privacyの拒否、abortを確認できた競合、リモート操作の失敗は、
+  コマンドの表示と非0終了で知らせる。入力を保持し、これだけでは自動のアプリ修理登録をしない。
+  リモート操作失敗は原因未確定・相手の結果不明を明示する。再実行は共有先を照合し、Gitの同じ
+  commitを同期する。pullの復旧失敗はhighで登録し、再試行前にrebaseの確認を求める。
+- 重大度の入力は実害。1操作の失敗はwarn、機能利用不能と復旧失敗はhigh、確認したデータ喪失は
+  fatal。検索結果を返せるmarkHit/query log失敗はwarn、検索・contextを作れないhookはhigh。
+  MCPの単一tool失敗はwarn、server起動不能とindex利用不能はhigh。
+- 原因未確定の登録はアプリ欠陥の確定を意味しない。rootの責任・復帰の可否・影響範囲は
+  hook-details、report-status、autosync状態、操作時の診断と担当調査で確認する。
+  未解決の重大な影響は後の軽い発生で下げない。旧版の証拠不足のhighは保持し、
+  件数・時刻・fingerprintの自動再分類や推定解決をしない。外部の旧API呼出しで実害の指定が
+  無い場合も、旧highを保持して確認を要する。
+- 通信環境の影響も隠さない。syncが続けて失敗すれば既存autosyncの状態・再試行間隔と
+  繰り返し通知が残る。失敗回数は再試行の制御だけに使い、バグの重大度へ変換しない。
+  端末間の更新停止など重大な実害が分かった場合は環境担当へ範囲と根拠を報告し、
+  アプリの表示・入力保持・復旧の不良を確認した場合は別に修理する。
+- collector送信失敗は既存report-statusへ残す。受領未確認の記録を保持し、署名付きackだけで
+  受領済みにする。再送の累計で二重発生を作らない。送信失敗そのものをruntime errorへ再登録しない。
+- snapshotと送信JSONへ分類や実害の未対応項目は足さない。不足する根拠は既存診断と担当報告で補う。
+
 ## 現行: 通知配送とJev苦戦判定
 
 - Throughlineの公開CLIが返す完了3ターン（toolログを除き、取得できるThinkingを含む）を

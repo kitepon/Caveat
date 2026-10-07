@@ -2,6 +2,13 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.3] — 2026-10-07
+
+- Keep normal sync setup cancellation, privacy refusals, safely aborted conflicts and surfaced remote-command failures out of automatic app repair reports. Remote failures identify the failed operation and explicitly leave the cause/remote result unconfirmed.
+- Check whether pull actually started a rebase before aborting it. Failed recovery remains a high-impact runtime report. Local entries/commits survive a remote failure and a retry checks the remote branch before pushing.
+- Determine runtime severity from the observed operation/feature/recovery impact, rather than the code or occurrence count. Preserve serious unresolved impact and all historical fingerprints/counts/times; retain legacy records for evidence-based review.
+- Keep the existing signed-report JSON contract, unacknowledged report retention and duplicate-safe cumulative retry behavior.
+
 ## Unreleased
 
 ## [0.20.2] — 2026-10-06

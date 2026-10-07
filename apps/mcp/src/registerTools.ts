@@ -25,7 +25,7 @@ function expectedControlFlow(error: unknown) {
 function observeToolFailure<T>(handler: (args: T) => unknown | Promise<unknown>, productVersion = '0.0.0') {
   return async (args: T) => {
     try { return jsonResult(await handler(args)); }
-    catch (error) { if (!expectedControlFlow(error)) observeRuntimeError('CAVEAT.MCP_TOOL_FAILED', { version: productVersion }); throw error; }
+    catch (error) { if (!expectedControlFlow(error)) observeRuntimeError('CAVEAT.MCP_TOOL_FAILED', { version: productVersion, impact: 'operation_failed' }); throw error; }
   };
 }
 

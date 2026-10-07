@@ -72,7 +72,9 @@ export function errorMessage(err: unknown): string {
 }
 
 function reportHookError(host: HookHost, phase: HookDiagnosticPhase, err: unknown): void {
-  observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION });
+  observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION,
+    impact: phase === 'markHit error' || phase === 'query log error' || phase === 'json parse error'
+      ? 'operation_failed' : 'feature_unavailable' });
   observeHookDiagnostic(host.errorCode, phase, err, { version: CAVEAT_VERSION });
   process.stderr.write(`[${host.stderrTag}] ${phase}: ${errorMessage(err)}\n`);
   // A hook that fails this early never reaches the stop-time trigger, so a

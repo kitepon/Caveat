@@ -1,7 +1,7 @@
-import { observeRuntimeError, resetAutoSyncFailureState, syncOwn, initOwnSync } from '@caveat/core';
+import { observeRuntimeError, resetAutoSyncFailureState, syncOwn, initOwnSync, SyncError, SyncRemoteError, SyncRecoveryError } from '@caveat/core';
 import type { CliContext } from '../context.js';
 import { CAVEAT_VERSION } from '../version.js';
-import { askOnce, defaultGitHubRepoUrl, runGh, type GhRunner } from '../ghSetup.js';
+import { askOnce, defaultGitHubRepoUrl, runGh, RepoSetupError, type GhRunner } from '../ghSetup.js';
 
 export interface SyncCmdOptions {
   init?: boolean | string;
@@ -82,7 +82,15 @@ export async function runSync(
       }
     }
   } catch (err) {
-    observeRuntimeError('CAVEAT.SYNC_FAILED', { version: CAVEAT_VERSION });
+    // Safe refusals, cancellation and surfaced remote failures keep local input.
+    // Unexpected failures and failed recovery still require a producer report.
+    if (!(err instanceof RepoSetupError || err instanceof SyncError || err instanceof SyncRemoteError)) {
+      observeRuntimeError('CAVEAT.SYNC_FAILED', { version: CAVEAT_VERSION,
+        impact: err instanceof SyncRecoveryError ? 'recovery_failed' : 'operation_failed' });
+      ctx.logger.warn('sync did not complete; cause and recovery require investigation');
+    }
+    if (err instanceof SyncRemoteError) ctx.logger.warn(`sync remote command failed (${err.phase}); cause unconfirmed; local input retained; retry checks remote state`);
+    if (err instanceof SyncRecoveryError) ctx.logger.warn('sync recovery is unverified; do not retry before inspecting the rebase');
     const message = err instanceof Error ? err.message : String(err);
     ctx.logger.error(message);
     process.exitCode = 1;
