@@ -3,9 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
-import { nativeSyncSchedule, nativeScheduleUserId, quoteWindowsArgument, type NativeSyncScheduleOptions, type ScheduleCommand } from '../src/platform.js';
+import { nativeScheduleReadbackMatches, nativeSyncSchedule, nativeScheduleUserId, quoteWindowsArgument, type NativeSyncScheduleOptions, type ScheduleCommand } from '../src/platform.js';
 import { manageSyncSchedule, type ScheduleRunner } from '../src/syncSchedule.js';
 
+function definitionText(path: string): string {
+  const bytes = readFileSync(path);
+  return bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.subarray(2).toString('utf16le') : bytes.toString('utf8');
+}
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 function fixture(platform: NodeJS.Platform) {
@@ -21,7 +25,7 @@ function fixture(platform: NodeJS.Platform) {
     if (args.includes('show')) return { status: 0, stdout: present ? 'loaded' : 'not-found' };
     if (args.includes('print') || args.includes('/Query') || args.includes('-EncodedCommand') || args.includes('is-active')) {
       if (!present) return { status: plan.kind === 'launchd-user' ? 113 : 1, stdout: '' };
-      return { status: 0, stdout: plan.kind === 'windows-task' ? (readbackWrong ? plan.files[0]!.content.replace('caveat.js', 'foreign.js') : (existsSync(plan.files[0]!.path) ? readFileSync(plan.files[0]!.path, 'utf8') : plan.files[0]!.content)) : 'active' };
+      return { status: 0, stdout: plan.kind === 'windows-task' ? (readbackWrong ? plan.files[0]!.content.replace('caveat.js', 'foreign.js') : (existsSync(plan.files[0]!.path) ? definitionText(plan.files[0]!.path) : plan.files[0]!.content)) : 'active' };
     }
     if (args.includes('enable') || args.includes('bootstrap') || args.includes('/Create')) {
       if (fail) return { status: 1, stdout: 'private native error must not leak' };
@@ -224,12 +228,14 @@ it('Windows recovers an owned task after a corrupt-encoding readback and retains
   expect(f.present()).toBe(false);
 });
 
-it('Windows imports UTF-8 files through a Unicode string without a conflicting declaration', () => {
+it('Windows imports BOM-marked UTF-16LE files with exact non-ASCII arguments', () => {
   const f = fixture('win32');
   const importThroughBstr: ScheduleRunner = command => {
     if (command.args.includes('/Create')) {
-      const payload = readFileSync(f.plan.files[0]!.path, 'utf8');
-      expect(payload).not.toMatch(/encoding\s*=/i);
+      const bytes = readFileSync(f.plan.files[0]!.path);
+      expect([...bytes.subarray(0, 2)]).toEqual([0xff, 0xfe]);
+      const payload = bytes.subarray(2).toString('utf16le');
+      expect(payload).toMatch(/^<\?xml version="1.0" encoding="UTF-16"\?>/);
       // TaskDefinition.XmlText on Windows rejects a UTF-8 declaration in BSTR.
       if (/<\?xml[^?]*encoding=["']UTF-8["']/i.test(payload)) return { status: 1, stdout: 'unable to switch the encoding' };
       const document = new XMLParser().parse(payload).Task;
@@ -270,4 +276,48 @@ it('Linux and macOS identity generation runs no Windows process', () => {
   for (const platform of ['linux', 'darwin'] as const) {
     expect(nativeScheduleUserId('fixture', platform, () => { throw Error('must not run'); })).toBe('fixture');
   }
+});
+
+it('Windows accepts omitted native defaults but refuses explicit policy and argv changes', () => {
+  const f = fixture('win32');
+  const exported = f.plan.files[0]!.content.replace(/<Enabled>true<\/Enabled>/g, '')
+    .replace('<RunLevel>LeastPrivilege</RunLevel>', '').replace('<StopAtDurationEnd>false</StopAtDurationEnd>', '');
+  expect(nativeScheduleReadbackMatches(f.plan, exported)).toBe(true);
+  for (const changed of [
+    exported.replace('</CalendarTrigger>', '<Enabled>false</Enabled></CalendarTrigger>'),
+    exported.replace('</Settings>', '<Enabled>false</Enabled></Settings>'),
+    exported.replace('</Principal>', '<RunLevel>HighestAvailable</RunLevel></Principal>'),
+    exported.replace('</Repetition>', '<StopAtDurationEnd>true</StopAtDurationEnd></Repetition>'),
+    exported.replace('PT1M', 'PT2M'), exported.replace('caveat.js', 'foreign.js'),
+  ]) expect(nativeScheduleReadbackMatches(f.plan, changed)).toBe(false);
+});
+
+it('Windows migrates an owned legacy UTF-8 definition without losing byte ownership', async () => {
+  const { createHash } = await import('node:crypto');
+  const f = fixture('win32');
+  const oldFile = { path: f.plan.files[0]!.path, content: f.plan.files[0]!.content.replace(' encoding="UTF-16"', '') };
+  const old = { ...f.plan, files: [oldFile] };
+  mkdirSync(dirname(oldFile.path), { recursive: true }); writeFileSync(oldFile.path, oldFile.content);
+  const manifest = join(f.opts.caveatHome, 'sync', '.schedule.json');
+  writeFileSync(manifest, JSON.stringify({ schema: 'caveat.sync_schedule.v1', id: old.id, kind: old.kind,
+    definition: old, file_hashes: { [oldFile.path]: createHash('sha256').update(oldFile.content).digest('hex') },
+    registered: true, last_operation: 'installed', last_failure: 'schedule_native_command_failed' }));
+  f.setPresent();
+  expect(manageSyncSchedule('install', f.opts).status).toBe('success');
+  const bytes = readFileSync(oldFile.path); expect([...bytes.subarray(0, 2)]).toEqual([0xff, 0xfe]);
+  const saved = JSON.parse(readFileSync(manifest, 'utf8'));
+  expect(saved.file_hashes[oldFile.path]).toBe(createHash('sha256').update(bytes).digest('hex'));
+  expect(saved.last_failure).toBe('schedule_native_command_failed');
+  expect(manageSyncSchedule('status', f.opts).status).toBe('success');
+  expect(manageSyncSchedule('uninstall', f.opts).status).toBe('uninstalled');
+});
+
+it('Windows refuses byte-reencoded owned XML even if its decoded text is unchanged', () => {
+  const f = fixture('win32'); expect(manageSyncSchedule('install', f.opts).status).toBe('success');
+  const manifest = join(f.opts.caveatHome, 'sync', '.schedule.json'); const before = readFileSync(manifest, 'utf8');
+  const file = f.plan.files[0]!; writeFileSync(file.path, file.content, 'utf8');
+  const calls = f.calls.length;
+  expect(manageSyncSchedule('uninstall', f.opts).reason).toBe('schedule_definition_changed');
+  expect(f.calls.length).toBe(calls); expect(f.present()).toBe(true);
+  expect(readFileSync(manifest, 'utf8')).toBe(before);
 });

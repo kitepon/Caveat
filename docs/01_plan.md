@@ -39,6 +39,8 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
   取得できない時は登録せず固定reasonを返し、環境変数のdomain名からは推測しない。
   Node/CLI/data home/config homeを固定し、毎分起動から既存cycleの間隔・backoffを使う。
   定義hash・所有記録・cycle lockで他job/編集済み定義/実行中処理を保護する。
+  Windowsの新定義はUTF-16LE+BOMで保存し、hashは保存bytesに一致させる。
+  この候補を入れた検査機で旧候補へ戻す時は、新候補でschedule uninstallを済ませてから戻す。
   登録失敗を保持し、登録状態と受信成功を分ける。ログイン・sleep・再起動後の実行は実機検証する。
 - `caveat publish`: public entryだけを検査し、`README.md`とAES-256-GCM封緘bundleへ生成して
   public remoteを一方向更新する。non-showcase本文を平文treeへ置かない。

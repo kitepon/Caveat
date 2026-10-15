@@ -89,7 +89,7 @@ export function nativeScheduleUserId(
 export interface NativeSyncSchedule {
   id: string;
   kind: 'systemd-user' | 'launchd-user' | 'windows-task';
-  files: { path: string; content: string }[];
+  files: { path: string; content: string; encoding?: 'utf16le' }[];
   query: ScheduleCommand;
   inspect: ScheduleCommand;
   install: ScheduleCommand[];
@@ -97,6 +97,13 @@ export interface NativeSyncSchedule {
   reload: ScheduleCommand[];
   argv: string[];
 }
+/** Exact persisted bytes; absent encoding preserves legacy UTF-8 ownership. */
+export function nativeScheduleFileBytes(file: NativeSyncSchedule['files'][number]): Buffer {
+  if (file.encoding === 'utf16le') return Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(file.content, 'utf16le')]);
+  if (file.encoding !== undefined) throw Error('schedule_definition_encoding_invalid');
+  return Buffer.from(file.content, 'utf8');
+}
+
 export interface NativeSyncScheduleOptions {
   caveatHome: string; userHome: string; nodePath: string; cliPath: string;
   platform?: NodeJS.Platform; uid?: number; userId?: string;
@@ -145,11 +152,11 @@ export function nativeSyncSchedule(opts: NativeSyncScheduleOptions): NativeSyncS
   if (platform === 'win32') {
     if (!opts.userId || /[\x00-\x1f]/.test(opts.userId)) throw Error('schedule_user_id_required');
     const file = join(opts.caveatHome, 'sync', `${id}.xml`);
-    // Keep the declaration encoding-neutral: TaskDefinition.XmlText rejects
-    // a UTF-8 declaration in its UTF-16 BSTR input (observed on Windows).
+    // schtasks imports a BOM-marked UTF-16LE file, matching its Unicode XML
+    // declaration; BOM-less UTF-8 corrupted non-ASCII paths on Windows.
     // Daily repetition avoids locale-sensitive date arguments to schtasks.
-    const content = `<?xml version="1.0"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>Caveat private knowledge reception ${id}</Description></RegistrationInfo><Triggers><CalendarTrigger><Repetition><Interval>PT1M</Interval><Duration>P1D</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2020-01-01T00:00:00</StartBoundary><Enabled>true</Enabled><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers><Principals><Principal id="CurrentUser"><UserId>${xml(opts.userId)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT10M</ExecutionTimeLimit><Enabled>true</Enabled></Settings><Actions Context="CurrentUser"><Exec><Command>${xml(opts.nodePath)}</Command><Arguments>${xml(argv.slice(1).map(quoteWindowsArgument).join(' '))}</Arguments></Exec></Actions></Task>\n`;
-    return { id, kind: 'windows-task', argv, files: [{ path: file, content }],
+    const content = `<?xml version="1.0" encoding="UTF-16"?>\n<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Description>Caveat private knowledge reception ${id}</Description></RegistrationInfo><Triggers><CalendarTrigger><Repetition><Interval>PT1M</Interval><Duration>P1D</Duration><StopAtDurationEnd>false</StopAtDurationEnd></Repetition><StartBoundary>2020-01-01T00:00:00</StartBoundary><Enabled>true</Enabled><ScheduleByDay><DaysInterval>1</DaysInterval></ScheduleByDay></CalendarTrigger></Triggers><Principals><Principal id="CurrentUser"><UserId>${xml(opts.userId)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings><MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><ExecutionTimeLimit>PT10M</ExecutionTimeLimit><Enabled>true</Enabled></Settings><Actions Context="CurrentUser"><Exec><Command>${xml(opts.nodePath)}</Command><Arguments>${xml(argv.slice(1).map(quoteWindowsArgument).join(' '))}</Arguments></Exec></Actions></Task>\n`;
+    return { id, kind: 'windows-task', argv, files: [{ path: file, content, encoding: 'utf16le' }],
       query: command('powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(
         `$ErrorActionPreference = 'Stop'; try { $scheduler = New-Object -ComObject Schedule.Service; $scheduler.Connect(); $task = $scheduler.GetFolder('\\').GetTask('${id}'); $bytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes($task.Xml); $stdout = [Console]::OpenStandardOutput(); $stdout.Write($bytes, 0, $bytes.Length); $stdout.Flush(); exit 0 } catch { exit 1 }`, 'utf16le').toString('base64')),
       inspect: command('powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
@@ -182,14 +189,17 @@ export function nativeScheduleReadbackMatches(plan: NativeSyncSchedule, stdout: 
     const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true, trimValues: false, parseTagValue: false });
     const actual = parser.parse(stdout).Task;
     const expected = parser.parse(plan.files[0]!.content).Task;
+    // Task Scheduler exports omit these schema defaults. Explicit changes still fail.
+    // https://learn.microsoft.com/windows/win32/taskschd/task-scheduler-schema
+    const defaulted = (value: unknown, fallback: string) => value === undefined ? fallback : value;
     const triggerFields = (task: typeof actual) => {
       const trigger = task.Triggers.CalendarTrigger;
-      return [trigger.StartBoundary, trigger.Enabled, trigger.ScheduleByDay.DaysInterval,
-        trigger.Repetition.Interval, trigger.Repetition.Duration, trigger.Repetition.StopAtDurationEnd];
+      return [trigger.StartBoundary, defaulted(trigger.Enabled, 'true'), trigger.ScheduleByDay.DaysInterval,
+        trigger.Repetition.Interval, trigger.Repetition.Duration, defaulted(trigger.Repetition.StopAtDurationEnd, 'false')];
     };
     const values = (task: typeof actual) => [task.Actions.Exec.Command, task.Actions.Exec.Arguments,
-      ...triggerFields(task), task.Principals.Principal.LogonType, task.Principals.Principal.RunLevel,
-      task.Settings.MultipleInstancesPolicy, task.Settings.ExecutionTimeLimit, task.Settings.Enabled];
+      ...triggerFields(task), task.Principals.Principal.LogonType, defaulted(task.Principals.Principal.RunLevel, 'LeastPrivilege'),
+      task.Settings.MultipleInstancesPolicy, task.Settings.ExecutionTimeLimit, defaulted(task.Settings.Enabled, 'true')];
     return JSON.stringify(values(actual)) === JSON.stringify(values(expected));
   } catch { return false; }
 }

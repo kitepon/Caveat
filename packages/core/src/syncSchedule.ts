@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { acquireFileLock, releaseFileLock } from './autoReindex.js';
-import { nativeSchedulePresent, nativeScheduleReadbackMatches, nativeScheduleCanRecover, nativeSyncSchedule, type NativeSyncSchedule, type NativeSyncScheduleOptions, type ScheduleCommand } from './platform.js';
+import { nativeScheduleFileBytes, nativeSchedulePresent, nativeScheduleReadbackMatches, nativeScheduleCanRecover, nativeSyncSchedule, type NativeSyncSchedule, type NativeSyncScheduleOptions, type ScheduleCommand } from './platform.js';
 
 export type ScheduleRunner = (command: ScheduleCommand) => { status: number; stdout: string };
 export interface SyncScheduleState {
@@ -16,7 +16,7 @@ export interface SyncScheduleResult {
   schema: 'caveat.sync_schedule_result.v1'; status: 'success' | 'failed' | 'planned' | 'uninstalled';
   reason: string; definition?: NativeSyncSchedule; registered?: boolean; definition_matches?: boolean;
 }
-const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const statePath = (home: string) => join(home, 'sync', '.schedule.json');
 const defaultRunner: ScheduleRunner = command => {
   const result = spawnSync(command.command, command.args, { encoding: 'utf8', timeout: 30_000, windowsHide: true });
@@ -43,11 +43,11 @@ function verifyOwned(plan: NativeSyncSchedule, old: SyncScheduleState): void {
     const expected = old.file_hashes[file.path];
     if (!expected) { if (existsSync(file.path)) throw Error('schedule_file_unmanaged'); continue; }
     if (!existsSync(file.path) || !lstatSync(file.path).isFile() || lstatSync(file.path).isSymbolicLink()
-      || digest(readFileSync(file.path, 'utf8')) !== expected) throw Error('schedule_definition_changed');
+      || digest(readFileSync(file.path)) !== expected) throw Error('schedule_definition_changed');
   }
 }
 function filesMatch(plan: NativeSyncSchedule): boolean {
-  return plan.files.every(file => existsSync(file.path) && lstatSync(file.path).isFile() && !lstatSync(file.path).isSymbolicLink() && readFileSync(file.path, 'utf8') === file.content);
+  return plan.files.every(file => existsSync(file.path) && lstatSync(file.path).isFile() && !lstatSync(file.path).isSymbolicLink() && readFileSync(file.path).equals(nativeScheduleFileBytes(file)));
 }
 function nativeReadback(plan: NativeSyncSchedule, run: ScheduleRunner, query: ScheduleCommand = plan.query): boolean {
   const result = run(query);
@@ -109,10 +109,10 @@ export function manageSyncSchedule(action: 'install' | 'status' | 'uninstall', o
     if (present) commands(plan.remove, run);
     for (const file of plan.files) {
       mkdirSync(dirname(file.path), { recursive: true });
-      writeFileSync(file.path, file.content, { mode: 0o600, flag: old?.file_hashes[file.path] ? 'w' : 'wx' });
+      writeFileSync(file.path, nativeScheduleFileBytes(file), { mode: 0o600, flag: old?.file_hashes[file.path] ? 'w' : 'wx' });
     }
     owned = { schema: 'caveat.sync_schedule.v1', id: plan.id, kind: plan.kind,
-      file_hashes: Object.fromEntries(plan.files.map(file => [file.path, digest(file.content)])), registered: false,
+      file_hashes: Object.fromEntries(plan.files.map(file => [file.path, digest(nativeScheduleFileBytes(file))])), registered: false,
       definition: plan, last_operation: 'installing', last_failure: old?.last_failure ?? null };
     save(opts.caveatHome, owned);
     commands(plan.install, run);
