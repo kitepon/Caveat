@@ -223,3 +223,23 @@ it('Windows recovers an owned task after a corrupt-encoding readback and retains
   expect(manageSyncSchedule('uninstall', f.opts).status).toBe('uninstalled');
   expect(f.present()).toBe(false);
 });
+
+it('Windows imports UTF-8 files through a Unicode string without a conflicting declaration', () => {
+  const f = fixture('win32');
+  const importThroughBstr: ScheduleRunner = command => {
+    if (command.args.includes('/Create')) {
+      const payload = readFileSync(f.plan.files[0]!.path, 'utf8');
+      expect(payload).not.toMatch(/encoding\s*=/i);
+      // TaskDefinition.XmlText on Windows rejects a UTF-8 declaration in BSTR.
+      if (/<\?xml[^?]*encoding=["']UTF-8["']/i.test(payload)) return { status: 1, stdout: 'unable to switch the encoding' };
+      const document = new XMLParser().parse(payload).Task;
+      expect(document.Actions.Exec.Command).toBe(f.opts.nodePath);
+      expect(document.Actions.Exec.Arguments).toContain('私 & data');
+      expect(document.Principals.Principal.LogonType).toBe('InteractiveToken');
+    }
+    return f.opts.runner(command);
+  };
+  expect(manageSyncSchedule('install', { ...f.opts, runner: importThroughBstr }).status).toBe('success');
+  expect(manageSyncSchedule('status', f.opts).status).toBe('success');
+  expect(manageSyncSchedule('uninstall', f.opts).status).toBe('uninstalled');
+});
