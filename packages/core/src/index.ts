@@ -6,6 +6,7 @@ export * from './indexer.js';
 export * from './autoReindex.js';
 export * from './autoSync.js';
 export * from './periodicSync.js';
+export * from './syncSchedule.js';
 export * from './repository.js';
 export * from './id.js';
 export * from './writer.js';

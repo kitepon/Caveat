@@ -305,6 +305,13 @@ caveat runtime-errors report-status --json
   `caveat autosync status --json`で最後の実試行・失敗・成功完了を確認できます。
   保留になっても直前の失敗や成功は保持します。このコマンドはOSの予定を登録しません。
   停止・スリープ中の端末は受信できません。
+  定期起動は`caveat autosync schedule install --json --dry-run`で定義を確認し、
+  `--dry-run`を外した時だけ登録します。systemd user timer・launchd user agent・Windowsの
+  現在ユーザーのタスクを使います。`autosync schedule status --json`で読戻し、
+  `autosync schedule uninstall --json`で自分が登録した定義だけを解除します。
+  他jobや変更された定義は上書きしません。現在のNode/CLI・data home・設定homeを固定するため、
+  移動後はinstallを再実行します。毎分起動して既存の間隔・再試行待機に従います。
+  ユーザーセッションとOSの予定機構が必要で、登録成功だけでは受信完了を意味しません。
 
 - **`caveat publish`** — `visibility: public`だけを検査し、決定的なAES-256-GCM封緘bundleと
   生成READMEを公開repoへ一方向反映します。公開treeは`README.md`と

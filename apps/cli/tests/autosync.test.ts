@@ -40,3 +40,23 @@ describe('autosync JSON and completion status', () => {
     expect(JSON.stringify(result)).not.toContain(ctx.caveatHome); expect(process.exitCode).toBe(1);
   });
 });
+
+it('schedule dry-run uses the shipped CLI and explicit homes without registration or state writes', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { existsSync, readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const ctx = fixture();
+  writeFileSync(ctx.userConfigPath, JSON.stringify({ knowledgeRepo: 'knowledge-fixture' }));
+  const before = readFileSync(ctx.userConfigPath, 'utf8');
+  const cli = fileURLToPath(new URL('../dist/caveat.js', import.meta.url));
+  const child = spawnSync(process.execPath, [cli, 'autosync', 'schedule', 'install', '--json', '--dry-run', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome], { encoding: 'utf8', timeout: 10_000 });
+  expect(child.status).toBe(0);
+  const result = JSON.parse(child.stdout);
+  expect(result).toMatchObject({ schema: 'caveat.sync_schedule_result.v1', status: 'planned', reason: 'install' });
+  expect(result.definition.argv).toEqual([process.execPath, cli, 'autosync', 'run', '--json', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome]);
+  expect(existsSync(ctx.caveatHome)).toBe(false); expect(readFileSync(ctx.userConfigPath, 'utf8')).toBe(before);
+  // Generated native argv must be accepted by the actual shipped CLI.
+  const cycle = spawnSync(result.definition.argv[0], result.definition.argv.slice(1), { encoding: 'utf8', timeout: 10_000, env: { ...process.env, CAVEAT_AUTO_SYNC: 'off' } });
+  expect(cycle.status).toBe(2); expect(JSON.parse(cycle.stdout)).toMatchObject({ status: 'skipped', reason: 'disabled' });
+  expect(readFileSync(ctx.userConfigPath, 'utf8')).toBe(before);
+});

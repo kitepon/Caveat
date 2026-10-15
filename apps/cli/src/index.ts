@@ -19,7 +19,7 @@ import { runCursorHook } from './commands/cursorHookCmd.js';
 import { installCursorHooks, uninstallCursorHooks } from './cursorInstall.js';
 import { runPull } from './commands/pull.js';
 import { runSync } from './commands/sync.js';
-import { autosyncStatus, runAutosync } from './commands/autosync.js';
+import { autosyncSchedule, autosyncStatus, runAutosync } from './commands/autosync.js';
 import { runPublish } from './commands/publish.js';
 import {
   runCommunityAdd,
@@ -60,12 +60,22 @@ program
 
 const runtimeErrors = program.command('runtime-errors').description('Inspect Caveat opt-in runtime errors');
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
-autosync.command('run').requiredOption('--json', 'emit the completed cycle result').action(async () => {
-  await runAutosync(buildContext({ info: () => {}, warn: () => {}, error: () => {} }));
+type AutosyncOptions = { caveatHome?: string; userHome?: string; dryRun?: boolean };
+const autosyncCommand = (parent: Command, name: string) => parent.command(name)
+  .requiredOption('--json', 'emit a versioned JSON result')
+  .option('--caveat-home <path>', 'fixed Caveat data directory')
+  .option('--user-home <path>', 'fixed home containing .caveatrc.json');
+autosyncCommand(autosync, 'run').action(async (opts: AutosyncOptions) => {
+  await runAutosync(buildContext({ info: () => {}, warn: () => {}, error: () => {} }, opts));
 });
-autosync.command('status').requiredOption('--json', 'emit the last attempt, failure, and success').action(() => {
-  autosyncStatus(buildContext(stdoutLogger));
+autosyncCommand(autosync, 'status').action((opts: AutosyncOptions) => {
+  autosyncStatus(buildContext(stdoutLogger, opts));
 });
+const schedule = autosync.command('schedule').description('Explicitly manage the current user reception schedule');
+for (const action of ['install', 'status', 'uninstall'] as const) {
+  autosyncCommand(schedule, action).option('--dry-run', 'print the definition without writing or running native commands')
+    .action((opts: AutosyncOptions) => autosyncSchedule(buildContext(stdoutLogger, opts), action, opts.dryRun));
+}
 const jev = program.command('jev').description('Configure Jev struggle detection');
 jev.command('enable').requiredOption('--key-stdin', 'read the TypeSafe API key from stdin').action(async () => { await enableJev(buildContext(stdoutLogger)); });
 jev.command('disable').action(() => { disableJev(buildContext(stdoutLogger)); });
