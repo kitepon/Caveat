@@ -255,8 +255,9 @@ it('Windows schedules use the current token SID, without interpolating account n
   const sid = 'S-1-5-21-123-456-789-1001';
   expect(nativeScheduleUserId('WORKGROUP\\私; untrusted', 'win32', command => {
     commands.push(command); return { status: 0, stdout: `${sid}\r\n` };
-  })).toBe(sid);
+  }, 'C:\\Windows')).toBe(sid);
   expect(commands).toHaveLength(1);
+  expect(commands[0]!.command).toBe('C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
   expect(commands[0]!.args).toContain('-NonInteractive');
   expect(commands[0]!.args.at(-1)).toContain('WindowsIdentity]::GetCurrent().User.Value');
   expect(JSON.stringify(commands)).not.toMatch(/WORKGROUP|untrusted|USERDOMAIN|RegisterTask|schtasks/);
@@ -268,9 +269,9 @@ it('Windows identity lookup rejects failed, malformed or extra output without gu
   for (const result of [{ status: 1, stdout: 'S-1-5-21-123-1001' }, { status: -1, stdout: '' },
     { status: 0, stdout: '' }, { status: 0, stdout: 'WORKGROUP\\fixture' },
     { status: 0, stdout: 'S-1-5-21-123-1001\nextra' }, { status: 0, stdout: 'private error text' }]) {
-    expect(() => nativeScheduleUserId('fallback', 'win32', () => result)).toThrow('schedule_user_identity_unavailable');
+    expect(() => nativeScheduleUserId('fallback', 'win32', () => result, 'C:\\Windows')).toThrow(`schedule_user_identity_unavailable_${result.status === 0 ? 'output' : 'exit'}`);
   }
-  expect(() => nativeScheduleUserId('fallback', 'win32', () => { throw Error('private spawn detail'); })).toThrow('schedule_user_identity_unavailable');
+  expect(() => nativeScheduleUserId('fallback', 'win32', () => { throw Error('private spawn detail'); }, 'C:\\Windows')).toThrow('schedule_user_identity_unavailable_spawn');
 });
 it('Linux and macOS identity generation runs no Windows process', () => {
   for (const platform of ['linux', 'darwin'] as const) {
@@ -320,4 +321,12 @@ it('Windows refuses byte-reencoded owned XML even if its decoded text is unchang
   expect(manageSyncSchedule('uninstall', f.opts).reason).toBe('schedule_definition_changed');
   expect(f.calls.length).toBe(calls); expect(f.present()).toBe(true);
   expect(readFileSync(manifest, 'utf8')).toBe(before);
+});
+
+it('Windows identity refuses missing or relative system roots without searching cwd or PATH', () => {
+  for (const root of ['', 'relative', 'C:\\Windows\n']) {
+    let called = false;
+    expect(() => nativeScheduleUserId('fallback', 'win32', () => { called = true; return { status: 0, stdout: 'S-1-5-21-1-1001' }; }, root)).toThrow('schedule_user_identity_unavailable_root');
+    expect(called).toBe(false);
+  }
 });

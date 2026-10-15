@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { recordRuntimeError, runtimeErrorsConfigPath, signRuntimeErrorReportReceipt } from '@caveat/core';
+import { recordRuntimeError, runtimeErrorsConfigPath, runtimeErrorsStatePath, signRuntimeErrorReportReceipt } from '@caveat/core';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const cli = join(repo, 'apps', 'cli', 'dist', 'caveat.js');
@@ -54,7 +54,7 @@ function isolated(url: string | null) {
   const credentialFile = join(root, 'caveat-credential.json');
   if (url !== null) writeFileSync(credentialFile, JSON.stringify({ url, key_id: 'cli-test', secret: SECRET }), { mode: 0o600 });
   writeFileSync(runtimeErrorsConfigPath(env), JSON.stringify(url === null ? { runtimeErrors: true } : { runtimeErrors: true, runtimeErrorReportCredentialFile: credentialFile }));
-  return { env };
+  return { env, root };
 }
 const lastLine = (stdout: string) => JSON.parse(stdout.trim().split('\n').at(-1)!) as Record<string, any>;
 
@@ -98,9 +98,14 @@ describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 30_0
     expect(reports).toHaveLength(0);
   });
 
-  it('失敗したhookは待たされずに終わり、切り離したworkerが記録を送る', async () => {
+  it('失敗したhookは待たされずに終わり、切り離したworkerが記録を送る', { timeout: windowsHost ? 240_000 : 45_000 }, async () => {
     const { url, reports } = await receiver(accept);
-    const { env } = isolated(url);
+    const { env, root } = isolated(url);
+    const observer = fileURLToPath(new URL('./fixtures/reportWorkerObserver.cjs', import.meta.url));
+    const observation = join(root, 'worker-observation.jsonl');
+    env.CAVEAT_REPORT_FIXTURE_OBSERVER = observation;
+    env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --require ${JSON.stringify(observer.replace(/\\/g, '/'))}`;
+    const started = Date.now();
     const hook = await run(['hook', 'user-prompt-submit'], env, '{not json');
     expect(hook.status).toBe(0);
     expect(hook.stdout).toBe('');
@@ -112,9 +117,25 @@ describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 30_0
     expect(details.status).toBe(0);
     expect(lastLine(details.stdout)).toMatchObject({ schema: 'caveat.local_hook_diagnostics.v1', status: 'ready', records: [{ error_code: 'CAVEAT.CLAUDE_HOOK_FAILED', phase: 'json parse error', kind: 'invalid_json' }] });
     expect(JSON.stringify(reports[0])).not.toMatch(/hook-details|invalid_json|json parse error/);
-    // workerが受領を書き終えるまで待つ。
-    let status: Record<string, any> = {};
-    while (Date.now() < deadline) { status = lastLine((await run(['runtime-errors', 'report-status', '--json'], env)).stdout); if (status.last_outcome === 'accepted') break; await new Promise((resolve) => setTimeout(resolve, 200)); }
-    expect(status).toMatchObject({ pending_count: 0, last_outcome: 'accepted' });
+    // Wait on isolated raw files, then exercise the real CLI once. Repeated
+    // ACL-checking status children must not compete with the detached writer.
+    const storePath = runtimeErrorsStatePath(env);
+    const statePath = join(dirname(storePath), 'runtime-error-report.json');
+    const read = (path: string): Record<string, any> => { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; } };
+    const observations = (): Array<Record<string, any>> => { try { return readFileSync(observation, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch { return []; } };
+    const acceptedAt = Date.now();
+    const savedDeadline = Date.now() + (windowsHost ? 60_000 : 10_000);
+    while (Date.now() < savedDeadline) {
+      if (read(storePath).acknowledged_through >= 1 && read(statePath).last_outcome === 'accepted') break;
+      if (observations().some(value => value.phase === 'exit')) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    const status = lastLine((await run(['runtime-errors', 'report-status', '--json'], env)).stdout);
+    const store = read(storePath), state = read(statePath);
+    const metrics = { hook_and_receipt_ms: acceptedAt - started, receipt_to_saved_ms: Date.now() - acceptedAt,
+      next_sequence: store.next_sequence ?? null, acknowledged_through: store.acknowledged_through ?? null,
+      last_outcome: state.last_outcome ?? null, lock_file_exists: existsSync(`${storePath}.lock.sqlite`), worker: observations() };
+    process.stderr.write(`[caveat_report_fixture] ${JSON.stringify(metrics)}\n`);
+    expect(status, JSON.stringify(metrics)).toMatchObject({ pending_count: 0, last_outcome: 'accepted' });
   });
 });

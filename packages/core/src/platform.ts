@@ -73,17 +73,25 @@ export function nativeScheduleUserId(
   platform: NodeJS.Platform = process.platform,
   run: (command: ScheduleCommand) => { status: number; stdout: string } = command => {
     const result = spawnSync(command.command, command.args, { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    if (result.error) throw Error('schedule_identity_spawn_failed');
     return { status: result.status ?? -1, stdout: result.stdout ?? '' };
   },
+  systemRoot = process.env.SystemRoot,
 ): string {
   if (!isWindows(platform)) return username;
+  let phase: 'root' | 'spawn' | 'exit' | 'output' = 'root';
   try {
-    const result = run({ command: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command',
+    if (!systemRoot || !win32.isAbsolute(systemRoot) || /[\x00-\x1f]/.test(systemRoot)) throw Error('schedule_system_root_unavailable');
+    phase = 'spawn';
+    const result = run({ command: win32.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), args: ['-NoProfile', '-NonInteractive', '-Command',
       "$ErrorActionPreference='Stop';try{[Console]::Write([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value);exit 0}catch{exit 1}"] });
+    phase = 'exit';
+    if (result.status !== 0) throw Error('schedule_identity_exit_failed');
+    phase = 'output';
     const sid = result.stdout.trim();
-    if (result.status === 0 && /^S-1-\d+(?:-\d+){1,15}$/.test(sid)) return sid;
+    if (/^S-1-\d+(?:-\d+){1,15}$/.test(sid)) return sid;
   } catch { /* Never fall back to environment/account-name guesses. */ }
-  throw Error('schedule_user_identity_unavailable');
+  throw Error(`schedule_user_identity_unavailable_${phase}`);
 }
 
 export interface NativeSyncSchedule {

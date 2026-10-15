@@ -51,7 +51,9 @@ it('schedule dry-run uses the shipped CLI and explicit homes without registratio
   const cli = fileURLToPath(new URL('../dist/caveat.js', import.meta.url));
   // Windows identity lookup is read-only and bounded at 30s before planning.
   const child = spawnSync(process.execPath, [cli, 'autosync', 'schedule', 'install', '--json', '--dry-run', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome], { encoding: 'utf8', timeout: 40_000 });
-  expect(child.status).toBe(0);
+  let reason: string | null = null;
+  try { const value = JSON.parse(child.stdout); if (typeof value.reason === 'string' && /^schedule_[a-z_]+$/.test(value.reason)) reason = value.reason; } catch { /* Do not expose raw child output. */ }
+  expect(child.status, JSON.stringify({ status: child.status, signal: child.signal, error_code: (child.error as NodeJS.ErrnoException | undefined)?.code ?? null, reason })).toBe(0);
   const result = JSON.parse(child.stdout);
   expect(result).toMatchObject({ schema: 'caveat.sync_schedule_result.v1', status: 'planned', reason: 'install' });
   expect(result.definition.argv).toEqual([process.execPath, cli, 'autosync', 'run', '--json', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome]);
