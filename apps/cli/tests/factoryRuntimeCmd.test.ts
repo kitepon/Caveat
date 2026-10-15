@@ -7,12 +7,20 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { openDb, recordRuntimeError, runtimeErrorsConfigPath, runtimeErrorsStatePath } from '@caveat/core';
 import { stringify as stringifyToml } from 'smol-toml';
+import { timedFixtureStep } from './fixtures/commandTiming.js';
 
 const repo = fileURLToPath(new URL('../../../', import.meta.url));
 const cli = join(repo, 'apps', 'cli', 'dist', 'caveat.js');
 
 function run(args: string[], env: NodeJS.ProcessEnv) {
-  return spawnSync(process.execPath, [cli, ...args], { cwd: repo, env, encoding: 'utf8', timeout: 20_000 });
+  const step = args[0] === 'runtime-errors' ? `runtime-errors ${args[1]}` : args[0]!;
+  const result = timedFixtureStep(env.CAVEAT_FACTORY_CLI_TRACE, step, () =>
+    spawnSync(process.execPath, [cli, ...args], { cwd: repo, env, encoding: 'utf8', timeout: 20_000 }),
+    value => ({ status: value.status, signal: value.signal, error_code: (value.error as NodeJS.ErrnoException | undefined)?.code ?? null,
+      stdout_bytes: Buffer.byteLength(value.stdout ?? ''), stderr_bytes: Buffer.byteLength(value.stderr ?? '') }));
+  // A killed child is not a successful negative-argument assertion.
+  expect(result.error).toBeUndefined(); expect(result.signal).toBeNull(); expect(result.status).not.toBeNull();
+  return result;
 }
 
 function json(result: ReturnType<typeof run>) {
@@ -26,7 +34,7 @@ function isolated() {
   const configHome = join(root, 'xdg-config'); const stateHome = join(root, 'xdg-state'); const localAppData = join(root, 'local-app-data');
   mkdirSync(home, { recursive: true }); mkdirSync(caveatHome, { recursive: true });
   const codexHome = join(root, 'codex');
-  const env = { ...process.env, HOME: home, USERPROFILE: home, LOCALAPPDATA: localAppData, CAVEAT_HOME: caveatHome, CODEX_HOME: codexHome, GROK_HOME: join(root, 'grok'), XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, PATH: process.env.PATH ?? '' };
+  const env = { ...process.env, CAVEAT_FACTORY_CLI_TRACE: '', HOME: home, USERPROFILE: home, LOCALAPPDATA: localAppData, CAVEAT_HOME: caveatHome, CODEX_HOME: codexHome, GROK_HOME: join(root, 'grok'), XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, PATH: process.env.PATH ?? '' };
   const runtimeConfig = runtimeErrorsConfigPath(env);
   mkdirSync(dirname(runtimeConfig), { recursive: true });
   writeFileSync(runtimeConfig, JSON.stringify({ runtimeErrors: true }));
@@ -141,8 +149,11 @@ describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
     expect(existsSync(db)).toBe(false); expect(existsSync(join(fixture.caveatHome, 'own'))).toBe(false);
   });
 
-  it('keeps prepared ready DB/config/git mtimes unchanged', () => {
-    const fixture = isolated(); readyFactory(fixture); const dbPath = join(fixture.caveatHome, 'index', 'caveat.db');
+  it('keeps prepared ready DB/config/git mtimes unchanged and exposes runtime JSON lifecycle plus negative arguments', { timeout: 90_000 }, () => {
+    // Fourteen bounded CLI children plus setup/ACL work measured 41.241s on the non-admin Windows runner.
+    // Retain the 20s per-child guard and every assertion; allow the whole sequence its own budget.
+    const fixture = isolated(); fixture.env.CAVEAT_FACTORY_CLI_TRACE = join(fixture.root, 'command-timing.jsonl');
+    timedFixtureStep(fixture.env.CAVEAT_FACTORY_CLI_TRACE, 'readyFactory', () => readyFactory(fixture)); const dbPath = join(fixture.caveatHome, 'index', 'caveat.db');
     const own = join(fixture.caveatHome, 'own');
     const config = runtimeErrorsConfigPath(fixture.env);
     const before = [statSync(dbPath).mtimeMs, statSync(config).mtimeMs, statSync(join(own, '.git')).mtimeMs];
@@ -164,13 +175,9 @@ describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
       connectors: { cursor: { compatibility_status: 'ready' } },
     });
     expect([statSync(dbPath).mtimeMs, statSync(config).mtimeMs, statSync(join(own, '.git')).mtimeMs]).toEqual(before);
-  });
 
-  // Runtime commands verify owner-only ACLs on Windows. Give this independent
-  // contract its own fixture/budget instead of combining 15 subprocess calls.
-  it('exposes the runtime JSON lifecycle', () => {
-    const fixture = isolated();
-    const recorded = recordRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { env: fixture.env, version: '0.16.3' });
+    const recorded = timedFixtureStep(fixture.env.CAVEAT_FACTORY_CLI_TRACE, 'runtime record', () =>
+      recordRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { env: fixture.env, version: '0.16.3' }));
     const snapshot = json(run(['runtime-errors', 'snapshot', '--json'], fixture.env));
     expect(snapshot).toMatchObject({ schema: 'caveat.runtime_errors.v1', product: 'caveat', diagnostics: { collection: 'enabled' } });
     const fingerprint = snapshot.runtime_errors[0].fingerprint as string; const cursor = snapshot.cursor.high_watermark as number;
@@ -179,10 +186,6 @@ describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
     expect(json(run(['runtime-errors', 'reopen', fingerprint, '--json'], fixture.env)).runtime_errors[0].fingerprint).toBe(fingerprint);
     expect(json(run(['runtime-errors', 'compact', '--json'], fixture.env)).schema).toBe('caveat.runtime_errors.v1');
     expect(runtimeErrorsStatePath(fixture.env)).toContain(fixture.root); expect(recorded.status).toBe('recorded');
-  });
-
-  it('rejects invalid runtime and factory CLI arguments', () => {
-    const fixture = isolated();
     expect(run(['runtime-errors', 'ack', '99', '--json'], fixture.env).status).not.toBe(0);
     expect(run(['runtime-errors', 'ack', 'not-a-number', '--json'], fixture.env).status).not.toBe(0);
     expect(run(['runtime-errors', 'resolve', 'nope', '--json'], fixture.env).status).not.toBe(0);
