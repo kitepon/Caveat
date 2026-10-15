@@ -31,7 +31,9 @@ Quasar junction boot failure reports a rare anchor mismatch.
 function cli(name: string, home: string, env: NodeJS.ProcessEnv = process.env) {
   return spawnSync(
     process.execPath,
-    ['--import', 'tsx', fileURLToPath(new URL('../src/index.ts', import.meta.url)), 'hook', name],
+    // Exercise the shipped entry point. Repeated tsx loader startup under the
+    // full CI load consumed the 5s test budget before these assertions ran.
+    [fileURLToPath(new URL('../dist/caveat.js', import.meta.url)), 'hook', name],
     {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       input: JSON.stringify({ session_id: 'auto-reindex', prompt: 'quasar junction boot failure' }),
