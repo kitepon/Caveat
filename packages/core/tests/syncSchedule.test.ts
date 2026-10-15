@@ -17,9 +17,9 @@ function fixture(platform: NodeJS.Platform) {
   const run: ScheduleRunner = command => {
     calls.push(command);
     const args = command.args;
-    if (command.command === 'powershell.exe') return { status: present ? 0 : 3, stdout: '' };
+    if (command.command === 'powershell.exe' && !args.includes('-EncodedCommand')) return { status: present ? 0 : 3, stdout: '' };
     if (args.includes('show')) return { status: 0, stdout: present ? 'loaded' : 'not-found' };
-    if (args.includes('print') || args.includes('/Query') || args.includes('is-active')) {
+    if (args.includes('print') || args.includes('/Query') || args.includes('-EncodedCommand') || args.includes('is-active')) {
       if (!present) return { status: plan.kind === 'launchd-user' ? 113 : 1, stdout: '' };
       return { status: 0, stdout: plan.kind === 'windows-task' ? (readbackWrong ? plan.files[0]!.content.replace('caveat.js', 'foreign.js') : (existsSync(plan.files[0]!.path) ? readFileSync(plan.files[0]!.path, 'utf8') : plan.files[0]!.content)) : 'active' };
     }
@@ -196,4 +196,30 @@ it('Linux stops linked units before disable removes their manager definitions', 
   expect(manageSyncSchedule('uninstall', { ...f.opts, runner }).status).toBe('uninstalled');
   expect(active).toBe(false); expect(loaded).toBe(false);
   expect(f.plan.files.every(file => !existsSync(file.path))).toBe(true);
+});
+
+it('Windows reads non-ASCII XML through a read-only explicit UTF-8 COM command', () => {
+  const f = fixture('win32');
+  expect(f.plan.query.command).toBe('powershell.exe');
+  const script = Buffer.from(f.plan.query.args.at(-1)!, 'base64').toString('utf16le');
+  expect(script).toContain('(New-Object System.Text.UTF8Encoding($false)).GetBytes($task.Xml)');
+  expect(script).toContain('[Console]::OpenStandardOutput()');
+  expect(script).toContain('$stdout.Write($bytes, 0, $bytes.Length)');
+  expect(script).toContain(`GetTask('${f.plan.id}')`);
+  expect(script).not.toMatch(/RegisterTask|DeleteTask|CreateTask|Set-ScheduledTask/);
+});
+it('Windows recovers an owned task after a corrupt-encoding readback and retains the failure', () => {
+  const f = fixture('win32');
+  const damaged: ScheduleRunner = command => {
+    const result = f.opts.runner(command);
+    return command.args.includes('-EncodedCommand') ? { ...result, stdout: result.stdout.replace(/[^\x00-\x7f]/g, '?') } : result;
+  };
+  expect(manageSyncSchedule('install', { ...f.opts, runner: damaged }).reason).toBe('schedule_readback_failed');
+  expect(f.present()).toBe(true);
+  const manifest = join(f.opts.caveatHome, 'sync', '.schedule.json');
+  expect(JSON.parse(readFileSync(manifest, 'utf8'))).toMatchObject({ registered: false, last_failure: 'schedule_readback_failed' });
+  expect(manageSyncSchedule('install', f.opts).status).toBe('success');
+  expect(JSON.parse(readFileSync(manifest, 'utf8')).last_failure).toBe('schedule_readback_failed');
+  expect(manageSyncSchedule('uninstall', f.opts).status).toBe('uninstalled');
+  expect(f.present()).toBe(false);
 });
