@@ -104,7 +104,10 @@ describe('runAutoSync own-sync failure escape (E-5)', () => {
     }
   });
 
-  it('increments on repeated failure, escalates once at 3, suspends after, and resets manually', async () => {
+  // Seven autosync cycles with real Git measured 4.205s on non-admin Windows and exceeded
+  // the default 5s in the PR matrix (that timeout is a lower bound).
+  // Give this state-transition sequence 10s without changing its assertions.
+  it('increments on repeated failure, escalates once at 3, suspends after, and resets manually', { timeout: 10_000 }, async () => {
     const { home, paths, ownDir, cleanup } = freshOwnRepoWithUnprobeableRemote();
     try {
       const opts = { caveatHome: home, ownDir, paths, logger: silent };
