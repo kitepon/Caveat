@@ -41,7 +41,7 @@ describe('autosync JSON and completion status', () => {
   });
 });
 
-it('schedule dry-run uses the shipped CLI and explicit homes without registration or state writes', async () => {
+it('schedule dry-run uses the shipped CLI and explicit homes without registration or state writes', { timeout: 60_000 }, async () => {
   const { spawnSync } = await import('node:child_process');
   const { existsSync, readFileSync } = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
@@ -49,7 +49,8 @@ it('schedule dry-run uses the shipped CLI and explicit homes without registratio
   writeFileSync(ctx.userConfigPath, JSON.stringify({ knowledgeRepo: 'knowledge-fixture' }));
   const before = readFileSync(ctx.userConfigPath, 'utf8');
   const cli = fileURLToPath(new URL('../dist/caveat.js', import.meta.url));
-  const child = spawnSync(process.execPath, [cli, 'autosync', 'schedule', 'install', '--json', '--dry-run', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome], { encoding: 'utf8', timeout: 10_000 });
+  // Windows identity lookup is read-only and bounded at 30s before planning.
+  const child = spawnSync(process.execPath, [cli, 'autosync', 'schedule', 'install', '--json', '--dry-run', '--caveat-home', ctx.caveatHome, '--user-home', ctx.userHome], { encoding: 'utf8', timeout: 40_000 });
   expect(child.status).toBe(0);
   const result = JSON.parse(child.stdout);
   expect(result).toMatchObject({ schema: 'caveat.sync_schedule_result.v1', status: 'planned', reason: 'install' });

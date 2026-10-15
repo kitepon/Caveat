@@ -35,6 +35,8 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
   定期起動の登録はこの入口に含めず、通常init・更新から自動で有効化しない。
 - `caveat autosync schedule install|status|uninstall --json`: 現在ユーザーのsystemd/launchd/
   Task Scheduler定義を明示管理する。`--dry-run`は生成だけで書込み・native操作なし。
+  Windowsでは現tokenのSIDを読み取って登録主体に使う（dry-runでもこの読取processだけは実行する）。
+  取得できない時は登録せず固定reasonを返し、環境変数のdomain名からは推測しない。
   Node/CLI/data home/config homeを固定し、毎分起動から既存cycleの間隔・backoffを使う。
   定義hash・所有記録・cycle lockで他job/編集済み定義/実行中処理を保護する。
   登録失敗を保持し、登録状態と受信成功を分ける。ログイン・sleep・再起動後の実行は実機検証する。

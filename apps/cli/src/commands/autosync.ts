@@ -1,6 +1,6 @@
 import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
-import { manageSyncSchedule, readPeriodicSyncState, runPeriodicSync } from '@caveat/core';
+import { manageSyncSchedule, nativeScheduleUserId, readPeriodicSyncState, runPeriodicSync } from '@caveat/core';
 import type { CliContext } from '../context.js';
 
 export async function runAutosync(ctx: CliContext): Promise<void> {
@@ -26,11 +26,12 @@ export function autosyncSchedule(ctx: CliContext, action: 'install' | 'status' |
   let result;
   try {
     const user = userInfo();
-    const userId = process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${user.username}` : user.username;
+    const userId = nativeScheduleUserId(user.username);
     result = manageSyncSchedule(action, { caveatHome: resolve(ctx.caveatHome), userHome: resolve(ctx.userHome),
       nodePath: process.execPath, cliPath: resolve(process.argv[1]!), uid: user.uid, userId, dryRun });
-  } catch {
-    result = { schema: 'caveat.sync_schedule_result.v1', status: 'failed', reason: 'schedule_unavailable' };
+  } catch (error) {
+    const reason = error instanceof Error && /^schedule_[a-z_]+$/.test(error.message) ? error.message : 'schedule_unavailable';
+    result = { schema: 'caveat.sync_schedule_result.v1', status: 'failed', reason };
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   process.exitCode = result.status === 'failed' ? 1 : 0;

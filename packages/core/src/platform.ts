@@ -1,4 +1,5 @@
 import type { Stats } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { XMLParser } from 'fast-xml-parser';
 import { createHash } from 'node:crypto';
 import { join, isAbsolute, win32 } from 'node:path';
@@ -66,6 +67,25 @@ export function normalizePathCase(
 }
 
 export interface ScheduleCommand { command: string; args: string[] }
+/** Resolve the current token, never a guessed USERDOMAIN/account pair. */
+export function nativeScheduleUserId(
+  username: string,
+  platform: NodeJS.Platform = process.platform,
+  run: (command: ScheduleCommand) => { status: number; stdout: string } = command => {
+    const result = spawnSync(command.command, command.args, { encoding: 'utf8', timeout: 30_000, windowsHide: true });
+    return { status: result.status ?? -1, stdout: result.stdout ?? '' };
+  },
+): string {
+  if (!isWindows(platform)) return username;
+  try {
+    const result = run({ command: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command',
+      "$ErrorActionPreference='Stop';try{[Console]::Write([System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value);exit 0}catch{exit 1}"] });
+    const sid = result.stdout.trim();
+    if (result.status === 0 && /^S-1-\d+(?:-\d+){1,15}$/.test(sid)) return sid;
+  } catch { /* Never fall back to environment/account-name guesses. */ }
+  throw Error('schedule_user_identity_unavailable');
+}
+
 export interface NativeSyncSchedule {
   id: string;
   kind: 'systemd-user' | 'launchd-user' | 'windows-task';

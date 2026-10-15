@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { XMLParser } from 'fast-xml-parser';
-import { nativeSyncSchedule, quoteWindowsArgument, type NativeSyncScheduleOptions, type ScheduleCommand } from '../src/platform.js';
+import { nativeSyncSchedule, nativeScheduleUserId, quoteWindowsArgument, type NativeSyncScheduleOptions, type ScheduleCommand } from '../src/platform.js';
 import { manageSyncSchedule, type ScheduleRunner } from '../src/syncSchedule.js';
 
 const roots: string[] = [];
@@ -242,4 +242,32 @@ it('Windows imports UTF-8 files through a Unicode string without a conflicting d
   expect(manageSyncSchedule('install', { ...f.opts, runner: importThroughBstr }).status).toBe('success');
   expect(manageSyncSchedule('status', f.opts).status).toBe('success');
   expect(manageSyncSchedule('uninstall', f.opts).status).toBe('uninstalled');
+});
+
+it('Windows schedules use the current token SID, without interpolating account names', () => {
+  const commands: ScheduleCommand[] = [];
+  const sid = 'S-1-5-21-123-456-789-1001';
+  expect(nativeScheduleUserId('WORKGROUP\\私; untrusted', 'win32', command => {
+    commands.push(command); return { status: 0, stdout: `${sid}\r\n` };
+  })).toBe(sid);
+  expect(commands).toHaveLength(1);
+  expect(commands[0]!.args).toContain('-NonInteractive');
+  expect(commands[0]!.args.at(-1)).toContain('WindowsIdentity]::GetCurrent().User.Value');
+  expect(JSON.stringify(commands)).not.toMatch(/WORKGROUP|untrusted|USERDOMAIN|RegisterTask|schtasks/);
+  const f = fixture('win32');
+  const plan = nativeSyncSchedule({ ...f.opts, userId: sid });
+  expect(new XMLParser().parse(plan.files[0]!.content).Task.Principals.Principal.UserId).toBe(sid);
+});
+it('Windows identity lookup rejects failed, malformed or extra output without guessing', () => {
+  for (const result of [{ status: 1, stdout: 'S-1-5-21-123-1001' }, { status: -1, stdout: '' },
+    { status: 0, stdout: '' }, { status: 0, stdout: 'WORKGROUP\\fixture' },
+    { status: 0, stdout: 'S-1-5-21-123-1001\nextra' }, { status: 0, stdout: 'private error text' }]) {
+    expect(() => nativeScheduleUserId('fallback', 'win32', () => result)).toThrow('schedule_user_identity_unavailable');
+  }
+  expect(() => nativeScheduleUserId('fallback', 'win32', () => { throw Error('private spawn detail'); })).toThrow('schedule_user_identity_unavailable');
+});
+it('Linux and macOS identity generation runs no Windows process', () => {
+  for (const platform of ['linux', 'darwin'] as const) {
+    expect(nativeScheduleUserId('fixture', platform, () => { throw Error('must not run'); })).toBe('fixture');
+  }
 });
