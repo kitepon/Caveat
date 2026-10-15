@@ -386,6 +386,20 @@ unaffected.
   ends. It never blocks you, it obeys the same refuse-if-anonymously-readable rule, and repeated
   failures back off rather than stopping silently. Set `CAVEAT_AUTO_SYNC=off` to sync only by hand.
 
+  For an OS scheduler, `caveat autosync run --json` waits for one cycle and emits its result.
+  It uses the existing 15-minute interval and failure backoff, skips uncommitted work, and shares
+  repository/index locks with manual and hook sync. Exit status is 0 for completed sync and indexing,
+  2 for an intentional skip, and 1 for failure. `caveat autosync status --json` retains the last actual
+  attempt, last failure, and last successful completion even after a skipped invocation. These commands
+  do not install an OS schedule; a sleeping or stopped terminal cannot receive updates.
+  To explicitly opt in, preview `caveat autosync schedule install --json --dry-run`, then omit
+  `--dry-run` to register a current-user systemd timer, launchd agent, or Windows task.
+  `autosync schedule status --json` reads registration and `autosync schedule uninstall --json`
+  removes only the owned definition. Edited definitions and foreign jobs are refused.
+  Registration fixes the current Node/CLI paths, Caveat home and configuration home; rerun install
+  after moving them. Jobs wake once a minute and use the existing interval/backoff. User sessions
+  and native schedulers must be available; registration does not prove successful reception.
+
 - **`caveat publish`** — scan only `visibility: public` entries, then generate a
   deterministic AES-256-GCM sealed bundle plus a generated README. The public
   mirror contains only `README.md` and `bundle/entries.caveat`; non-showcase

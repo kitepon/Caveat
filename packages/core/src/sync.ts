@@ -3,7 +3,7 @@ import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import type { Logger } from './db.js';
 import { openDb } from './db.js';
-import { computeEntriesDigest, reindexAllSources, writeDigestMarker } from './autoReindex.js';
+import { acquireFileLock, acquireReindexLock, computeEntriesDigest, reindexAllSources, releaseFileLock, writeDigestMarker, type FileLock } from './autoReindex.js';
 import type { ResolvedPaths } from './paths.js';
 import { deriveAnonymousProbeUrl, probeAnonymousRead, type RemoteAccess } from './remoteVisibility.js';
 import { createGit } from './gitRuntime.js';
@@ -21,7 +21,9 @@ export type SyncErrorCode =
   | 'SYNC_CONFLICT'
   | 'REBASE_IN_PROGRESS'
   | 'OWN_REPO_EXISTS'
-  | 'BOTH_HAVE_ENTRIES';
+  | 'BOTH_HAVE_ENTRIES'
+  | 'WORKTREE_DIRTY'
+  | 'SYNC_BUSY';
 
 export class SyncError extends Error {
   constructor(public readonly code: SyncErrorCode, message: string) {
@@ -79,6 +81,10 @@ export interface SyncOwnOptions extends PreflightSyncOptions {
   paths: Pick<ResolvedPaths, 'dbPath' | 'entriesDir' | 'communityDir'>;
   logger: Logger;
   dryRun?: boolean;
+  /** Scheduled reception must never commit an editor's unfinished work. */
+  dirtyPolicy?: 'commit' | 'refuse';
+  /** Internal: the autosync cycle already owns this home's reindex lock. */
+  heldReindexLock?: FileLock;
 }
 
 export interface SyncOwnResult extends SyncPreflight {
@@ -206,9 +212,35 @@ async function reindexAndMark(opts: Pick<SyncOwnOptions, 'caveatHome' | 'paths' 
 }
 
 export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
+  // All sync entry points take index then repository locks. The repository lock
+  // lives in Git's common directory, so different CAVEAT_HOMEs/worktrees agree.
+  const indexLock = opts.heldReindexLock ?? acquireReindexLock(opts.caveatHome);
+  if (!indexLock) throw new SyncError('SYNC_BUSY', 'reindex is already running; retry later');
+  let repoLock: FileLock | null = null;
+  try {
+    const git = createGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs });
+    if (await git.checkIsRepo()) {
+      const common = realpathSync.native(resolve(opts.ownDir, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
+      repoLock = acquireFileLock(join(common, '.caveat-sync-lock'));
+      if (!repoLock) throw new SyncError('SYNC_BUSY', 'this knowledge repository is already syncing; retry later');
+      if (opts.dirtyPolicy === 'refuse' && !(await git.status()).isClean()) {
+        throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained uncommitted changes; retry after editing');
+      }
+    }
+    return await syncOwnLocked(opts);
+  } finally {
+    if (repoLock) releaseFileLock(repoLock);
+    if (!opts.heldReindexLock) releaseFileLock(indexLock);
+  }
+}
+
+async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   const preflight = await preflightSync(opts.ownDir, opts);
   const git = createGit(preflight.ownDir, { timeoutMs: opts.gitTimeoutMs });
   const status = await git.status();
+  if (opts.dirtyPolicy === 'refuse' && !status.isClean()) {
+    throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained uncommitted changes; retry after editing');
+  }
   if (opts.dryRun) {
     return {
       ...preflight,
@@ -231,7 +263,7 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   let pulled = false;
   if (remoteBranch) {
     try {
-      await git.pull('origin', preflight.branch, ['--rebase']);
+      await git.pull('origin', preflight.branch, opts.dirtyPolicy === 'refuse' ? ['--rebase', '--no-autostash'] : ['--rebase']);
       pulled = true;
     } catch (err) {
       // Pull may fail before rebase starts. Do not call every transport error
@@ -248,6 +280,9 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
     }
   }
 
+  if (opts.dirtyPolicy === 'refuse' && !(await git.status()).isClean()) {
+    throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained edits made during reception');
+  }
   await reindexAndMark(opts);
   await remoteOperation('push', () => git.push('origin', preflight.branch, ['-u']));
   return {
