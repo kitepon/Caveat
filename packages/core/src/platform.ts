@@ -103,12 +103,12 @@ export function nativeSyncSchedule(opts: NativeSyncScheduleOptions): NativeSyncS
     const service = join(opts.userHome, '.config', 'systemd', 'user', `${id}.service`);
     const timer = join(opts.userHome, '.config', 'systemd', 'user', `${id}.timer`);
     return { id, kind: 'systemd-user', argv, files: [
-      { path: service, content: `[Unit]\nDescription=Caveat private knowledge reception\n[Service]\nType=oneshot\nExecStart=${argv.map(unitArg).join(' ')}\nSuccessExitStatus=2\n` },
+      { path: service, content: `[Unit]\nDescription=Caveat private knowledge reception\n[Service]\nType=oneshot\nTimeoutStartSec=10min\nExecStart=${argv.map(unitArg).join(' ')}\nSuccessExitStatus=2\n` },
       { path: timer, content: `[Unit]\nDescription=Caveat reception timer\n[Timer]\nOnBootSec=60s\nOnUnitInactiveSec=60s\nUnit=${id}.service\n[Install]\nWantedBy=timers.target\n` },
     ], query: command('systemctl', '--user', 'is-active', `${id}.timer`),
     inspect: command('systemctl', '--user', 'show', `${id}.timer`, '--property=LoadState', '--value'),
-    install: [command('systemctl', '--user', 'daemon-reload'), command('systemctl', '--user', 'enable', '--now', `${id}.timer`)],
-    remove: [command('systemctl', '--user', 'disable', '--now', `${id}.timer`), command('systemctl', '--user', 'stop', `${id}.service`)],
+    install: [command('systemctl', '--user', 'link', service, timer), command('systemctl', '--user', 'daemon-reload'), command('systemctl', '--user', 'enable', '--now', `${id}.timer`)],
+    remove: [command('systemctl', '--user', 'stop', `${id}.timer`, `${id}.service`), command('systemctl', '--user', 'disable', `${id}.timer`, `${id}.service`)],
     reload: [command('systemctl', '--user', 'daemon-reload')] };
   }
   if (platform === 'darwin') {
@@ -169,4 +169,9 @@ export function nativeScheduleReadbackMatches(plan: NativeSyncSchedule, stdout: 
       task.Settings.MultipleInstancesPolicy, task.Settings.ExecutionTimeLimit, task.Settings.Enabled];
     return JSON.stringify(values(actual)) === JSON.stringify(values(expected));
   } catch { return false; }
+}
+
+/** systemd can load linked units before enabling their timer succeeds. */
+export function nativeScheduleCanRecover(plan: NativeSyncSchedule, readback: () => boolean): boolean {
+  return plan.kind === 'systemd-user' || readback();
 }

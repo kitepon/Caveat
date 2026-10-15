@@ -148,3 +148,52 @@ it('Windows inspection errors retain live tasks and definition files', () => {
   expect(manageSyncSchedule('uninstall', { ...f.opts, runner }).reason).toBe('schedule_inspection_failed');
   expect(f.present()).toBe(true); expect(existsSync(f.plan.files[0]!.path)).toBe(true);
 });
+
+it('Linux links definitions outside the manager home and disables both owned links', () => {
+  const f = fixture('linux');
+  expect(f.plan.install[0]).toEqual({ command: 'systemctl', args: ['--user', 'link', ...f.plan.files.map(file => file.path)] });
+  expect(f.plan.remove[0]!.args).toEqual(['--user', 'stop', `${f.plan.id}.timer`, `${f.plan.id}.service`]);
+  expect(f.plan.remove[1]!.args).toEqual(['--user', 'disable', `${f.plan.id}.timer`, `${f.plan.id}.service`]);
+});
+
+it('Linux retains ownership after link succeeds and enable fails, allowing retry or uninstall', () => {
+  for (const recovery of ['install', 'uninstall'] as const) {
+    const f = fixture('linux'); let loaded = false; let enabled = false; let fail = true;
+    const runner: ScheduleRunner = command => {
+      if (command.args.includes('link')) loaded = true;
+      if (command.args.includes('show')) return { status: 0, stdout: loaded ? 'loaded' : 'not-found' };
+      if (command.args.includes('is-active')) return { status: enabled ? 0 : 3, stdout: enabled ? 'active' : 'inactive' };
+      if (command.args.includes('enable')) { if (fail) return { status: 1, stdout: '' }; enabled = true; }
+      if (command.args.includes('disable')) { loaded = false; enabled = false; }
+      return { status: 0, stdout: '' };
+    };
+    const opts = { ...f.opts, runner };
+    expect(manageSyncSchedule('install', opts).reason).toBe('schedule_native_command_failed');
+    expect(loaded).toBe(true); fail = false;
+    expect(manageSyncSchedule(recovery, opts).status).toBe(recovery === 'install' ? 'success' : 'uninstalled');
+    if (recovery === 'install') expect(manageSyncSchedule('uninstall', opts).status).toBe('uninstalled');
+    expect(loaded).toBe(false);
+  }
+});
+
+it('Linux stops linked units before disable removes their manager definitions', () => {
+  const f = fixture('linux'); let loaded = false; let active = false;
+  const runner: ScheduleRunner = command => {
+    const args = command.args;
+    if (args.includes('show')) return { status: 0, stdout: loaded ? 'loaded' : 'not-found' };
+    if (args.includes('is-active')) return { status: active ? 0 : 3, stdout: active ? 'active' : 'inactive' };
+    if (args.includes('link')) loaded = true;
+    if (args.includes('enable')) active = true;
+    if (args.includes('stop')) { if (!loaded) return { status: 5, stdout: '' }; active = false; }
+    if (args.includes('disable')) {
+      loaded = false;
+      // systemctl disable --now resolves stop after unlink/reload: no unit.
+      if (args.includes('--now')) return { status: 5, stdout: '' };
+    }
+    return { status: 0, stdout: '' };
+  };
+  expect(manageSyncSchedule('install', { ...f.opts, runner }).status).toBe('success');
+  expect(manageSyncSchedule('uninstall', { ...f.opts, runner }).status).toBe('uninstalled');
+  expect(active).toBe(false); expect(loaded).toBe(false);
+  expect(f.plan.files.every(file => !existsSync(file.path))).toBe(true);
+});

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { acquireFileLock, releaseFileLock } from './autoReindex.js';
-import { nativeSchedulePresent, nativeScheduleReadbackMatches, nativeSyncSchedule, type NativeSyncSchedule, type NativeSyncScheduleOptions, type ScheduleCommand } from './platform.js';
+import { nativeSchedulePresent, nativeScheduleReadbackMatches, nativeScheduleCanRecover, nativeSyncSchedule, type NativeSyncSchedule, type NativeSyncScheduleOptions, type ScheduleCommand } from './platform.js';
 
 export type ScheduleRunner = (command: ScheduleCommand) => { status: number; stdout: string };
 export interface SyncScheduleState {
@@ -85,7 +85,11 @@ export function manageSyncSchedule(action: 'install' | 'status' | 'uninstall', o
     if (old) verifyOwned(plan, old);
     const inspection = run(plan.inspect);
     const present = nativeSchedulePresent(plan.kind, inspection.status, inspection.stdout);
-    if (present && !old?.registered) throw Error('schedule_job_unmanaged');
+    const recoverable = old && ['installing', 'failed'].includes(old.last_operation)
+      && Object.keys(old.file_hashes).length === plan.files.length
+      && filesMatch(old.definition)
+      && nativeScheduleCanRecover(old.definition, () => nativeReadback(old!.definition, run, plan.query));
+    if (present && !old?.registered && !recoverable) throw Error('schedule_job_unmanaged');
     if (present && old?.registered && !nativeReadback(old.definition, run, plan.query)) throw Error('schedule_native_changed');
     if (action === 'uninstall') {
       if (present) commands(plan.remove, run);
