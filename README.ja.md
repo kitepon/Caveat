@@ -299,6 +299,13 @@ caveat runtime-errors report-status --json
   caveat sync --init --repo https://github.com/acme-corp/Caveat-Private.git   # 組織 / 自前ホスト
   ```
 
+  OSの予定から呼ぶ`caveat autosync run --json`は、同期と再索引の終了まで待って結果を返します。
+  既存の15分間隔と失敗時の待機を使い、編集中の変更があれば保留します。手動・hookとの
+  repo/index排他を共有します。終了値は成功0・保留2・失敗1です。
+  `caveat autosync status --json`で最後の実試行・失敗・成功完了を確認できます。
+  保留になっても直前の失敗や成功は保持します。このコマンドはOSの予定を登録しません。
+  停止・スリープ中の端末は受信できません。
+
 - **`caveat publish`** — `visibility: public`だけを検査し、決定的なAES-256-GCM封緘bundleと
   生成READMEを公開repoへ一方向反映します。公開treeは`README.md`と
   `bundle/entries.caveat`だけで、showcase以外の本文を平文配置しません。不正entryや

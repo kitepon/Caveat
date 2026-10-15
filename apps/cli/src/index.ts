@@ -19,6 +19,7 @@ import { runCursorHook } from './commands/cursorHookCmd.js';
 import { installCursorHooks, uninstallCursorHooks } from './cursorInstall.js';
 import { runPull } from './commands/pull.js';
 import { runSync } from './commands/sync.js';
+import { autosyncStatus, runAutosync } from './commands/autosync.js';
 import { runPublish } from './commands/publish.js';
 import {
   runCommunityAdd,
@@ -58,6 +59,13 @@ program
   });
 
 const runtimeErrors = program.command('runtime-errors').description('Inspect Caveat opt-in runtime errors');
+const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
+autosync.command('run').requiredOption('--json', 'emit the completed cycle result').action(async () => {
+  await runAutosync(buildContext({ info: () => {}, warn: () => {}, error: () => {} }));
+});
+autosync.command('status').requiredOption('--json', 'emit the last attempt, failure, and success').action(() => {
+  autosyncStatus(buildContext(stdoutLogger));
+});
 const jev = program.command('jev').description('Configure Jev struggle detection');
 jev.command('enable').requiredOption('--key-stdin', 'read the TypeSafe API key from stdin').action(async () => { await enableJev(buildContext(stdoutLogger)); });
 jev.command('disable').action(() => { disableJev(buildContext(stdoutLogger)); });

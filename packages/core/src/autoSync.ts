@@ -23,7 +23,7 @@ import {
 } from './remoteVisibility.js';
 import { createKeyserverKeyProvider } from './sealedKeys.js';
 import { prewarmSealedKeys } from './sealedIndex.js';
-import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn } from './sync.js';
+import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn, type ProbeImpl } from './sync.js';
 
 // Knowledge is worthless to the other terminals until it reaches the private
 // remote, so the periodic cycle runs on a human-scale interval. A cycle is one
@@ -145,6 +145,8 @@ export function classifyOwnSyncOutcome(
     case 'DETACHED_HEAD':
     case 'OWN_REPO_EXISTS':
     case 'BOTH_HAVE_ENTRIES':
+    case 'WORKTREE_DIRTY':
+    case 'SYNC_BUSY':
       return 'skip';
     case 'REMOTE_PUBLIC':
     case 'SYNC_CONFLICT':
@@ -225,18 +227,24 @@ export interface RunAutoSyncOptions {
   logger: Logger;
   now?: () => Date;
   gitTimeoutMs?: number;
+  dirtyPolicy?: 'commit' | 'refuse';
+  /** Optional interval, checked again while holding the cycle lock. */
+  debounceMs?: number;
+  probeImpl?: ProbeImpl;
 }
 
 export interface RunAutoSyncResult {
   ran: boolean;
   outcome?: AutoSyncOutcome;
   notified?: boolean;
+  skipReason?: 'disabled' | 'sync_busy' | 'index_busy' | 'interval_wait';
+  errorCode?: 'cycle_failed';
 }
 
 export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSyncResult> {
-  if (process.env[CAVEAT_AUTO_SYNC_ENV] === 'off') return { ran: false };
+  if (process.env[CAVEAT_AUTO_SYNC_ENV] === 'off') return { ran: false, skipReason: 'disabled' };
   const lock = acquireFileLock(autoSyncLockPath(opts.caveatHome));
-  if (!lock) return { ran: false };
+  if (!lock) return { ran: false, skipReason: 'sync_busy' };
 
   let reindexLock: ReturnType<typeof acquireReindexLock> = null;
   try {
@@ -247,12 +255,16 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
     // next stop retry promptly instead of silently deferring the push for up
     // to a full debounce window.
     reindexLock = acquireReindexLock(opts.caveatHome);
-    if (!reindexLock) return { ran: false };
+    if (!reindexLock) return { ran: false, skipReason: 'index_busy' };
 
     const nowDate = (opts.now ?? (() => new Date()))();
     const nowMs = nowDate.getTime();
     const nowIso = nowDate.toISOString();
     const previousState = readAutoSyncState(opts.caveatHome);
+    if (opts.debounceMs !== undefined && previousState
+      && nowMs - parseTimestamp(previousState.finishedAt) < opts.debounceMs) {
+      return { ran: false, skipReason: 'interval_wait' };
+    }
     let ownSyncState = previousState?.ownSync ?? {
       consecutiveFailureSignature: null,
       consecutiveFailureCount: 0,
@@ -281,10 +293,12 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
           caveatHome: opts.caveatHome,
           paths: opts.paths,
           logger: opts.logger,
+          dirtyPolicy: opts.dirtyPolicy,
+          heldReindexLock: reindexLock,
           trustRemotePrivate: false,
           gitTimeoutMs: opts.gitTimeoutMs ?? BACKGROUND_GIT_TIMEOUT_MS,
           probeImpl: async (url) => {
-            const probe = await probeAnonymousRead(url);
+            const probe = await (opts.probeImpl ?? probeAnonymousRead)(url);
             lastProbe = probe;
             return probe;
           },
@@ -317,6 +331,12 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
 
     if (ownSyncState.consecutiveFailureCount >= AUTO_SYNC_SUSPEND_THRESHOLD) own.degraded = true;
 
+    // A scheduled dirty/busy refusal must not index an editor's unfinished
+    // own changes or advance the interval marker; retry when the guard clears.
+    if (own.code === 'WORKTREE_DIRTY' || own.code === 'SYNC_BUSY') {
+      return { ran: true, outcome: { community, own }, notified: false };
+    }
+
     // Reindex under the held lock so community-pull changes land in the index
     // even when own sync was skipped or failed.
     await reindexAndMark(opts);
@@ -343,7 +363,7 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
     return { ran: true, outcome, notified };
   } catch (err: unknown) {
     opts.logger.warn(`autosync failed: ${errorMessage(err)}`);
-    return { ran: true };
+    return { ran: true, errorCode: 'cycle_failed' };
   } finally {
     if (reindexLock) {
       try {

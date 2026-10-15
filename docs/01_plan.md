@@ -29,6 +29,10 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 - `private`: 自分の端末または同じprivate remoteを使える組織内まで。
 - `public`: 世界へ配布してよい。
 - `caveat sync`: public/privateを含むown全体をprivate remoteと同期する。匿名可読remoteは拒否する。
+- `caveat autosync run --json`: OS予定用の単発処理。既存cycleの間隔・再試行・privacy判定を
+  再利用し、dirty treeを保留する。repo共通lockとindex lockで手動/hook同期と排他する。
+  終了値は成功0/保留2/失敗1。`autosync status --json`は最後の実試行・失敗・成功完了を保持する。
+  定期起動の登録はこの入口に含めず、通常init・更新から自動で有効化しない。
 - `caveat publish`: public entryだけを検査し、`README.md`とAES-256-GCM封緘bundleへ生成して
   public remoteを一方向更新する。non-showcase本文を平文treeへ置かない。
 - publishには`publishTarget`、`sealedKeyserverUrl`、`sealedKeyId`が必要。鍵配布契約とrotationは
