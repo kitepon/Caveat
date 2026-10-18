@@ -312,3 +312,18 @@ Expected:
 - GitHub Release `v$VERSION` exists and is neither draft nor prerelease.
 - npm latest equals `$VERSION`.
 - Worktree is clean and synced with `origin/main`.
+
+
+## Private evidence candidate gate
+
+This isolated candidate does not enable a transport or hook into factory diagnostics.
+After a clean workspace build, pack locally with pinned pnpm and run
+`node scripts/check-private-evidence-pack.mjs <absolute-local-tarball>`.
+The gate reads archive bytes only: package version/bin, all three source-identical schemas,
+compiled pure entry files, and the schema-valid capability with `transports: []`.
+No transport may be added until its platform/launch path, ownership, nonblocking behavior,
+peer identity/nonce/EOF, cancellation and secret non-transfer have separate acceptance evidence.
+Pure fixture success and local pack success do not establish Windows/macOS or host acceptance.
+OFF must not prepare or send private data; optional failures must preserve public bytes and exit.
+The fixed synthetic fixture is `apps/cli/tests/fixtures/private-evidence/contract.v1.json`.
+No private raw values are put in npm artifacts, logs or public diagnostic JSON.

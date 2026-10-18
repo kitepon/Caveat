@@ -32,6 +32,12 @@ importers:
 
   apps/cli:
     dependencies:
+      ajv:
+        specifier: 8.18.0
+        version: 8.18.0
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
       commander:
         specifier: ^14.0.3
         version: 14.0.3
@@ -1254,6 +1260,9 @@ packages:
 
   json-schema-typed@8.0.2:
     resolution: {integrity: sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA==}
+
+  jsonc-parser@3.3.1:
+    resolution: {integrity: sha512-HUgH65KyejrUFPvHFPbqOY0rsFip3Bo5wb4ngvdi1EpCYWUQDC5V+Y7mZws+DLkr4M//zQJoanu1SP+87Dv1oQ==}
 
   kind-of@6.0.3:
     resolution: {integrity: sha512-dcS1ul+9tmeD95T+x28/ehLgd9mENa3LsvDTtzm3vyBEO7RPptvAD+t44WVXaUjTBRcrpFeFlC8WCruUR456hw==}
@@ -2840,6 +2849,8 @@ snapshots:
   json-schema-traverse@1.0.0: {}
 
   json-schema-typed@8.0.2: {}
+
+  jsonc-parser@3.3.1: {}
 
   kind-of@6.0.3: {}
 
