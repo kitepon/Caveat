@@ -563,3 +563,5 @@ Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT
+
+Factory private evidence v1 is an isolated, default-OFF contract candidate. This build declares no supported transports; it sends and stores no private evidence. The product owns the protocol and missing-evidence rules.

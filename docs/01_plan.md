@@ -142,3 +142,303 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 - 完了したplan、handoff、release ledger、監査、告知案は`archive/`へ移す。
 - 同じ目的の現行説明はREADME、本書、host契約、release checklistのいずれかへ統合し、並立させない。
 - ADRと`rag/`は履歴・根拠として専用棚に残すが、通常作業の必読にはしない。
+
+
+## Factory private evidence v1 隔離候補
+
+#### 製品所有の契約
+
+所有: kitepon/Caveat、担当ノア。pure隔離候補。状態: draft、未実装・未配布・未有効化。
+これはCaveatの利用者限定の公式入口として採用するための契約案。
+現行`caveat.native_factory_diagnostics.v1`の公開JSON、診断の意味・終了値は変更しない。
+Caveatはdotagentsが無くても同じ入口を使え、製品の診断/復旧/公開判断を自分で所有する。
+
+### 1. 何を返せるか
+
+通常の`caveat factory-diagnostics --json`を**一回**呼ぶ際に、呼出元が明示設定した
+private channelへ同じ実行中の補助証拠を返す。追加の製品process、Git照会、同期は起こさない。
+対象は、その実行で既に得たrepo identityとHEAD、public出力との対応、process情報だけ。
+
+| 情報 | 生成と意味の所有者 | v1の扱い |
+|---|---|---|
+| local/remote HEAD・未取得理由 | Caveatのsync診断 | 同runで取得済みの値だけ。未到達はnull+固定reason |
+| knowledge repo/remoteの識別digest | Caveatの既存設定/解決結果 | 同runの解決結果から。工場cwdや外部推測を使わない |
+| public JSON bytesへの対応 | Caveat CLI action | 実際にstdoutへ渡す1行のUTF-8 bytes SHAと長さ |
+| process/entry/packageの自己申告 | 当該Caveat process | collectorの観測と照合。自己申告だけを実行証明と呼ばない |
+| 実同期操作receipt | Caveatの別の操作契約 | **v1ではnot_supported。receipt=null** |
+| runtime error/ack/内部DB内容 | 製品の既存責務 | この契約には含めず、factoryへ返さない |
+
+工場はCaveatのGit repo、内部DB、sync state、runtime保存fileを直接読んで補完しない。
+操作receiptが必要な時はCaveatが別の公式版付き契約を設計する。診断の近くにある履歴を
+操作成功のreceiptへ仕立てたり、v1のnullを内部fileから埋めたりしない。
+
+### 2. 能力の宣言元と選択
+
+製品releaseが公式artifactとして配布する候補path:
+`<caveat-cli-package>/dist/factory-private-evidence-capabilities.v1.json`。
+このfileは公開可能な能力記述で、利用者の内部設定/状態ではない。
+製品のpack/release gateがentryとschemaの整合を保証し、将来採用時に製品文書から案内する。
+
+能力fileの厳格なkey集合:
+
+| key | 型・制約 |
+|---|---|
+| schema | `caveat.factory_private_evidence_capability.v1`固定 |
+| product | `caveat`固定 |
+| package_version | 配布packageのsemverと一致 |
+| public_diagnostic_schema | `caveat.native_factory_diagnostics.v1`固定 |
+| private_protocol | `caveat.factory_private_evidence.v1`固定 |
+| transports | 実装・製品検証済みのtransportだけの配列。重複なし |
+| max_channel_bytes | v1では16384固定。hello/result/改行の合計 |
+| operation_receipt | `not_supported`固定 |
+
+各transportは`id`、`platforms`、`launch_paths`の3key。
+候補IDは`posix-fd-v1`（linux/darwin）、`windows-named-pipe-v1`（win32）。
+launch_pathsは製品が受け入れた`direct_node_entry` / `native_exe` / `powershell_standard_shim`の明示集合。
+Windows能力をPOSIX能力から推定しない。現0.20.3は能力file無し→not_supported。
+この草案を作ったことを能力fileが配布済みという意味にしない。
+
+選択順序:
+
+1. collector側opt-inがOFFなら能力fileを読まず、private env/channel/file/workerを作らない。
+2. ON時だけ、既存のcommand解決が指す公式packageの能力fileを読む。
+   owner/type/上限16KiB/厳格JSON/version整合を確認する。別packageから借りない。
+3. file無し/既知非対応は`not_supported`。読取不能/形不正/版不一致は`unverified`。
+4. 現platform・実際のexe/shim経路・collectorの安全なtransport実装の共通能力を選ぶ。
+   共通能力無しはnot_supported、保証を検査できない場合はunverified。
+5. channelが通常診断の起動時点で安全に用意できないなら、private要求を付けず通常診断を一回呼ぶ。
+   channel準備のため診断開始/既存timeoutを待ち延ばさない。
+
+能力確認用にhelp/version/診断を追加起動しない。標準shimを迂回せず、内部repo/DBで代用しない。
+能力fileは宣言であって実行証拠ではない。実frame/peer/nonce/EOFの検査に失敗すれば採用しない。
+
+### 3. 明示要求
+
+候補request envは次の4つ。対応版のCaveatだけが解釈する。
+
+| env | 値 |
+|---|---|
+| CAVEAT_FACTORY_PRIVATE_EVIDENCE | `v1` |
+| CAVEAT_FACTORY_PRIVATE_COLLECTION_ID | RFC4122形式UUID |
+| CAVEAT_FACTORY_PRIVATE_NONCE | CSPRNGの32bytesを表す64桁lowercase hex。毎実行更新 |
+| CAVEAT_FACTORY_PRIVATE_CHANNEL | 選択済みtransportのlocal descriptor |
+
+4つが揃い有効な時だけprivate機能を試みる。未指定/OFF/不正はprivate出力なし。
+不正要求やprivate保存の成否でpublic診断のstatus/exitを変更しない。
+env全体やnonceをlogへ出さない。URL・credential・保存file pathを引数へ足さない。
+collectorはCAVEAT_HOMEや認証/製品設定をこの機能のために変更しない。
+
+### 4. framing・identity・EOF
+
+channelはUTF-8 strict JSONのNDJSONを最大2frame、合計16384bytes以内で返す。
+unknown key・重複key・不正UTF-8・frame超過・多重hello/resultは拒否する。
+同protocolのhello 1件→diagnostic_result 1件→EOFの順序が必要。
+長さが上限内でもEOF無しは完全な結果としない。
+
+共通keyは`schema`、`type`、`collection_id`、`nonce`、`execution_id`。
+schemaは`caveat.factory_private_evidence.v1`、execution_idはCaveatが当該起動時に生成したUUID。
+helloとresultの全共通keyが一致し、要求collection/nonceにexact一致しなければ採用しない。
+
+helloに含める追加key:
+
+- `product`=caveat、`product_version`、`public_diagnostic_schema`、`transport`。
+- `process`: pid、parent_pid、process-startの識別値/取得元、主体UID/GID又はSID、
+  process.execPathとentry realpath、package version/build ID。取れないものはnullと明示reason。
+  これらはprivateで、collectorの実peer観測と一致する範囲だけ信頼する。
+
+resultに含める追加key:
+
+| key | 型・制約 |
+|---|---|
+| public_output | `bytes`非負整数、`sha256`64hex。stdoutへ実際に渡すJSON+改行のbytes |
+| public_result | `schema`、`overall_status`、`planned_exit_code`。stdoutとの整合だけを示す |
+| sync_observation | 下記の同run観測。公開診断のsync.status/reasonと整合 |
+| operation_receipt | `{status:"not_supported", receipt:null}`固定 |
+
+planned_exit_codeはCLIが決めた予定値であり、OSが観測した実終了codeとは別。
+collectorのcode/signal/timeout/spawn情報を置換しない。
+public JSONが途中で失われた時はpublic_output hashを使って内容を復元しない。
+
+`sync_observation`のkey:
+
+- `status`/`reason_code`: 当該公開sync結果そのもの。
+- `repo_identity`: `status`=available/not_observed/unverified、`algorithm`、`digest`又はnull、固定reason。
+- `local_head`/`remote_head`: 各`status`=observed/not_observed/unverified、`value`=40hex又はnull、固定reason。
+- `comparison`: `equal`/`different`/`not_evaluated`。両値取得済みの時だけ比較。
+- `relation_counts`: `{status:"not_supported", behind:null, ahead:null}`固定。
+
+各値は既存sync関数がそのrunで得た変数だけをsinkへ渡す。
+remote_mismatchでreturnする前に取得済み値を渡すが、後からrev-list/ls-remote/fetchを足さない。
+dirty/origin不在/通信不能等で未到達ならnull+固定reason。過去/current値は使わない。
+v1はSHA-1の40hexだけを対象にし、異なるrepo hash形式はunverifiedとして補完しない。
+
+repo_identityの規約は同梱[origin記述の規約](#repo_identityの規約)をnormativeとする。
+algorithmは`origin-descriptor-sha256-v1`。remote originのhost/path記述を形式・scheme・明示portとともに識別する。
+local clone・認証主体・実操作主体/成否・接続先実体の同一性は証明しない。
+URL/scp・明示port有無を区別し、pathの末尾.git/slashを保持。相対scpなど曖昧/非対応はunverified。
+第2稿のhost/pathだけの正規化/digest規約を置換し、旧algorithmのdigestと比較しない。
+同run既存origin取得の完全な成功出力だけを使い、追加Git照会・内部repo/DB補完は禁止する。
+
+
+### 5. transportの契約
+
+#### POSIX: posix-fd-v1
+
+descriptorは`fd:3`固定。collectorが作った継承済み専用pipe/socketだけを使い、stdout/stderrを拒否する。
+creator/owner/endpoint種別を確認し、nonblockingを**実装で保証できるadapterだけ**が能力を宣言する。
+Nodeの任意fdへ同期writeすれば安全という仮定は置かない。
+collectorは常にreadを排出し、保存先が失敗/上限超過でもreadを止めない。
+productは上限付きnonblocking writeを一度試み、backpressure/切断/権限失敗で追加待機や再送をしない。
+書けなかったframeは欠測。privateの送信完了を待ってCaveatの自然終了を遅らせない。
+
+#### Windows: windows-named-pipe-v1
+
+descriptorはlocal `\\.\pipe\caveat-evidence-<random-id>`だけ。
+remote pipe名を拒否し、collectorはfirst-instance/remote-client拒否、現SID限定DACL、overlapped I/Oを使う。
+既存pipe名の衝突は拒否し、他者endpointへ接続しない。
+Windowsのrequest env CHANNELは、transport/path/server_pid/server_start_identity/owner_sidの
+5keyを持つ厳格JSON descriptorとする。pathは上記local pipeだけ、serverのPID/start/SIDは
+creatorの実値。productはOSから得たserver値と照合し、照合不能ならprivate値を書かない。
+POSIX descriptorは`fd:3`のままとし、Windows descriptorをPOSIXへ解釈しない。
+
+| 実launch path | 選択条件 |
+|---|---|
+| direct `.exe` | capabilityにnative_exeあり、secure named-pipe adapter/peer検査が利用可能 |
+| PowerShell→標準npm/script shim→Node | capabilityにpowershell_standard_shimあり、env継承とpeer/実子identityを検査できる |
+| 未知shim/custom wrapper | not_supported。迂回しない |
+| 能力はあるがSID/peer/start identity等の確認不能 | unverified、private採用なし |
+
+collectorはlookup PowerShell、実wrapper、Caveat Node/exeを別のroleで記録する。
+GetNamedPipeClientProcessId相当とprocess creation identityでpeerを取得し、SIDと起動したchainに照合。
+pid番号だけやparent_pid自己申告だけで結び付けない。productもserver PID/start identity/SIDを確認する。
+hello/resultのnonce、execution_id、process identity、public出力SHA、EOFが整合した場合だけ採用。
+named-pipe安全APIがNode標準機能だけで利用できるとは主張せず、必要なnative adapterの
+実装・配布・製品検証まで能力は宣言しない。現Windowsは未実装/未確認。
+
+接続/書込みはnonblockingで、保留I/Oを元診断のdeadline/終了より延長しない。
+安全にcancel/close/排出を保証できない場合は要求を送らず欠測とする。
+channel EOF、wrapper close、診断子closeは別event。wrapperのexitを子のexitに代入しない。
+Windowsの既存command lookup等を含めて「全process一個」と呼ばず、**Caveat診断の追加起動0回**を契約にする。
+
+### 6. 未対応・不完全・失敗の採用規則
+
+能力file無し/共通transport無しはnot_supported。宣言矛盾/nonce不一致/peer不明はunverified。
+helloだけ、result途中、EOF無し、公開stdout hash不一致はpartial/unverifiedとし、欠測を返す。
+実行中のtimeout/kill/signalとprivate channel失敗を別々に保存する。
+失敗をpublic stdout/stderrへ生出力せず、public check/終了値/runtime件数も変えない。
+collector側の固定local保存statusだけで欠測を通知する。
+何も保存できなくても製品正常/同期未実行とは推測しない。
+
+### 7. 受入条件（今回は未実行）
+
+Caveat release gateがschema/能力artifact/entry整合、OFF時の副作用無し、既存public bytes/exit維持、
+同run値だけの取得、private pipeの上限/非閉塞、Windows exe/shimとidentity/nonce/EOF拒否、
+秘密の非転送を検証する必要がある。dotagentsの検証で製品契約を置換しない。
+公開・適用・host受入は別工程。全3OS×4harnessは未適用・未確認。
+
+### 8. schemaとcross-field条件
+
+`../apps/cli/src/contracts/factory-private-evidence/capability.v1.schema.json`、`../apps/cli/src/contracts/factory-private-evidence/private-frame.v1.schema.json`、
+`../apps/cli/src/contracts/factory-private-evidence/windows-channel.v1.schema.json`を本草案に付ける。
+JSON schemaの構文/型だけで表せない次の条件もnormativeなvalidator条件とする。
+
+- 能力fileのproduct/version/public schemaとhello、hello/resultの共通keyはexact一致。
+- descriptorのtransport/platform/launch path、OS peer identity、nonceが同じ呼出しに対応する。
+- processのnullにはmissing_reasonsの対応理由が必要。自己申告値をOS実観測へ昇格させない。
+- head status=observedだけが値を持ち、両値がobservedの時だけequal/differentを返す。
+  comparisonと両HEAD実値の一致/不一致が矛盾したframeはunverified。
+- repo status=availableだけが規定algorithm/digestを持つ。それ以外はnull。
+- public_outputはcollectorが受信した完全なpublic stdout bytesに一致する。
+  public_result/sync_observationは実際の公開JSONと整合し、readyのplanned exitは0、それ以外は1。
+- private frameのplanned exitとcollectorの実exit/signalは別情報として残す。
+- schemaを通ってもchannel全体の16KiB/順序/EOF検査が未達なら採用しない。
+
+schemaとcapabilityの将来製品配置はCaveat pack manifestへ収容する別工程。
+本ディレクトリのschemaを現Caveatが対応済みとするものではない。
+
+##### repo_identityの規約
+
+所有Caveat / ノア。2026-10-18。未実装・未配布のv1草案。第2稿のdigest規約だけを置換する。
+
+#### 意味と証明範囲
+
+`repo_identity`は、**同runで既に取得したremote origin文字列のhost/pathを、形式・scheme・明示portとともに識別するprivate digest**。
+`available`は下記の限定文法でその記述を識別できたという意味だけを持つ。
+local cloneの同一性・実在、認証アカウント、OS実行主体、実同期操作の主体/契機/成否を証明しない。
+同じdescriptor/digestでも、接続先の実体・同じrepository・同じ権限とは断定しない。
+URLのuser名は識別入力から除外されるので、同じdigestを認証主体一致として扱うことも禁止する。
+DNS、SSH alias/config、proxy、redirect、server側のroutingは確認しない。aliasと実hostの同一性を推定しない。
+同じHEADの観測も同期receipt又は成功証明ではない。v1のoperation_receiptはnot_supported/receipt=null、relation_countsも非対応/nullのまま。
+
+#### 入力の境界
+
+Caveatが既存診断runで行うorigin取得の**同じ呼出し**の成功stdoutだけが入力。
+将来限定captureを追加する場合も、既存Git呼出し・timeout・公開結果を変えないことが条件。
+追加get-url/config/Git、collector cwd、内部repo/DB、以前又は現在の別runの値を使わない。
+成功入力の完全性を保証できない、複数行、stdout上限超過、切断、不正UTF-8、NUL/制御文字ならunverified。
+既存コマンドの行終端LFを一個、又はCRLFを一個だけ除ける。その他の空白をtrimしない。
+既存分岐でorigin取得へ未到達ならnot_observed。試みたが確定できないものはunverified。
+追加照会で曖昧さを解消しない。生origin、userinfo、正規化tupleをframe/log/reportへ保存しない。
+
+#### 保守的な対応文法
+
+以下はこの草案が対応する部分集合。Gitが受け入れる全形式の対応を主張しない。
+入力は行終端除去後4096 ASCII bytes以下。空白、非ASCII、percent escape、backslash、query又はfragmentは拒否。
+疑問符/fragmentを捨てて識別する第2稿の規約は廃止する。
+
+| 部分 | 採用条件/扱い |
+|---|---|
+| URL | `scheme://[user@]host[:port]/path`のみ。schemeはhttp/https/ssh/gitをASCII小文字化して区別。既知schemeでも残りが未対応ならunverified |
+| scp | `[user@]host:/path`の絶対pathだけ。URLと区別し、scheme/portはnull。`host:path`の相対pathはremote home依存が未確定なのでv1ではunverified |
+| user | 任意一個、非空の`[A-Za-z0-9._-]+`のみ。digestから除外。password/複数@/曖昧userinfoはunverified、認証情報へ解釈しない |
+| host | ASCII DNS labelを`.`で連結。各labelは1〜63文字、英数字で始終し途中のhyphen可、全長253以下。小文字化。末尾dot、IP literal、IPv6 bracket、空hostは本v1では未対応/unverified |
+| 明示port | URLだけ、1〜65535の十進表記、先頭zero無し。文字列のまま保持。未指定はnullで、明示default portとも区別。scpのcolonをportへ推測しない |
+| path | `/`から始まる一個以上のsegment。segmentは非空の`[A-Za-z0-9._-]+`、`.`/`..`は拒否。途中の空segment、`~`等はunverified。末尾slash一個は許可して保持 |
+| 正規化 | schemeとhostのASCII小文字化だけ。pathの大小、末尾`.git`、末尾slashを保持。slash統合、dot解決、URL decode、home展開をしない |
+| その他 | file/local path、custom helper、未知scheme、相対path、IPv4/IPv6/IDN等の非対応形はunverified。推測fallback無し |
+
+hostのIP literal除外では、全labelが数字だけのhostも拒否する。DNS/SSH設定を読んで判別しない。
+明示port無しは設定/既定portの実値を知ったという意味ではない。
+URL/scpを同一SSH接続へ正規化する規則は持たない。上記以外は「同じはず」と補完せずunverifiedにする。
+
+#### digestの版とbytes
+
+algorithmは **`origin-descriptor-sha256-v1`**。
+UTF-8で次の固定7要素配列をJSON直列化（余白/改行無し）し、そのSHA256をlowercase 64hexで返す。
+要素はASCII string又はJSON nullのみなので、この規約のbytesは実装言語に依存しない。
+
+```text
+["caveat.origin-descriptor.v1", form, scheme, host, port, "absolute", path]
+```
+
+formは`url`又は`scp`。URLのschemeは上表の小文字、scpのscheme/portはnull。
+pathは先頭/末尾slashを含む採用文字列そのもの。digest入力にuser名/credentialを含めない。
+available時だけalgorithm/digestを持ち、reasonは`origin_descriptor_observed`。
+not_observed/unverifiedではalgorithm=digest=null。固定reason候補は
+`origin_not_reached` / `origin_capture_unverified` / `origin_syntax_unsupported` / `origin_semantics_ambiguous`。
+生入力/error本文をreasonへ連結しない。製品validatorが採用時にこの固定集合との対応を検査する。
+
+digestはprivate限定。元URLを返さなくても辞書推測を防げるとは保証しない。
+第2稿`origin-host-path-sha256-v1`とはalgorithmが異なる。旧digestを変換・比較・同一扱いしない。
+未配布草案の訂正で、公開診断schemaやHEADの意味を変更しない。
+
+#### 規約例（実行試験ではない）
+
+以下は例示文字列の比較規則であり、実在repo又は当時のoriginの測定結果ではない。
+
+| 左/右の差 | 規約上の扱い |
+|---|---|
+| `https://EXAMPLE.invalid/org/repo.git` とhostだけ小文字 | 同じtuple |
+| httpsとhttp | 異なるtuple |
+| `https://example.invalid/org/repo` と明示`:443` | 異なるtuple |
+| `ssh://git@example.invalid/org/repo` と`git@example.invalid:/org/repo` | url/scpが異なるtuple |
+| `git@example.invalid:org/repo` | 相対scpなのでunverified |
+| `/org/repo` と`/org/repo.git`又は`/org/repo/` | 異なるtuple |
+| userだけ変更、他は同じ対応文法 | 同じtupleになり得る。認証主体/接続先実体の一致は示さない |
+| query/fragment/escape、dotsegment、alias解決が必要な比較 | 非対応/曖昧ならunverified。別照会で補わない |
+
+同じalgorithmとdigestはこの規約での記述一致のみ。異なるdigestも、異なる実repoの証明ではない。
+この限定範囲で役立たない場合は欠測を維持し、文法の拡張は新algorithm版と通常reviewを必要とする。
+
+
+本文のrepo_identityの固定理由fieldはprivate schemaと同じ`reason`。公開sync及びsync_observationの`reason_code`とは別fieldである。今回の純粋実装は診断入口から未接続。能力artifactのtransportsは空で、実送信/保存/公開/常用有効化は未実装。

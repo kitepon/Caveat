@@ -1,3 +1,4 @@
+import { copyPrivateEvidenceAssets } from '../../scripts/copy-private-evidence-assets.mjs';
 import { defineConfig } from 'tsup';
 import {
   chmodSync,
@@ -39,7 +40,7 @@ function restoreNodePrefix(content: string): string {
 }
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  entry: ['src/index.ts', 'src/privateEvidence/validation.ts', 'src/privateEvidence/origin.ts', 'src/privateEvidence/candidate.ts'],
   format: ['esm'],
   dts: false,
   clean: true,
@@ -59,7 +60,7 @@ export default defineConfig({
     const distDir = join(__dirname, 'dist');
     if (!existsSync(distDir)) mkdirSync(distDir, { recursive: true });
 
-    for (const file of readdirSync(distDir)) {
+    for (const file of readdirSync(distDir, { recursive: true })) {
       if (!file.endsWith('.js')) continue;
       const outFile = join(distDir, file);
       const patched = restoreNodePrefix(readFileSync(outFile, 'utf-8'));
@@ -93,5 +94,6 @@ export default defineConfig({
     const destMigrations = join(distDir, 'migrations');
     if (!existsSync(destMigrations)) mkdirSync(destMigrations, { recursive: true });
     cpSync(coreMigrations, destMigrations, { recursive: true });
+    copyPrivateEvidenceAssets();
   },
 });

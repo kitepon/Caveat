@@ -1,0 +1,116 @@
+{
+  "notice": "Synthetic contract values only. No measured HEAD, host, account or verified transport capability.",
+  "public_bytes_utf8": "{\"schema\":\"caveat.native_factory_diagnostics.v1\",\"product\":\"caveat\",\"version\":\"0.20.3\",\"overall\":{\"status\":\"not_ready\"},\"sync\":{\"status\":\"not_ready\",\"reason_code\":\"remote_mismatch\"}}\n",
+  "request_env": {
+    "CAVEAT_FACTORY_PRIVATE_EVIDENCE": "v1",
+    "CAVEAT_FACTORY_PRIVATE_COLLECTION_ID": "00000000-0000-4000-8000-000000000001",
+    "CAVEAT_FACTORY_PRIVATE_NONCE": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "CAVEAT_FACTORY_PRIVATE_CHANNEL": "fd:3"
+  },
+  "hello": {
+    "schema": "caveat.factory_private_evidence.v1",
+    "collection_id": "00000000-0000-4000-8000-000000000001",
+    "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "execution_id": "00000000-0000-4000-8000-000000000002",
+    "type": "hello",
+    "product": "caveat",
+    "product_version": "0.20.3",
+    "public_diagnostic_schema": "caveat.native_factory_diagnostics.v1",
+    "transport": "posix-fd-v1",
+    "process": {
+      "pid": 1234,
+      "parent_pid": 1200,
+      "start_identity": {
+        "source": "os_process_start",
+        "value": "fixture-start"
+      },
+      "identity": {
+        "kind": "uid_gid",
+        "uid": 1000,
+        "gid": 1000,
+        "sid": null
+      },
+      "exec_path": "/fixture/node",
+      "entry_realpath": "/fixture/caveat.js",
+      "package_version": "0.20.3",
+      "build_id": "fixture-build",
+      "missing_reasons": []
+    }
+  },
+  "result": {
+    "schema": "caveat.factory_private_evidence.v1",
+    "collection_id": "00000000-0000-4000-8000-000000000001",
+    "nonce": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "execution_id": "00000000-0000-4000-8000-000000000002",
+    "type": "diagnostic_result",
+    "public_output": {
+      "bytes": 183,
+      "sha256": "199f6ee49e9201fc704d1dad12dedb9d4c068ef90dc34b39887fd2dcc368800e"
+    },
+    "public_result": {
+      "schema": "caveat.native_factory_diagnostics.v1",
+      "overall_status": "not_ready",
+      "planned_exit_code": 1
+    },
+    "sync_observation": {
+      "status": "not_ready",
+      "reason_code": "remote_mismatch",
+      "repo_identity": {
+        "status": "available",
+        "algorithm": "origin-descriptor-sha256-v1",
+        "digest": "e1e8b488f56f40e849bbd936c5ae89e3b962087d95dbd729477e6051db8b52ed",
+        "reason": "origin_descriptor_observed"
+      },
+      "local_head": {
+        "status": "observed",
+        "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reason": "head_observed"
+      },
+      "remote_head": {
+        "status": "observed",
+        "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "reason": "head_observed"
+      },
+      "comparison": "different",
+      "relation_counts": {
+        "status": "not_supported",
+        "behind": null,
+        "ahead": null
+      }
+    },
+    "operation_receipt": {
+      "status": "not_supported",
+      "receipt": null
+    }
+  },
+  "synthetic_capability": {
+    "schema": "caveat.factory_private_evidence_capability.v1",
+    "product": "caveat",
+    "package_version": "0.20.3",
+    "public_diagnostic_schema": "caveat.native_factory_diagnostics.v1",
+    "private_protocol": "caveat.factory_private_evidence.v1",
+    "transports": [
+      {
+        "id": "posix-fd-v1",
+        "platforms": [
+          "linux",
+          "darwin"
+        ],
+        "launch_paths": [
+          "direct_node_entry"
+        ]
+      }
+    ],
+    "max_channel_bytes": 16384,
+    "operation_receipt": "not_supported"
+  },
+  "windows_descriptor": {
+    "transport": "windows-named-pipe-v1",
+    "path": "\\\\.\\pipe\\caveat-evidence-00000000-0000-4000-8000-000000000001",
+    "server_pid": 1200,
+    "server_start_identity": "fixture-server-start",
+    "owner_sid": "S-1-5-21-111-222-333-1000"
+  },
+  "origin_input": "https://EXAMPLE.invalid/org/repo.git\n",
+  "expected_origin_digest": "e1e8b488f56f40e849bbd936c5ae89e3b962087d95dbd729477e6051db8b52ed"
+}

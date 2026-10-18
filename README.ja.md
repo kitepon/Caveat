@@ -351,3 +351,5 @@ iterative 開発時は `apps/cli/` 内で `npm link` するとグローバル sh
 ## ライセンス
 
 MIT
+
+Factory private evidence v1は既定OFFの隔離契約候補。このbuildは対応transportを宣言せず、private証拠の送信・保存を行わない。製品がprotocolと欠測条件を所有する。

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:caveat:factory-private-evidence-windows-channel:v1",
+  "title": "Draft: local Windows private channel descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "transport",
+    "path",
+    "server_pid",
+    "server_start_identity",
+    "owner_sid"
+  ],
+  "properties": {
+    "transport": {
+      "const": "windows-named-pipe-v1"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^\\\\\\\\\\.\\\\pipe\\\\caveat-evidence-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "server_pid": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "server_start_identity": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "owner_sid": {
+      "type": "string",
+      "pattern": "^S-1-[0-9]+(?:-[0-9]+)+$",
+      "maxLength": 256
+    }
+  }
+}
