@@ -442,3 +442,21 @@ digestはprivate限定。元URLを返さなくても辞書推測を防げると�
 
 
 本文のrepo_identityの固定理由fieldはprivate schemaと同じ`reason`。公開sync及びsync_observationの`reason_code`とは別fieldである。今回の純粋実装は診断入口から未接続。能力artifactのtransportsは空で、実送信/保存/公開/常用有効化は未実装。
+
+
+## 最低Nodeと通常launcher
+
+製品の公開下限はNode22.5以降。SQLiteがstartup flagを必要とするruntimeでは、
+`dist/caveat.js`がbuiltinの可用性を確認し、必要な場合だけ同じNode/argv/cwd/env/stdioで一度起動し直す。
+入口は`apps/cli/src/bootstrap.mjs`をclean build後にそのままcopyして所有する。
+追加flagは製品launcherが所有し、試験又は利用者設定だけを変更して下限対応済みとしない。
+明示的なSQLite enable/disableはNodeが同等とするhyphen/underscoreの混在表記も上書きせず、
+判定時だけ正規化して元のargv/NODE_OPTIONSを保持する。flag付きでもmoduleが利用不能なら通常の失敗で止まり再帰しない。
+子のcode/signalを親へ返し、POSIXのSIGINT/SIGTERMを転送する。Windowsのprocess-tree終了と
+各OS最低Nodeの実受入は別の検証条件であり、このlocal候補の成功だけで全OS対応とはしない。
+POSIX親の強制終了と起動直後signal、preload（--require/--import）の再実行、debugger port、
+将来の追加fd/private channelの継承も未受入。全Node optionの副作用不変は保証しない。
+
+根拠は[Node22.5のSQLite flag](https://nodejs.org/download/release/v22.5.0/docs/api/cli.html#--experimental-sqlite)と
+[Node22.13のunflag変更](https://nodejs.org/en/blog/release/v22.13.0)。runtimeのversion文字列だけで
+新しいprivate能力やnative安全性を推測しない。このlauncher修理はprivate evidence候補と独立して扱う。

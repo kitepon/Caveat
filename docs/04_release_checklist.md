@@ -327,3 +327,30 @@ Pure fixture success and local pack success do not establish Windows/macOS or ho
 OFF must not prepare or send private data; optional failures must preserve public bytes and exit.
 The fixed synthetic fixture is `apps/cli/tests/fixtures/private-evidence/contract.v1.json`.
 No private raw values are put in npm artifacts, logs or public diagnostic JSON.
+
+
+## Declared minimum Node launcher gate
+
+Run `node --test scripts/cli-bootstrap.test.mjs` on the declared lower bound and the normal build runtime.
+Use the shipped bin with `--version` and `--help` without adding an experimental SQLite flag to the test command.
+Match the packed bootstrap bytes to `apps/cli/src/bootstrap.mjs`, and verify argv/stdio/exit/signal and explicit-disable refusal.
+The product launcher owns the startup requirement; preserve the baseline failure and fixed output separately.
+Record the OS and Node version actually exercised. A Linux lower-bound pass does not establish macOS/Windows cancellation
+or all product features, private diagnostics, or the full private pure suite on that runtime.
+
+Before accepting the re-exec launcher for all callers, record these separate results:
+
+| Remaining condition | Isolated acceptance and required evidence |
+|---|---|
+| macOS/Windows minimum Node | Exact declared Node 22.5.0, fresh pack/npm bin version/help without test-only SQLite flags, argv/env/stdio/exit fixtures; record OS/runtime/archive hashes |
+| Windows lifetime and cancellation | Fake long-running entry with parent/child IDs; cancel the normal npm/PowerShell path and prove both terminate within the caller deadline; own-tree cleanup on failure |
+| POSIX forced parent exit / startup signals | Bounded fake process group, SIGKILL and signals before/after entry readiness; prove no remaining child, preserve signal result, clean up only the owned group |
+| Preloads | Local --require/--import marker fixture records one execution without re-exec and two with it; this observed difference needs a caller policy or repair before claiming side-effect equivalence |
+| Debugger | Fake entry and loopback inspector in an explicitly authorized isolated test; verify port ownership/conflict and parent/child termination before accepting this Node option |
+| Future additional fd/private channel | Keep transports empty and diagnostics disconnected; before any capability claim, prove descriptor ownership/peer/EOF/nonblocking/cancellation across the re-exec and actual shim |
+
+POSIX ready-entry SIGINT/SIGTERM tests are selected only on POSIX; Windows skips are explicit missing acceptance.
+The canonical three-OS CI uses each runner's installed Node and does not establish the exact minimum on all OSes.
+Minimum-Node private147 and the 3OS x 4harness actual-use matrix remain separate, unverified acceptance.
+Local fake-entry regressions, build/pack and CI do not authorize real diagnostics/sync, host configuration,
+publication, enabling private evidence, or real private transport.
