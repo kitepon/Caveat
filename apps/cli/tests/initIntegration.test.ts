@@ -59,7 +59,7 @@ describe('caveat init integrated setup', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
-    rmSync(fx.root, { recursive: true, force: true });
+    rmSync(fx.root, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   });
 
   it('keeps new setup choices off and emits no nudges outside a TTY', async () => {
@@ -122,9 +122,11 @@ describe('caveat init integrated setup', () => {
     expect(existsSync(ctx.paths.dbPath)).toBe(false);
   });
 
-  it('initializes an explicit file URL without gh and syncs it on re-init', async () => {
+  // Two real local-Git init/sync passes can exceed Vitest's default 5s on
+  // Windows. Match the existing Git integration budget, not a product timeout.
+  it('initializes an explicit file URL without gh and syncs it on re-init', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, async () => {
     const remote = join(fx.root, 'private.git');
-    execFileSync('git', ['init', '--bare', '--initial-branch=main', remote]);
+    execFileSync('git', ['init', '--bare', '--initial-branch=main', remote], { timeout: 20_000 });
     const remoteUrl = pathToFileURL(remote).href;
     const ghRunner = vi.fn(() => ({ status: 1, stdout: '', stderr: '' }));
     const confirm = vi.fn(() => true);
