@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, copyFileSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, copyFileSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { once } from 'node:events';
@@ -27,7 +27,7 @@ test('normal launcher enables SQLite when needed, passes argv/cwd/env and emits 
     const args=['--argument','space value','ノード','literal$()`'];
     const result=invoke(root,args,{cwd:root,env:{...process.env,NODE_OPTIONS:'',CAVEAT_BOOTSTRAP_TEST:'fixture'}});
     assert.equal(result.status,0,result.stderr);assert.equal(result.stderr,'');
-    const output=JSON.parse(result.stdout);assert.deepEqual(output.args,args);assert.equal(output.cwd,root);
+    const output=JSON.parse(result.stdout);assert.deepEqual(output.args,args);assert.equal(output.cwd,realpathSync(root));
     assert.equal(output.value,'fixture');assert.equal(output.sqlite,true);
     const alreadyAvailable=!!process.getBuiltinModule('node:sqlite');
     assert.equal(output.flags.includes('--experimental-sqlite'),!alreadyAvailable);
