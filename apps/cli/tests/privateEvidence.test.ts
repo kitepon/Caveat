@@ -56,6 +56,26 @@ describe('same-run pure projection', () => {
     }
     expect(projectOrigin(run, acquired(null, {status:'not_observed'})).reason).toBe('origin_not_reached');
   });
+  it.each(['unknown', '', null, undefined, 0, false, {}, []])(
+    'untrusted status %j cannot become an observation', status => {
+      const origin = { ...acquired(fixture.origin_input), status } as unknown as AcquiredValue;
+      const head = { ...acquired('a'.repeat(40)), status } as unknown as AcquiredValue;
+      expect(projectOrigin(run, origin)).toEqual({ status: 'unverified', algorithm: null,
+        digest: null, reason: 'origin_capture_unverified' });
+      expect(projectHead(run, head)).toEqual({ status: 'unverified', value: null,
+        reason: 'head_capture_unverified' });
+    });
+  const invalidCompleteness = [false, undefined, null, 0, 1, 'true', 'false', {}, []];
+  it.each((['observed', 'not_observed', 'unverified'] as const).flatMap(status =>
+    invalidCompleteness.map(complete => ({ status, complete }))))(
+    'untrusted completeness $status/$complete remains unverified', ({ status, complete }) => {
+      const origin = { ...acquired(fixture.origin_input), status, complete } as unknown as AcquiredValue;
+      const head = { ...acquired('a'.repeat(40)), status, complete } as unknown as AcquiredValue;
+      expect(projectOrigin(run, origin)).toEqual({ status: 'unverified', algorithm: null,
+        digest: null, reason: 'origin_capture_unverified' });
+      expect(projectHead(run, head)).toEqual({ status: 'unverified', value: null,
+        reason: 'head_capture_unverified' });
+    });
   it('rejects invalid matching run IDs without substituting measurements', () => {
     expect(projectHead('bad',acquired('a'.repeat(40),{run_id:'bad'})).status).toBe('unverified');
     expect(projectOrigin('bad',acquired(fixture.origin_input,{run_id:'bad'})).status).toBe('unverified');

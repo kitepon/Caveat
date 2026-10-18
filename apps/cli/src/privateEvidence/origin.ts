@@ -16,9 +16,14 @@ export type AcquiredValue = {
 const missing = (status: 'not_observed' | 'unverified', reason: string): OriginIdentity =>
   ({ status, algorithm: null, digest: null, reason });
 
+function hasKnownCaptureState(input: AcquiredValue): boolean {
+  return input.complete === true &&
+    (input.status === 'observed' || input.status === 'not_observed' || input.status === 'unverified');
+}
+
 /** Input is an already acquired value; never queries Git, config, DNS, files or state. */
 export function projectOrigin(runId: string, input: AcquiredValue): OriginIdentity {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId) || input.run_id !== runId || !input.complete || input.status === 'unverified')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId) || input.run_id !== runId || !hasKnownCaptureState(input) || input.status === 'unverified')
     return missing('unverified', 'origin_capture_unverified');
   if (input.status === 'not_observed') return missing('not_observed', 'origin_not_reached');
   if (typeof input.value !== 'string') return missing('unverified', 'origin_capture_unverified');
@@ -52,7 +57,7 @@ export function projectOrigin(runId: string, input: AcquiredValue): OriginIdenti
 }
 
 export function projectHead(runId: string, input: AcquiredValue) {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId) || input.run_id !== runId || !input.complete || input.status === 'unverified')
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(runId) || input.run_id !== runId || !hasKnownCaptureState(input) || input.status === 'unverified')
     return { status: 'unverified', value: null, reason: 'head_capture_unverified' } as const;
   if (input.status === 'not_observed') return { status: 'not_observed', value: null, reason: 'head_not_reached' } as const;
   if (typeof input.value !== 'string' || !/^[0-9a-f]{40}$/.test(input.value))
