@@ -150,9 +150,12 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 `dist/caveat.js`がbuiltinの可用性を確認し、必要な場合だけ同じNode/argv/cwd/env/stdioで一度起動し直す。
 入口は`apps/cli/src/bootstrap.mjs`をclean build後にそのままcopyして所有する。
 追加flagは製品launcherが所有し、試験又は利用者設定だけを変更して下限対応済みとしない。
-明示的なSQLite enable/disableは上書きせず、flag付きでもmoduleが利用不能なら通常の失敗で止まり再帰しない。
+明示的なSQLite enable/disableはNodeが同等とするhyphen/underscoreの混在表記も上書きせず、
+判定時だけ正規化して元のargv/NODE_OPTIONSを保持する。flag付きでもmoduleが利用不能なら通常の失敗で止まり再帰しない。
 子のcode/signalを親へ返し、POSIXのSIGINT/SIGTERMを転送する。Windowsのprocess-tree終了と
 各OS最低Nodeの実受入は別の検証条件であり、このlocal候補の成功だけで全OS対応とはしない。
+POSIX親の強制終了と起動直後signal、preload（--require/--import）の再実行、debugger port、
+将来の追加fd/private channelの継承も未受入。全Node optionの副作用不変は保証しない。
 
 根拠は[Node22.5のSQLite flag](https://nodejs.org/download/release/v22.5.0/docs/api/cli.html#--experimental-sqlite)と
 [Node22.13のunflag変更](https://nodejs.org/en/blog/release/v22.13.0)。runtimeのversion文字列だけで

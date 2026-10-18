@@ -14,8 +14,10 @@ process.on('warning', (warning) => {
 // Feature detection also covers other supported Node versions before unflagging.
 const hasSqlite = Boolean(process.getBuiltinModule?.('node:sqlite'));
 const flagPattern = /^--(?:no-)?experimental-sqlite(?:=|$)/;
-const explicitFlag = process.execArgv.some((arg) => flagPattern.test(arg)) ||
-  /(?:^|[\s"'])--(?:no-)?experimental-sqlite(?:$|[\s"'=])/.test(process.env.NODE_OPTIONS ?? '');
+// Node treats underscores as hyphens in option names, but retains original
+// tokens in execArgv. Normalize comparisons only; forward argv/env unchanged.
+const explicitFlag = process.execArgv.some((arg) => flagPattern.test(arg.replaceAll('_', '-'))) ||
+  /(?:^|[\s"'])--(?:no-)?experimental-sqlite(?:$|[\s"'=])/.test((process.env.NODE_OPTIONS ?? '').replaceAll('_', '-'));
 
 if (!hasSqlite && !explicitFlag && process.allowedNodeEnvironmentFlags.has('--experimental-sqlite')) {
   const child = spawn(process.execPath, [

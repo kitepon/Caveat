@@ -53,6 +53,29 @@ test('explicit SQLite disable in argv or NODE_OPTIONS is retained without enabli
   } finally {rmSync(root,{recursive:true,force:true});}
 });
 
+const sqliteSpellings = [
+  ['--experimental_sqlite', true],
+  ['--no_experimental_sqlite', false],
+  ['--no-experimental_sqlite', false],
+  ['--no_experimental-sqlite', false],
+];
+for (const [option, expected] of sqliteSpellings) {
+  for (const location of ['argv', 'NODE_OPTIONS']) {
+    test(`SQLite option spelling ${option} in ${location} is preserved`, () => {
+      const root = fixture("process.stdout.write(JSON.stringify({sqlite:!!process.getBuiltinModule('node:sqlite'),flags:process.execArgv,options:process.env.NODE_OPTIONS})+'\\n');");
+      try {
+        const argv = location === 'argv' ? [option, join(root, 'caveat.js')] : [join(root, 'caveat.js')];
+        const options = location === 'NODE_OPTIONS' ? option : '';
+        const result = spawnSync(process.execPath, argv, {encoding:'utf8',timeout:10000,env:{...process.env,NODE_OPTIONS:options}});
+        assert.equal(result.status,0,result.stderr);assert.equal(result.stderr,'');
+        const output = JSON.parse(result.stdout);assert.equal(output.sqlite,expected);
+        assert.deepEqual(output.flags,location === 'argv' ? [option] : []);
+        assert.equal(output.options,options);
+      } finally {rmSync(root,{recursive:true,force:true});}
+    });
+  }
+}
+
 test('existing Node argv options are forwarded and bootstrap initialization remains one-shot', () => {
   const root=fixture("process.stdout.write(JSON.stringify(process.execArgv)+'\\n');");
   try {
