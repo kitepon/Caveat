@@ -37,7 +37,10 @@ function childExit(childProcess: ReturnType<typeof spawn>) {
 describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, () => {
   it('uses observed impact, keeps unresolved serious impact, and preserves historical identity/counts', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
-    const opts = { env: e, version: '0.20.3' };
+    // This case owns state/impact invariants, not native ACL latency. Exercise
+    // the existing Windows ACL seam without spawning PowerShell per operation.
+    // Native permission acceptance remains in runtimeErrorsAcl.test.ts.
+    const opts = { env: e, version: '0.20.3', isWindows: () => true, aclRunner: () => {} };
     recordRuntimeError('CAVEAT.SYNC_FAILED', { ...opts, impact: 'operation_failed' });
     const initial = runtimeErrorsSnapshot(0, 256, opts).runtime_errors[0]!;
     expect(initial.severity).toBe('warn');
