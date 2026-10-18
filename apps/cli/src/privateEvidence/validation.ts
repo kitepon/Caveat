@@ -71,7 +71,7 @@ export function validateExchange(input: {
 }): { status: 'valid' | 'unverified'; reason: string } {
   const bad = (reason: string) => ({ status: 'unverified', reason } as const);
   try {
-    if (input.request.status !== 'valid' || !input.eof || !input.peerVerified) return bad('channel_incomplete');
+    if (input.request.status !== 'valid' || input.eof !== true || input.peerVerified !== true) return bad('channel_incomplete');
     if (!validateCapability(input.capability) || (input.capability as Dict).package_version !== input.expectedVersion)
       return bad('capability_invalid');
     if (input.channelBytes.byteLength > MAX_CHANNEL_BYTES) return bad('channel_budget');

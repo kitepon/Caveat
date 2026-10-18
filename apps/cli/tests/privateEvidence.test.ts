@@ -164,6 +164,11 @@ describe('complete synthetic frame exchange', () => {
   it.each([['win32','direct_node_entry'],['linux','unknown_wrapper']])('rejects unsupported platform/launch %s/%s', (platform,launchPath) => {
     expect(validateExchange({...exchange(),platform,launchPath}).status).toBe('unverified');
   });
+  const invalidFlags = [false, undefined, null, 0, 1, 'false', 'true', {}, []];
+  it.each(['eof', 'peerVerified'].flatMap(key => invalidFlags.map(value => ({ key, value }))))(
+    'untrusted boolean $key/$value cannot establish completeness or peer identity', ({ key, value }) => {
+      expect(validateExchange({ ...exchange(), [key]: value }).status).toBe('unverified');
+    });
   it.each(['eof','peerVerified'])('requires %s', key => {
     expect(validateExchange({...exchange(),[key]:false}).status).toBe('unverified');
   });
@@ -201,6 +206,19 @@ describe('isolated OFF/public outcome and fake sink boundary', () => {
     if(result.privateCandidate!==null)sink(result.privateCandidate);
     expect(prepare).not.toHaveBeenCalled();expect(sink).not.toHaveBeenCalled();
     expect(result.publicBytes).toBe(pub);expect(result.exitCode).toBe(exit);
+  });
+  it.each([false, undefined, null, 0, 1, 'false', 'true', {}, []])(
+    'untrusted boolean enabled %j remains OFF without preparing', enabled => {
+      const pub = Buffer.from(fixture.public_bytes_utf8), prepare = vi.fn(() => fixture.result);
+      const result = planOptionalEvidence(enabled as unknown as boolean, pub, 1, prepare);
+      expect(prepare).not.toHaveBeenCalled();expect(result.privateStatus).toBe('off');
+      expect(result.privateCandidate).toBeNull();expect(result.publicBytes).toBe(pub);expect(result.exitCode).toBe(1);
+    });
+  it('strict true opt-in prepares once and preserves public outcome', () => {
+    const pub = Buffer.from(fixture.public_bytes_utf8), prepare = vi.fn(() => fixture.result);
+    const result = planOptionalEvidence(true, pub, 1, prepare);
+    expect(prepare).toHaveBeenCalledOnce();expect(result.privateStatus).toBe('prepared');
+    expect(result.privateCandidate).toBe(fixture.result);expect(result.publicBytes).toBe(pub);expect(result.exitCode).toBe(1);
   });
   it('prepare and fake sink failure cannot rewrite public bytes/exit', () => {
     const pub=Buffer.from(fixture.public_bytes_utf8);
