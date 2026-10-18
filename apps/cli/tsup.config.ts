@@ -66,27 +66,9 @@ export default defineConfig({
       writeFileSync(outFile, patched, 'utf-8');
     }
 
-    // Write a thin bootstrap wrapper (no static imports) that installs a
-    // warning handler BEFORE the ESM bundle's imports hoist. This swallows the
-    // node:sqlite ExperimentalWarning without hiding other warnings.
+    // Copy the product-owned launcher after clean; it owns minimum-Node SQLite startup.
     const bootstrapPath = join(distDir, 'caveat.js');
-    writeFileSync(
-      bootstrapPath,
-      [
-        '#!/usr/bin/env node',
-        "process.removeAllListeners('warning');",
-        "process.on('warning', (w) => {",
-        "  if (w && w.name === 'ExperimentalWarning' && typeof w.message === 'string' && w.message.includes('SQLite')) return;",
-        "  process.stderr.write('(' + (w && w.name) + ') ' + (w && w.message) + '\\n');",
-        '});',
-        "import('./index.js').catch((err) => {",
-        "  process.stderr.write('[caveat:fatal] ' + (err && err.stack || err) + '\\n');",
-        '  process.exit(1);',
-        '});',
-        '',
-      ].join('\n'),
-      'utf-8',
-    );
+    copyFileSync(join(__dirname, 'src', 'bootstrap.mjs'), bootstrapPath);
     chmodSync(bootstrapPath, 0o755);
 
     copyFileSync(coreSchema, join(distDir, 'schema.sql'));

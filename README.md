@@ -193,7 +193,7 @@ rag/                  Research asset ledger; currently only INDEX.md
 
 ## Requirements
 
-- **Node 22.5+** (for `node:sqlite`). Verified on Node 24.14 with bundled SQLite 3.51.2.
+- **Node 22.5+** (for `node:sqlite`). Verified on Node 24.14 with bundled SQLite 3.51.2. The shipped `caveat` launcher enables SQLite once when the runtime still requires its startup flag; callers do not add a test-only flag. Explicit SQLite enable/disable options are preserved.
 - WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
 - **pnpm 10** via corepack (pinned in root `package.json`'s `packageManager`).
 - **git** for community import (`simple-git` shells out to the system git).

@@ -139,7 +139,7 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-Node 22.5以降とgitが必要です。WindowsではPowerShell 7（`pwsh.exe`）を使います。
+Node 22.5以降とgitが必要です。 SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。利用者が試験時だけflagを足す必要はなく、明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使います。
 エラー収集用ストレージのACL処理も同じ入口です。
 
 ```sh

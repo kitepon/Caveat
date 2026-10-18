@@ -312,3 +312,13 @@ Expected:
 - GitHub Release `v$VERSION` exists and is neither draft nor prerelease.
 - npm latest equals `$VERSION`.
 - Worktree is clean and synced with `origin/main`.
+
+
+## Declared minimum Node launcher gate
+
+Run `node --test scripts/cli-bootstrap.test.mjs` on the declared lower bound and the normal build runtime.
+Use the shipped bin with `--version` and `--help` without adding an experimental SQLite flag to the test command.
+Match the packed bootstrap bytes to `apps/cli/src/bootstrap.mjs`, and verify argv/stdio/exit/signal and explicit-disable refusal.
+The product launcher owns the startup requirement; preserve the baseline failure and fixed output separately.
+Record the OS and Node version actually exercised. A Linux lower-bound pass does not establish macOS/Windows cancellation
+or all product features, private diagnostics, or the full private pure suite on that runtime.
