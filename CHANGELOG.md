@@ -2,6 +2,23 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] — 2026-10-24
+
+### Added
+
+- Add explicitly managed native autosync schedules for the current user, with retained cycle results and bounded retry state. Normal initialization does not enable schedules.
+
+### Fixed
+
+- Start the shipped CLI on the declared Node 22.5 SQLite floor while preserving explicit runtime options.
+- Preserve the current Windows token identity and non-ASCII task XML bytes during schedule management. Persist owner-only ACL changes without copying audit sections.
+- Preserve TOML table values and date forms when updating Codex/Grok registrations with smol-toml 1.9.1. Verify serialized values before backup/write and retain the independent readback check.
+
+### Dependencies and internal contracts
+
+- Update ten dependency version families while retaining separate YAML 3/4 and Node adapter 1/2 paths. Keep SDK 1.29.0 and direct js-yaml 4.1.1 pinned pending acceptance of their changed input contracts.
+- Include private evidence schemas and pure validation assets with no declared transports. Collection, native channels, and private runtime integration remain disabled and unsupported.
+
 ## [0.20.3] — 2026-10-07
 
 - Keep normal sync setup cancellation, privacy refusals, safely aborted conflicts and surfaced remote-command failures out of automatic app repair reports. Remote failures identify the failed operation and explicitly leave the cause/remote result unconfirmed.
