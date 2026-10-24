@@ -19,9 +19,9 @@
   },
   "dependencies": {
     "@caveat/core": "workspace:*",
-    "@hono/node-server": "^2.0.4",
-    "hono": "^4.12.23",
-    "markdown-it": "^14.2.0"
+    "@hono/node-server": "2.1.5",
+    "hono": "4.13.13",
+    "markdown-it": "14.3.3"
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.0",

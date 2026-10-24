@@ -25,10 +25,10 @@
     "@simple-git/argv-parser": "^1.1.0",
     "fast-xml-parser": "5.11.2",
     "gray-matter": "^4.0.3",
-    "js-yaml": "^4.1.0",
+    "js-yaml": "4.3.2",
     "semver": "^7.8.1",
     "simple-git": "^3.36.0",
-    "zod": "^4.4.3"
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.0",
