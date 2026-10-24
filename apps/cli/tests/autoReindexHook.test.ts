@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '@caveat/core';
 
+// Three shipped-bin invocations plus marker polling must fit the test budget.
+const HOOK_CHILD_TIMEOUT_MS = 10_000;
+const HOOK_E2E_TIMEOUT_MS = 3 * HOOK_CHILD_TIMEOUT_MS + 5_000;
+
 const POLL_INTERVAL_MS = 25;
 const POLL_TIMEOUT_MS = 3_000;
 
@@ -29,7 +33,8 @@ Quasar junction boot failure reports a rare anchor mismatch.
 }
 
 function cli(name: string, home: string, env: NodeJS.ProcessEnv = process.env) {
-  return spawnSync(
+  const started = Date.now();
+  const result = spawnSync(
     process.execPath,
     // Exercise the shipped entry point. Repeated tsx loader startup under the
     // full CI load consumed the 5s test budget before these assertions ran.
@@ -38,6 +43,7 @@ function cli(name: string, home: string, env: NodeJS.ProcessEnv = process.env) {
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       input: JSON.stringify({ session_id: 'auto-reindex', prompt: 'quasar junction boot failure' }),
       encoding: 'utf-8',
+      timeout: HOOK_CHILD_TIMEOUT_MS,
       // This file exercises the reindex system in isolation. The autosync
       // worker also reindexes (rewriting the shared .entries-digest marker), so
       // leave it off here or its background write races these marker/mtime
@@ -45,6 +51,11 @@ function cli(name: string, home: string, env: NodeJS.ProcessEnv = process.env) {
       env: { CAVEAT_AUTO_SYNC: 'off', ...env, CAVEAT_HOME: home, HOME: join(home, 'user') },
     },
   );
+  console.error('[caveat_reindex_fixture]', JSON.stringify({
+    step: name, elapsed_ms: Date.now() - started, status: result.status,
+    signal: result.signal, error_code: result.error?.code ?? null,
+  }));
+  return result;
 }
 
 async function waitFor(path: string): Promise<void> {
@@ -68,7 +79,7 @@ function fresh(): { home: string; cleanup: () => void } {
 }
 
 describe('auto reindex hook', () => {
-  it('reindexes directly, writes its marker, and makes the entry surface', () => {
+  it('reindexes directly, writes its marker, and makes the entry surface', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
     const { home, cleanup } = fresh();
     try {
       const result = cli('reindex', home);
@@ -81,7 +92,7 @@ describe('auto reindex hook', () => {
     } finally { cleanup(); }
   });
 
-  it('spawns from stop only when dirty and leaves a clean marker unchanged', { timeout: 15_000 }, async () => {
+  it('spawns from stop only when dirty and leaves a clean marker unchanged', { timeout: HOOK_E2E_TIMEOUT_MS }, async () => {
     const { home, cleanup } = fresh();
     try {
       const stop = cli('stop', home);
@@ -96,7 +107,7 @@ describe('auto reindex hook', () => {
     } finally { cleanup(); }
   });
 
-  it('honors the autosync kill switch and a live lock', () => {
+  it('honors the autosync kill switch and a live lock', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
     const { home, cleanup } = fresh();
     try {
       const off = cli('reindex', home, { ...process.env, CAVEAT_INDEX_AUTOSYNC: 'off' });
