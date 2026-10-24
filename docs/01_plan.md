@@ -195,8 +195,9 @@ private channelへ同じ実行中の補助証拠を返す。追加の製品proce
 各transportは`id`、`platforms`、`launch_paths`の3key。
 候補IDは`posix-fd-v1`（linux/darwin）、`windows-named-pipe-v1`（win32）。
 launch_pathsは製品が受け入れた`direct_node_entry` / `native_exe` / `powershell_standard_shim`の明示集合。
-Windows能力をPOSIX能力から推定しない。現0.20.3は能力file無し→not_supported。
-この草案を作ったことを能力fileが配布済みという意味にしない。
+Windows能力をPOSIX能力から推定しない。公開版0.20.3は能力file無し→not_supported。
+0.21.0候補は空のtransportsを持つ能力fileを含み、private transportの実行は引き続きnot_supported。
+この候補の作成を、能力fileの公開配布やruntime接続の完了とは扱わない。
 
 選択順序:
 
