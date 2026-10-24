@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse, stringify } from 'smol-toml';
-import { installMcpClient } from '../src/mcpInstall.js';
+import { installMcpClient, uninstallMcpClient } from '../src/mcpInstall.js';
 
 describe('製品が所有するMCP登録', () => {
   let root: string;
@@ -51,4 +51,76 @@ describe('製品が所有するMCP登録', () => {
     expect(installMcpClient({ client: 'codex', configPath: join(root, 'new.toml'), nodePath: process.execPath, cliScriptPath: '/caveat.js', dryRun: true })).toBe('dry-run');
     expect(readdirSync(root)).toEqual([]);
   });
+
+  for (const client of ['codex', 'grok'] as const) {
+    it(`${client}: TOMLの型・日時表現・他tableを保持して登録と解除を行う`, () => {
+      const configPath = join(root, 'config.toml');
+      const original = `model = "利用者指定"
+finite = 1.25
+not_a_number = nan
+infinity = inf
+large = 9007199254740991
+offset = 1979-05-27T07:32:00-07:00
+local = 1979-05-27T07:32:00
+date = 1979-05-27
+time = 07:32:00
+values = [1, "1", false]
+[features]
+hooks = false
+["__proto__"]
+polluted = "data only"
+[mcp_servers.other]
+command = "other"
+[mcp_servers.caveat]
+command = "old"
+enabled = false
+tool_timeout_sec = 240
+[mcp_servers.caveat.env]
+CAVEAT_HOME = "利用者の記録"
+[[profiles]]
+name = "first"
+enabled = false
+[[profiles]]
+name = "second"
+enabled = true
+`;
+      writeFileSync(configPath, original);
+      const before = parse(original);
+      const options = { client, configPath, nodePath: process.execPath, cliScriptPath: join(root, 'caveat.js'), dryRun: false };
+      expect(installMcpClient(options)).toBe('configured');
+      const after = parse(readFileSync(configPath, 'utf8'));
+      expect(after).toEqual({ ...before, mcp_servers: {
+        ...before.mcp_servers as object,
+        caveat: { command: process.execPath, args: ['--disable-warning=ExperimentalWarning', options.cliScriptPath, 'mcp-server'], enabled: false, tool_timeout_sec: 240, env: { CAVEAT_HOME: '利用者の記録' } },
+      } });
+      for (const key of ['offset', 'local', 'date', 'time']) {
+        expect((after[key] as Date).toISOString()).toBe((before[key] as Date).toISOString());
+      }
+      expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+      expect(installMcpClient(options)).toBe('unchanged');
+      expect(uninstallMcpClient({ client, configPath, dryRun: false })).toBe('configured');
+      expect(parse(readFileSync(configPath, 'utf8'))).toEqual({ ...before, mcp_servers: { other: { command: 'other' } } });
+      expect(uninstallMcpClient({ client, configPath, dryRun: false })).toBe('unchanged');
+    });
+
+    it(`${client}: 数値の符号を再出力で失う場合はbackupも書込も行わない`, () => {
+      const configPath = join(root, 'config.toml');
+      const original = 'value = -0.0\n';
+      expect(Object.is(parse(original).value, -0)).toBe(true);
+      expect(Object.is(parse(stringify(parse(original))).value, -0)).toBe(false);
+      writeFileSync(configPath, original);
+      expect(() => installMcpClient({ client, configPath, nodePath: process.execPath, cliScriptPath: '/caveat.js', dryRun: false })).toThrow('mcp_config_roundtrip_failed');
+      expect(readFileSync(configPath, 'utf8')).toBe(original);
+      expect(readdirSync(root)).toEqual(['config.toml']);
+    });
+
+    it(`${client}: 不正なexponent signを非書込で拒否する`, () => {
+      const configPath = join(root, 'config.toml');
+      const original = 'value = 1e++2\n';
+      writeFileSync(configPath, original);
+      expect(() => installMcpClient({ client, configPath, nodePath: process.execPath, cliScriptPath: '/caveat.js', dryRun: false })).toThrow();
+      expect(readFileSync(configPath, 'utf8')).toBe(original);
+      expect(readdirSync(root)).toEqual(['config.toml']);
+    });
+  }
 });

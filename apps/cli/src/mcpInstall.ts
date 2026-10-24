@@ -20,6 +20,25 @@ function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/** TOML tables may have a null prototype. Preserve scalar types and date forms. */
+function sameTomlValue(left: unknown, right: unknown): boolean {
+  if (left instanceof Date || right instanceof Date) {
+    return left instanceof Date && right instanceof Date
+      && isDeepStrictEqual(left, right) && left.toISOString() === right.toISOString();
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left) && Array.isArray(right) && left.length === right.length
+      && left.every((value, index) => sameTomlValue(value, right[index]));
+  }
+  const table = (value: unknown): value is Record<string, unknown> => object(value)
+    && (Object.getPrototypeOf(value) === null || Object.getPrototypeOf(value) === Object.prototype);
+  if (table(left) && table(right)) {
+    return Object.keys(left).length === Object.keys(right).length
+      && Object.keys(left).every((key) => Object.hasOwn(right, key) && sameTomlValue(left[key], right[key]));
+  }
+  return isDeepStrictEqual(left, right);
+}
+
 interface McpConfigOptions {
   client: McpClient;
   configPath: string;
@@ -47,6 +66,7 @@ function updateMcpClient(
   const { client, configPath, dryRun } = options;
   const json = client === 'cursor' || client === 'claude';
   const decode = (text: string): unknown => json ? JSON.parse(text) : parse(text);
+  const sameValue = json ? isDeepStrictEqual : sameTomlValue;
   const current = existsSync(configPath) ? decode(readFileSync(configPath, 'utf8')) : {};
   const key = json ? 'mcpServers' : 'mcp_servers';
   if (!object(current) || (current[key] !== undefined && !object(current[key]))) {
@@ -58,15 +78,19 @@ function updateMcpClient(
   }
   const previous = servers.caveat as Record<string, unknown> | undefined;
   const registration = update(previous);
-  if (isDeepStrictEqual(previous, registration)) return 'unchanged';
+  if (sameValue(previous, registration)) return 'unchanged';
   if (dryRun) return 'dry-run';
   const nextServers = { ...servers };
   if (registration === undefined) delete nextServers.caveat;
   else nextServers.caveat = registration;
   const next = { ...current, [key]: nextServers };
-  writeFileWithBackup(configPath, json ? `${JSON.stringify(next, null, 2)}\n` : stringify(next));
+  const encoded = json ? `${JSON.stringify(next, null, 2)}\n` : stringify(next);
+  if (!sameValue(decode(encoded), next)) {
+    throw new Error(`mcp_config_roundtrip_failed: ${client}の設定を意味を保って再出力できません`);
+  }
+  writeFileWithBackup(configPath, encoded);
   const observed = decode(readFileSync(configPath, 'utf8'));
-  if (!isDeepStrictEqual(observed, next)) {
+  if (!sameValue(observed, next)) {
     throw new Error(`mcp_config_readback_failed: ${client}の設定読戻しが一致しません`);
   }
   return 'configured';
