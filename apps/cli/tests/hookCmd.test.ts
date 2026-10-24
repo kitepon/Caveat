@@ -12,14 +12,20 @@ it('formats Claude pending cleanup failures with a fixed stderr prefix', () => {
 });
 
 // CLI integration includes process startup and SQLite; bound each child and
-// allow two invocations plus fixture setup without changing hook assertions.
+// budget both invocations plus local fixture setup/assertions. The deliberate
+// runtime-error path also secures the Windows error store (multiple ACL calls);
+// its child hit 10s in canonical CI while ordinary hook children stayed <1s.
 const HOOK_CHILD_TIMEOUT_MS = 10_000;
-const HOOK_E2E_TIMEOUT_MS = 30_000;
+const RUNTIME_ERROR_CHILD_TIMEOUT_MS = 20_000;
+const FIXTURE_OVERHEAD_MS = 10_000;
+const HOOK_E2E_TIMEOUT_MS = 2 * HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
+const RUNTIME_ERROR_E2E_TIMEOUT_MS = RUNTIME_ERROR_CHILD_TIMEOUT_MS + HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
 
 function runHook(
   name: string,
   input: Record<string, unknown>,
   env: NodeJS.ProcessEnv,
+  timeoutMs = HOOK_CHILD_TIMEOUT_MS,
 ): ReturnType<typeof spawnSync> {
   const started = Date.now();
   const result = spawnSync(
@@ -34,7 +40,7 @@ function runHook(
       cwd: fileURLToPath(new URL('..', import.meta.url)),
       input: JSON.stringify(input),
       encoding: 'utf-8',
-      timeout: HOOK_CHILD_TIMEOUT_MS,
+      timeout: timeoutMs,
       // These tests assert on the hook's synchronous stdout / pending-queue
       // behavior. A stop hook otherwise spawns detached reindex + autosync
       // workers whose background DB and pending writes race those assertions
@@ -43,7 +49,7 @@ function runHook(
     },
   );
   console.error('[caveat_hook_fixture]', JSON.stringify({
-    step: name, elapsed_ms: Date.now() - started, status: result.status,
+    step: name, elapsed_ms: Date.now() - started, child_limit_ms: timeoutMs, status: result.status,
     signal: result.signal, error_code: result.error?.code ?? null,
   }));
   return result;
@@ -165,7 +171,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('records an unexpected search/open failure but not expected empty-input validation', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('records an unexpected search/open failure but not expected empty-input validation', { timeout: RUNTIME_ERROR_E2E_TIMEOUT_MS }, () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-runtime-error-'));
     const caveatHome = join(root, 'caveat-home'); const userHome = join(root, 'home'); const configHome = join(root, 'xdg-config'); const stateHome = join(root, 'xdg-state'); const localAppData = join(root, 'local-app-data');
     const runtimeEnv = { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome, USERPROFILE: userHome, LOCALAPPDATA: localAppData, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome };
@@ -174,7 +180,7 @@ describe('Claude hook output', () => {
       mkdirSync(userHome, { recursive: true }); mkdirSync(dirname(runtimeConfig), { recursive: true });
       writeFileSync(runtimeConfig, JSON.stringify({ runtimeErrors: true }));
       mkdirSync(join(caveatHome, 'index', 'caveat.db'), { recursive: true });
-      const failed = runHook('user-prompt-submit', { session_id: 's', prompt: 'search this' }, runtimeEnv);
+      const failed = runHook('user-prompt-submit', { session_id: 's', prompt: 'search this' }, runtimeEnv, RUNTIME_ERROR_CHILD_TIMEOUT_MS);
       expect(failed.status).toBe(0); expect(failed.stderr).toContain('[caveat:hook] search error:');
       expect(runtimeErrorsSnapshot(0, 256, { env: runtimeEnv }).runtime_errors).toMatchObject([{ error_code: 'CAVEAT.CLAUDE_HOOK_FAILED' }]);
 
