@@ -2,13 +2,14 @@
 // Explicit acceptance harness: isolated fixture profile and read-only Codex RPC.
 // No thread/model calls, hook execution, trust writes, or real-user config edits.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { commandInvocation } from './process-command.mjs';
+import { isWindows } from '../packages/core/dist/platform.js';
 
 const built = resolve(process.argv[2] ?? 'apps/cli/dist');
 const search = [dirname(process.execPath), ...(process.env.PATH ?? '').split(delimiter), join(homedir(), '.local/bin'), join(homedir(), 'AppData/Roaming/npm'), '/opt/homebrew/bin', '/usr/local/bin'];
@@ -62,10 +63,20 @@ try {
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
   console.log(JSON.stringify({status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
 } finally {
-  clearTimeout(timer); lines?.close(); child?.stdin.end(); child?.kill();
-  if (child && child.exitCode === null && child.signalCode === null) await new Promise(resolve => {
+  clearTimeout(timer); lines?.close(); child?.stdin.end();
+  const alive = () => child && child.exitCode === null && child.signalCode === null;
+  const waitClose = async () => { if (alive()) await new Promise(resolve => {
     const timeout = setTimeout(resolve, 3000); child.once('exit', () => { clearTimeout(timeout); resolve(); });
-  });
+  }); };
+  // EOF normally closes the private server and its npm shim. Do not orphan a
+  // Windows PowerShell/.cmd descendant by killing only the wrapper first.
+  await waitClose();
+  if (alive()) {
+    if (isWindows()) spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});
+    else child.kill();
+    await waitClose();
+  }
+  assert.ok(!alive(), 'owned native proof server did not terminate');
   // Only the owned fixture tree is removed; no real Codex data is read or copied.
   rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 }
