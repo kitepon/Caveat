@@ -32,7 +32,7 @@ import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installSh
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
-import { deploymentStage, deploymentActivate, deploymentStatus, deploymentUnlock } from './commands/deployment.js';
+import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock } from './commands/deployment.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -61,6 +61,9 @@ program
 
 const runtimeErrors = program.command('runtime-errors').description('Inspect Caveat opt-in runtime errors');
 const deployment = program.command('deployment').description('Manage verified side-by-side releases behind a stable CLI entry');
+deployment.command('preflight').requiredOption('--json', 'read-only source and actual-user placement acceptance')
+  .option('--package-root <path>', 'caller-verified installed npm package to inspect')
+  .action((opts: { packageRoot?: string }) => { process.stdout.write(`${JSON.stringify(deploymentPreflight(opts.packageRoot))}\n`); });
 deployment.command('stage').requiredOption('--json', 'emit the staged release identity')
   .option('--package-root <path>', 'caller-verified installed npm package to stage')
   .action((opts: { packageRoot?: string }) => { process.stdout.write(`${JSON.stringify(deploymentStage(opts.packageRoot))}\n`); });

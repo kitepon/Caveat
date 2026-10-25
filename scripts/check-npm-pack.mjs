@@ -141,6 +141,10 @@ function installAndReadVersion(tarball, expectedVersion) {
     if (result.status !== 0) throw Error(`packed deployment ${args[0]} failed: ${result.stderr}`);
     return JSON.parse(result.stdout);
   };
+  const preflight = manage(['preflight']);
+  assertEqual(preflight.readOnly, true, 'preflight readOnly');
+  assertEqual(preflight.stageAllowed, true, 'preflight stageAllowed');
+  if (existsSync(preflight.root)) throw Error('read-only preflight created the managed root');
   const staged = manage(['stage']); manage(['activate', staged.release]);
   const timings = [];
   for (const args of [['--version'], ['--help']]) {

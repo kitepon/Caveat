@@ -1,10 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync, lstatSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync, lstatSync, copyFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isWindows } from '../src/platform.js';
-import { activateManagedDeployment, stageManagedDeployment, readManagedDeployment, managedRegistrationPath, managedDeploymentPaths, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '../src/managedDeployment.js';
+import { activateManagedDeployment, stageManagedDeployment, readManagedDeployment, managedRegistrationPath, managedDeploymentPaths, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, preflightManagedDeployment } from '../src/managedDeployment.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
@@ -12,7 +13,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'caveat-managed-')); roots.push(root);
   const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
   // These are semantic store fixtures, not native Windows ACL acceptance.
-  const options = { userHome, aclRunner: () => {}, aclTreeRunner: () => {}, aclVerifyTreeRunner: () => {} };
+  const options = { userHome, aclRunner: () => {}, aclTreeRunner: () => {}, aclVerifyTreeRunner: () => {}, aclSourceRunner: () => {} };
   const source = (version: string) => {
     const dir = join(root, version); mkdirSync(join(dir, 'dist'), { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'caveat-cli', version, bin: { caveat: 'dist/caveat.js' } }));
@@ -74,14 +75,14 @@ describe('managed deployment transaction and protected payload', () => {
   });
   it.skipIf(isWindows())('rejects a link in an existing root and a writable ancestor without repairing their permissions', () => {
     const f = fixture(), source = f.source('1.0.0');
-    mkdirSync(join(f.options.userHome, '.local'), { mode: 0o700 });
-    chmodSync(join(f.options.userHome, '.local'), 0o777);
+    mkdirSync(dirname(f.paths.root), { mode: 0o700 });
+    chmodSync(dirname(f.paths.root), 0o777);
     expect(() => stageManagedDeployment(source, f.options)).toThrow('unsafe_owner_or_mode');
-    chmodSync(join(f.options.userHome, '.local'), 0o700);
+    chmodSync(dirname(f.paths.root), 0o700);
     const outside = join(f.root, 'outside'); mkdirSync(outside, { mode: 0o700 });
-    symlinkSync(outside, join(f.options.userHome, '.local', 'share'));
+    symlinkSync(outside, f.paths.root);
     expect(() => stageManagedDeployment(source, f.options)).toThrow('unsafe_path');
-    expect(existsSync(join(outside, 'caveat'))).toBe(false);
+    expect(existsSync(join(outside, 'releases'))).toBe(false);
   });
   it.skipIf(isWindows())('accepts an OS-level parent alias while keeping the managed entry canonical', () => {
     const f=fixture(), alias=join(f.root,'parent-alias');symlinkSync(f.root,alias);
@@ -144,6 +145,36 @@ describe('managed deployment transaction and protected payload', () => {
     chmodSync(f.paths.root,0o777);
     expect(()=>stageManagedDeployment(source,f.options)).toThrow('unsafe_owner_or_mode');
     chmodSync(f.paths.root,0o700);
+  });
+
+  it('preflights the actual placement without creating root, lock, pointer or registration files', () => {
+    const f=fixture(), source=f.source('1.0.0');
+    const result=preflightManagedDeployment(source,f.options);
+    expect(result).toMatchObject({readOnly:true,stageAllowed:true,activateAllowed:true,rootExists:false});
+    expect(result.root).toBe(join(f.options.userHome,'.caveat-deploy','managed-v1'));
+    expect(existsSync(dirname(f.paths.root))).toBe(false);expect(existsSync(f.paths.root)).toBe(false);
+  });
+  it.skipIf(isWindows())('keeps new v1 placement independent of a group-writable shared dot-local directory', () => {
+    const f=fixture(), source=f.source('1.0.0');mkdirSync(join(f.options.userHome,'.local'),{mode:0o775});chmodSync(join(f.options.userHome,'.local'),0o775);
+    expect(preflightManagedDeployment(source,f.options).stageAllowed).toBe(true);
+    const staged=stageManagedDeployment(source,f.options);activateManagedDeployment(staged.release,f.options);
+    expect(staged.launcher).toBe(join(f.options.userHome,'.caveat-deploy','managed-v1','entry','caveat.mjs'));
+    expect(lstatSync(join(f.options.userHome,'.local')).mode&0o777).toBe(0o775);
+    expect(verifyManagedDeployment(f.options).manifest.version).toBe('1.0.0');
+  });
+  it('preserves the exact published 0.21.1 entry in a safe existing legacy root', () => {
+    const f=fixture(), legacy=join(f.options.userHome,'.local','share','caveat','managed-v1');
+    mkdirSync(join(legacy,'entry'),{recursive:true,mode:0o700});
+    for(const name of ['caveat.mjs','managed-deployment.js'])copyFileSync(fileURLToPath(new URL('./fixtures/managed-v1-0.21.1/'+name,import.meta.url)),join(legacy,'entry',name));
+    writeFileSync(join(legacy,'entry/package.json'),'{"type":"module"}\n',{mode:0o600});
+    const before=['caveat.mjs','managed-deployment.js'].map(name=>readFileSync(join(legacy,'entry',name)));
+    const source=f.source('1.0.1');expect(preflightManagedDeployment(source,f.options).legacyEntry).toBe(true);
+    const staged=stageManagedDeployment(source,f.options);activateManagedDeployment(staged.release,f.options);
+    expect(staged.launcher).toBe(join(legacy,'entry/caveat.mjs'));
+    expect(['caveat.mjs','managed-deployment.js'].map(name=>readFileSync(join(legacy,'entry',name)))).toEqual(before);
+    const run=spawnSync(process.execPath,[staged.launcher],{encoding:'utf8',timeout:5000});expect(run.status,run.stderr).toBe(0);expect(run.stdout.trim()).toBe('1.0.1');
+    writeFileSync(join(legacy,'entry/managed-deployment.js'),'unknown reader');
+    expect(()=>stageManagedDeployment(source,f.options)).toThrow('entry_upgrade_requires_migration');
   });
 
 });

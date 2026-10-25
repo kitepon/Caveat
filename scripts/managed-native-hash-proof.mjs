@@ -21,7 +21,7 @@ const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPath
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
-let child, lines, timer, nativeStderr = '', complete = false;
+let child, lines, nativeStderr = '', complete = false;
 const pending = new Map(); let sequence = 0;
 try {
   function source(version) {
@@ -46,11 +46,16 @@ try {
   child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });
   child.stderr.on('data', bytes => { nativeStderr = (nativeStderr + bytes.toString()).slice(-4000); });
   lines = createInterface({ input: child.stdout });
-  lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
+  lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); clearTimeout(p.timer); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
   child.on('error', error => { for (const p of pending.values()) p.reject(Error(`native_unavailable:${error.code ?? error.message}`)); });
   child.on('exit', (code, signal) => { for (const p of pending.values()) p.reject(Error(`native_exited:code=${code}:signal=${signal ?? 'none'}`)); });
-  const request = (method, params) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id,{resolve,reject}); child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n'); });
-  timer = setTimeout(() => { for (const p of pending.values()) p.reject(Error('native_timeout')); }, 30000);
+  // The bound belongs to a pending read-only RPC. Synchronous installer/ACL
+  // work between RPCs has its own guards and must not expire an idle RPC timer.
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    const timer = setTimeout(() => { pending.delete(id); reject(Error('native_timeout:' + method)); }, 30000);
+    pending.set(id,{resolve,reject,timer}); child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');
+  });
   await request('initialize', { clientInfo: { name: 'caveat-isolated-entry-hash-proof', version: '1' }, capabilities: { experimentalApi: true, explicitGatewayOauth: true } });
   child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'initialized'})+'\n');
   const phases = [];
@@ -67,7 +72,7 @@ try {
   console.log(JSON.stringify({status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
 } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
-  clearTimeout(timer); lines?.close(); child?.stdin.end();
+  for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();
   const alive = () => child && child.exitCode === null && child.signalCode === null;
   const waitClose = async () => { if (alive()) await new Promise(resolve => {
     const timeout = setTimeout(resolve, 3000); child.once('exit', () => { clearTimeout(timeout); resolve(); });
