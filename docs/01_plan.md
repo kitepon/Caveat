@@ -485,3 +485,8 @@ Compatibility lives in `managedDeploymentLegacy.ts`, separately from the new pla
 ### Migration and acceptance
 
 The first migration from version-specific commands requires review/trust of the exact new three Codex definitions per host through Codex's normal flow. The installer never writes trusted_hash, grants another product trust or bypasses review. Static installed diagnostics do not establish native trust or conversation acceptance. Keep shared Node, PATH, credentials and native schedules unchanged unless separately authorized.
+
+
+## MCP runtimeの読込み境界（次版source）
+
+通常hook/検索等はMCP SDKのmodule評価を必要としない。MCP server実装はpack必須asset `dist/mcp-server.js` に分離し、`mcp-server` command境界で読み込む。読込みとserver起動の失敗は従来の `CAVEAT.MCP_SERVER_FAILED` を記録して元例外を返す。MCPの検証/transport/ツール契約を省略せず、通常stdio経路で受け入れる。固定managed entry/runtimeのbytesを変更しない。
