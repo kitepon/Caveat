@@ -497,3 +497,7 @@ Compatibility lives in `managedDeploymentLegacy.ts`, separately from the new pla
 ### Migration and acceptance
 
 The first migration from version-specific commands requires review/trust of the exact new three Codex definitions per host through Codex's normal flow. The installer never writes trusted_hash, grants another product trust or bypasses review. Static installed diagnostics do not establish native trust or conversation acceptance. Keep shared Node, PATH, credentials and native schedules unchanged unless separately authorized.
+
+### Windows hookの保護保存transport（未公開source）
+
+Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。

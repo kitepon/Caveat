@@ -45,3 +45,4 @@ export * from './platform.js';
 export * from './entryConstraints.js';
 export * from './frontmatterCodec.js';
 export * from './entryRead.js';
+export { createWindowsAclSession } from './privateWindowsAclSession.js';

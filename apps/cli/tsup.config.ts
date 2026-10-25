@@ -46,6 +46,7 @@ export default defineConfig({
     'privateEvidence/origin': 'src/privateEvidence/origin.ts',
     'privateEvidence/candidate': 'src/privateEvidence/candidate.ts',
     'managed-deployment': '../../packages/core/src/managedDeploymentRuntime.ts',
+    privateWindowsAclWorker: '../../packages/core/src/privateWindowsAclWorker.ts',
   },
   splitting: false,
   format: ['esm'],
