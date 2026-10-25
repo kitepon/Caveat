@@ -49,8 +49,19 @@ describe('shipped stable entry and normal host installers', () => {
         const command=JSON.parse(readFileSync(join(configs,'codex/hooks.json'),'utf8')).hooks.PostToolUse[0].hooks[0].command;
         const registered=spawnSync(isWindows()?'pwsh.exe':'/bin/sh',isWindows()?['-NoProfile','-NonInteractive','-Command',command]:['-c',command],{encoding:'utf8',timeout:5000});
         expect(registered.status,registered.stderr).toBe(0);expect(JSON.parse(registered.stdout)).toMatchObject({version,args:['codex-hook','post-tool-use']});
-        if(isWindows()) for(const spelling of [paths.launcher.replace(/^[A-Z]/,c=>c.toLowerCase()),toNamespacedPath(paths.launcher)]){
-          const alias=spawnSync(process.execPath,[spelling],{encoding:'utf8',timeout:5000});expect(alias.status,alias.stderr).toBe(0);expect(JSON.parse(alias.stdout).version).toBe(version);
+        if(isWindows()) {
+          const lowerDrive=paths.launcher.replace(/^[A-Z]/,c=>c.toLowerCase());
+          const alias=spawnSync(process.execPath,[lowerDrive],{encoding:'utf8',timeout:5000});
+          expect(alias.status,alias.stderr).toBe(0);expect(JSON.parse(alias.stdout).version).toBe(version);
+          // Node 24.20 rejects an extended-path main argument before loading
+          // application code (EISDIR in resolveMainPath). Exercise the entry's
+          // identity boundary separately through a supported Node invocation.
+          // The actual installer-generated command above remains an end-to-end
+          // acceptance and always uses the canonical, non-extended launcher.
+          const spelling=toNamespacedPath(paths.launcher);
+          const source="const [invoked,canonical]=process.argv.slice(1);process.argv.splice(1,process.argv.length-1,invoked);await import((await import('node:url')).pathToFileURL(canonical).href);";
+          const extended=spawnSync(process.execPath,['--input-type=module','-e',source,spelling,paths.launcher],{encoding:'utf8',timeout:5000});
+          expect(extended.status,extended.stderr).toBe(0);expect(JSON.parse(extended.stdout)).toEqual({version,entry:spelling,args:[]});
         }
         expect(readFileSync(paths.launcher)).toEqual(entry); expect(readFileSync(paths.runtime)).toEqual(runtime);
       }
