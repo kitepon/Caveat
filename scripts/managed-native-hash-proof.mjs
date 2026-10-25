@@ -41,14 +41,14 @@ try {
   writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\n', { mode: 0o600 });
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
   const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
-  child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true });
+  child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });
   child.stderr.on('data', () => {});
   lines = createInterface({ input: child.stdout });
   lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
   child.on('error', () => { for (const p of pending.values()) p.reject(Error('native_unavailable')); });
   child.on('exit', () => { for (const p of pending.values()) p.reject(Error('native_exited')); });
   const request = (method, params) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id,{resolve,reject}); child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n'); });
-  timer = setTimeout(() => { for (const p of pending.values()) p.reject(Error('native_timeout')); child.kill(); }, 30000);
+  timer = setTimeout(() => { for (const p of pending.values()) p.reject(Error('native_timeout')); }, 30000);
   await request('initialize', { clientInfo: { name: 'caveat-isolated-entry-hash-proof', version: '1' }, capabilities: { experimentalApi: true, explicitGatewayOauth: true } });
   child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'initialized'})+'\n');
   const phases = [];
@@ -73,7 +73,7 @@ try {
   await waitClose();
   if (alive()) {
     if (isWindows()) spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});
-    else child.kill();
+    else process.kill(-child.pid, 'SIGTERM');
     await waitClose();
   }
   assert.ok(!alive(), 'owned native proof server did not terminate');
