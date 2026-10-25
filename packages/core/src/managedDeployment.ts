@@ -26,8 +26,14 @@ function windowsRootCheck(root: string, home: string, options: ManagedDeployment
   if (options.aclRunner) options.aclRunner(root, true, false);
   else runWindowsManagedRootAcl(root, home);
 }
+function canonicalHome(userHome = homedir()) {
+  const path=resolve(userHome);
+  // macOS /var -> /private/var and other OS-level aliases may precede the
+  // user profile. Descendants of the canonical home still reject redirects.
+  return existsSync(path) ? realpathSync(path) : path;
+}
 export function managedDeploymentPaths(userHome = homedir()) {
-  const root = join(resolve(userHome), '.local', 'share', 'caveat', 'managed-v1');
+  const root = join(canonicalHome(userHome), '.local', 'share', 'caveat', 'managed-v1');
   return { root, releases: join(root, 'releases'), entry: join(root, 'entry'),
     launcher: join(root, 'entry', 'caveat.mjs'), runtime: join(root, 'entry', 'managed-deployment.js'),
     pointer: join(root, 'active.json'), lock: join(root, 'installer.lock') };
@@ -40,7 +46,7 @@ function ownerStat(path: string, directory: boolean, options: ManagedDeploymentO
 }
 function assertAncestors(options: ManagedDeploymentOptions) {
   const paths = managedDeploymentPaths(options.userHome);
-  const home = resolve(options.userHome ?? homedir());
+  const home = canonicalHome(options.userHome);
   ownerStat(home, true, options);
   let path = home;
   for (const part of relative(home, paths.root).split(sep)) {
@@ -52,7 +58,7 @@ function assertAncestors(options: ManagedDeploymentOptions) {
 }
 function createRoot(options: ManagedDeploymentOptions) {
   const paths = managedDeploymentPaths(options.userHome);
-  const home = resolve(options.userHome ?? homedir());
+  const home = canonicalHome(options.userHome);
   ownerStat(home, true, options);
   if (options.windows ?? isWindows()) windowsRootCheck(paths.root, home, options);
   let path = home;

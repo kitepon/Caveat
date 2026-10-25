@@ -82,4 +82,12 @@ describe('managed deployment transaction and protected payload', () => {
     expect(() => stageManagedDeployment(source, f.options)).toThrow('unsafe_path');
     expect(existsSync(join(outside, 'caveat'))).toBe(false);
   });
+  it.skipIf(isWindows())('accepts an OS-level parent alias while keeping the managed entry canonical', () => {
+    const f=fixture(), alias=join(f.root,'parent-alias');symlinkSync(f.root,alias);
+    const options={...f.options,userHome:join(alias,'profile')};
+    const staged=stageManagedDeployment(f.source('1.0.0'),options);
+    activateManagedDeployment(staged.release,options);
+    expect(readManagedDeployment(options).manifest.version).toBe('1.0.0');
+    expect(staged.launcher).toBe(f.paths.launcher);
+  });
 });
