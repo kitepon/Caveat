@@ -21,7 +21,7 @@ const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPath
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
-let child, lines, timer;
+let child, lines, timer, nativeStderr = '', complete = false;
 const pending = new Map(); let sequence = 0;
 try {
   function source(version) {
@@ -44,7 +44,7 @@ try {
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
   const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
   child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });
-  child.stderr.on('data', () => {});
+  child.stderr.on('data', bytes => { nativeStderr = (nativeStderr + bytes.toString()).slice(-4000); });
   lines = createInterface({ input: child.stdout });
   lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
   child.on('error', error => { for (const p of pending.values()) p.reject(Error(`native_unavailable:${error.code ?? error.message}`)); });
@@ -63,8 +63,10 @@ try {
     phases.push({release,rows});
   }
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
+  complete = true;
   console.log(JSON.stringify({status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
 } finally {
+  if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   clearTimeout(timer); lines?.close(); child?.stdin.end();
   const alive = () => child && child.exitCode === null && child.signalCode === null;
   const waitClose = async () => { if (alive()) await new Promise(resolve => {
