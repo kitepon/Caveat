@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmdirSync, writeFileSyn
 import { dirname, join } from 'node:path';
 import {
   KNOWLEDGE_GITIGNORE,
+  assertSqliteSearchCapability,
   cleanupStalePendingDirs,
   computeEntriesDigest,
   createKeyserverKeyProvider,
@@ -65,6 +66,7 @@ export async function runInit(
   opts: InitOptions = { skipClaude: false, dryRun: false },
   dependencies: InitDependencies = {},
 ): Promise<void> {
+  assertSqliteSearchCapability();
   const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1], ctx.userHome) : undefined;
   const isTty = dependencies.isTty ?? (() => Boolean(process.stdin.isTTY));
   const confirm = dependencies.confirm ?? askOnce;

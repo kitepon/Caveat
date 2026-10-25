@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   computeEntriesDigest,
+  assertSqliteSearchCapability,
   createKeyserverKeyProvider,
   openDb,
   prewarmSealedKeys,
@@ -17,6 +18,10 @@ export interface IndexOptions {
 }
 
 export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<void> {
+  try { assertSqliteSearchCapability(); } catch (error) {
+    observeRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { version: CAVEAT_VERSION, impact: 'feature_unavailable' });
+    throw error;
+  }
   const dbDir = dirname(ctx.paths.dbPath);
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   const keyProvider = createKeyserverKeyProvider({ caveatHome: ctx.caveatHome });

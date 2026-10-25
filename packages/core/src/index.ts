@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './db.js';
+export * from './runtimeCapabilities.js';
 export * from './frontmatter.js';
 export * from './env.js';
 export * from './indexer.js';
