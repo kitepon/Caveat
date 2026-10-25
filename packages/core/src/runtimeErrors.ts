@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { arch as hostArch, homedir, platform as hostPlatform } from 'node:os';
@@ -6,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { loadConfig } from './config.js';
 import { isWindowsEnv } from './platform.js';
+import { runWindowsAcl } from './privateWindowsAcl.js';
+export { runWindowsAcl } from './privateWindowsAcl.js';
 
 export const RUNTIME_ERRORS_SCHEMA = 'caveat.runtime_errors.v1';
 const STATE_VERSION = '1.0';
@@ -73,31 +74,6 @@ export function runtimeCollectionEnabled(env: NodeJS.ProcessEnv = process.env, c
 const empty = (): Store => ({ schema: RUNTIME_ERRORS_SCHEMA, next_sequence: 1, acknowledged_through: 0, records: [] });
 function fingerprint(code: RuntimeErrorCode) { const d = definitions[code]; return createHash('sha256').update(`caveat\0${d.component}\0${code}\0${d.template}`).digest('hex'); }
 function ensureSafeDir(dir: string, isWin: boolean, options: RuntimeErrorOptions = {}) { const existed = existsSync(dir); mkdirSync(dir, { recursive: true, mode: 0o700 }); const s = lstatSync(dir); if (!s.isDirectory() || s.isSymbolicLink()) throw Error('store_unsafe'); if (isWin) secureWindowsAcl(dir, options.aclRunner, true, !existed); else assertPosix(s, 0o700); }
-const WINDOWS_ACL_VERIFY = String.raw`$ErrorActionPreference='Stop';$p=$env:CAVEAT_ACL_PATH;$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$acl=Get-Acl -LiteralPath $p;$owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value;if($owner -ne $sid){exit 41};$rules=@($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]));if($rules.Count -ne 1){exit 42};$r=$rules[0];if($r.IdentityReference.Value -ne $sid -or $r.AccessControlType -ne 'Allow' -or $r.IsInherited -or ($r.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl){exit 43}`;
-// Persist only modified owner/access sections; Set-Acl may copy the audit
-// section and require SeSecurityPrivilege even for a DACL-only change.
-const WINDOWS_ACL_APPLY = String.raw`$ErrorActionPreference='Stop';$p=$env:CAVEAT_ACL_PATH;$isDir=$env:CAVEAT_ACL_DIRECTORY -eq '1';$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;$acl=if($isDir){New-Object System.Security.AccessControl.DirectorySecurity}else{New-Object System.Security.AccessControl.FileSecurity};$acl.SetAccessRuleProtection($true,$false);$flags=if($isDir){[System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'}else{[System.Security.AccessControl.InheritanceFlags]::None};$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,'FullControl',$flags,[System.Security.AccessControl.PropagationFlags]::None,[System.Security.AccessControl.AccessControlType]::Allow);$acl.SetOwner($sid);$acl.AddAccessRule($rule);if($isDir){[System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.DirectoryInfo]::new($p),$acl)}else{[System.IO.FileSystemAclExtensions]::SetAccessControl([System.IO.FileInfo]::new($p),$acl)};` + WINDOWS_ACL_VERIFY;
-// Hang guard, not a latency budget, and sized against the slowest machine that
-// runs it rather than a developer box.
-//
-// The old 3s bound is what made this seam flake: on a contended Windows CI
-// runner a single apply can cross it, spawnSync kills powershell,
-// and the null exit status read as "unsafe ACL". Measured on the actual
-// runners, one apply costs 331-459ms across 160 isolated runs, but the same
-// test costs 1042-1319ms inside the full parallel suite and the file it lives
-// in takes 47-61s overall — so 3s left barely 2.5x headroom against a runner
-// under load. A later windows-2022 run exhausted the former 15s guard while
-// PowerShell was starting, without returning an ACL rejection. 30s remains a
-// bounded hang guard while giving the hosted runner cold start enough room.
-// Re-measure before changing it; a fast idle box will lie to you.
-const WINDOWS_ACL_TIMEOUT_MS = 30_000;
-export function runWindowsAcl(path: string, directory: boolean, apply: boolean) {
-  const result = spawnSync('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', apply ? WINDOWS_ACL_APPLY : WINDOWS_ACL_VERIFY], { env: { ...process.env, CAVEAT_ACL_PATH: path, CAVEAT_ACL_DIRECTORY: directory ? '1' : '0' }, encoding: 'utf-8', timeout: WINDOWS_ACL_TIMEOUT_MS, windowsHide: true });
-  // 起動失敗・timeout・ACL拒否を区別し、外向きのstore_unsafeにはcauseとして保持する。
-  // pathとstderrは内部診断だけに残し、収集レコードには保存しない。
-  if (result.error !== undefined) throw Error(`store_unsafe: powershell spawn ${(result.error as NodeJS.ErrnoException).code ?? result.error.message}`);
-  if (result.status !== 0) throw Error(`store_unsafe: powershell exit=${result.status} signal=${result.signal ?? 'none'} stderr=${(result.stderr ?? '').replace(/\s+/g, ' ').trim().slice(0, 400) || '(empty)'}`);
-}
 function secureWindowsAcl(path: string, runner: RuntimeErrorOptions['aclRunner'], directory = false, apply = false) { try { (runner ?? runWindowsAcl)(path, directory, apply); } catch (cause) { throw Error('store_unsafe', { cause }); } }
 function assertPosix(info: { mode: number; uid: number }, mode: number) { if ((info.mode & 0o777) !== mode || (typeof process.getuid === 'function' && info.uid !== process.getuid())) throw Error('store_unsafe'); }
 function ensureSafeFile(path: string, isWin: boolean, options: RuntimeErrorOptions = {}) { const s = lstatSync(path); if (!s.isFile() || s.isSymbolicLink()) throw Error('store_unsafe'); if (isWin) secureWindowsAcl(path, options.aclRunner); else assertPosix(statSync(path), 0o600); }

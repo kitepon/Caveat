@@ -2,6 +2,14 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] — 2026-10-25
+
+### Fixed
+
+- Keep managed MCP and native hook definitions on a version-independent launcher. Stage verified npm packages side by side, then atomically select or roll back a release without changing hook command hashes.
+- Verify managed-root ownership, ancestor write permissions, payload manifests and target paths. Windows staging seals copied ACLs; unsafe roots, links and changed payloads fail closed.
+- Preserve the stable entry through the existing minimum-Node SQLite bootstrap. Managed installation and release selection never write Codex hook trust.
+
 ## [0.21.0] — 2026-10-24
 
 ### Added

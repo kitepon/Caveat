@@ -28,10 +28,11 @@ import {
   runCommunityRemove,
 } from './commands/community.js';
 import { resolveHookNodePath } from './nodePath.js';
-import { resolveAgentConfigPaths } from './installShared.js';
+import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
+import { deploymentStage, deploymentActivate, deploymentStatus, deploymentUnlock } from './commands/deployment.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -59,6 +60,17 @@ program
   });
 
 const runtimeErrors = program.command('runtime-errors').description('Inspect Caveat opt-in runtime errors');
+const deployment = program.command('deployment').description('Manage verified side-by-side releases behind a stable CLI entry');
+deployment.command('stage').requiredOption('--json', 'emit the staged release identity')
+  .option('--package-root <path>', 'caller-verified installed npm package to stage')
+  .action((opts: { packageRoot?: string }) => { process.stdout.write(`${JSON.stringify(deploymentStage(opts.packageRoot))}\n`); });
+deployment.command('activate <release>').requiredOption('--json', 'emit the activated and previous release identities')
+  .option('--recover-invalid-pointer', 'retain an invalid pointer and explicitly select this verified release', false)
+  .action((release: string, opts: { recoverInvalidPointer: boolean }) => { process.stdout.write(`${JSON.stringify(deploymentActivate(release, opts.recoverInvalidPointer))}\n`); });
+deployment.command('status').requiredOption('--json', 'verify and report the selected release')
+  .action(() => { const result = deploymentStatus(); process.stdout.write(`${JSON.stringify(result)}\n`); if (result.status !== 'ready') process.exitCode = 1; });
+deployment.command('unlock').requiredOption('--json', 'explicitly remove an installer lock after verifying its process is absent')
+  .action(() => { process.stdout.write(`${JSON.stringify(deploymentUnlock())}\n`); });
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
 type AutosyncOptions = { caveatHome?: string; userHome?: string; dryRun?: boolean };
 const autosyncCommand = (parent: Command, name: string) => parent.command(name)
@@ -309,7 +321,7 @@ codexHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -342,7 +354,7 @@ codexHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -406,7 +418,7 @@ cursorHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -431,7 +443,7 @@ cursorHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);

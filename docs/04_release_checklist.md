@@ -354,3 +354,13 @@ The canonical three-OS CI uses each runner's installed Node and does not establi
 Minimum-Node private147 and the 3OS x 4harness actual-use matrix remain separate, unverified acceptance.
 Local fake-entry regressions, build/pack and CI do not authorize real diagnostics/sync, host configuration,
 publication, enabling private evidence, or real private transport.
+
+## Managed-entry acceptance
+
+Build the standalone managed runtime and ship both `dist/stable-entry.mjs` and `dist/managed-deployment.js`. Verify that runtime can load before the minimum-Node SQLite bootstrap. The isolated launcher test stages two fixture versions, invokes the normal bootstrap/argv entry, selects and rolls back, and checks unchanged four-client and native-hook definitions. Windows uses real owner-only root/tree ACLs in that acceptance; pure store fixtures use an injected ACL seam and are not native ACL evidence.
+
+For native hook identity, run `node scripts/managed-native-hash-proof.mjs apps/cli/dist <codex-executable-or-codex.js>` in each accepted OS environment. It uses an owned isolated profile and only initialize/hooks/list, never a thread/model, hook execution or trust write. The three untrusted fixture definitions must retain the same key/currentHash through selection and rollback. Preserve OS/runtime and source/archive identity with the result. Do not treat a Linux proof as Windows/macOS acceptance.
+
+Before migration, fix the real stable definitions and obtain their normal one-time trust decision. Preserve old registrations/payload until the stable entry is accepted. After migration, compare native hooks/list hashes and all other products' trust across a normal version selection and rollback. A managed deployment is not complete merely because static hook diagnostics say installed.
+
+For managed deployment, compare the same ordinary Codex hooks on each OS through the published 0.20.3 command, the candidate command and the managed launcher in isolated profiles with `runtimeErrors: true`. Record first-in-fixture and subsequent invocations separately; do not claim an OS cold cache. `check:npm-pack` performs this comparison with the packed candidate and an isolated published baseline installation. Keep native ACL/full payload checks in stage/activate/status and verify the fixed runtime has no child-process call or package scan. Test `deployment status` lock diagnosis and explicit dead-owner `deployment unlock`, plus Windows invocation from the registered command string and alternate path spellings.

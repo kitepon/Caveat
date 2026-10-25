@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.0. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.1. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -565,3 +565,7 @@ Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
 MIT
 
 Factory private evidence v1 is an isolated, default-OFF contract candidate. This build declares no supported transports; it sends and stores no private evidence. The product owns the protocol and missing-evidence rules.
+
+### Optional managed deployment
+
+For side-by-side releases with a stable MCP/hook entry, use `caveat deployment stage --json`, then `caveat deployment activate <release-id> --json`. Run the returned fixed launcher with the existing Node for `init`. Later updates and rollbacks select an already verified release through the same command; registration strings stay unchanged. `caveat deployment status --json` verifies the selected payload. The initial migration needs one normal Codex hook review. Deployment does not grant trust or change Node/PATH; see [the managed deployment contract](docs/01_plan.md#managed-deployment-and-stable-hook-identity).
