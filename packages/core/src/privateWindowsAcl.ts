@@ -35,9 +35,63 @@ export function runWindowsAclVerifyPrivateTree(path: string, additionalPaths: st
   runAclScript(path, true, script, { CAVEAT_ACL_VERIFY_PATHS: JSON.stringify([path, ...additionalPaths]) });
 }
 /** Ancestors must not let another ordinary user replace an owner-only root. */
-export function runWindowsManagedRootAcl(path: string, userHome: string) {
-  const script = String.raw`$ErrorActionPreference='Stop';$root=[System.IO.Path]::GetFullPath($env:CAVEAT_ACL_PATH);$homePath=[System.IO.Path]::GetFullPath($env:CAVEAT_DEPLOY_HOME);$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$current=$root;$mask=[System.Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership';while($true){if(Test-Path -LiteralPath $current){$item=Get-Item -LiteralPath $current -Force;if(-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)){exit 44};$acl=Get-Acl -LiteralPath $current;if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid){exit 41};foreach($rule in $acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){if($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $mask) -ne 0 -and $rule.IdentityReference.Value -notin @($sid,'S-1-5-18','S-1-5-32-544','S-1-3-0')){exit 43}}};if($current.Equals($homePath,[System.StringComparison]::OrdinalIgnoreCase)){break};$next=[System.IO.Path]::GetDirectoryName($current);if(-not $next -or $next.Length -lt $homePath.Length){exit 45};$current=$next};if(Test-Path -LiteralPath $root){$env:CAVEAT_ACL_PATH=$root;` + WINDOWS_ACL_VERIFY + '}';
-  runAclScript(path, true, script, { CAVEAT_DEPLOY_HOME: userHome });
+export function runWindowsManagedRootAcl(path: string, userHome: string, requireCreate = false) {
+  const script = String.raw`
+$ErrorActionPreference='Stop'
+$root=[System.IO.Path]::GetFullPath($env:CAVEAT_ACL_PATH)
+$homePath=[System.IO.Path]::GetFullPath($env:CAVEAT_DEPLOY_HOME)
+$identity=[System.Security.Principal.WindowsIdentity]::GetCurrent()
+$sid=$identity.User.Value
+$trusted=@($sid,'S-1-5-18','S-1-5-32-544')
+$tokenSids=@($sid)+@($identity.Groups | ForEach-Object {$_.Value})
+$mask=[System.Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'
+$current=$root
+$createChecked=$false
+while($true){
+  if(Test-Path -LiteralPath $current){
+    $item=Get-Item -LiteralPath $current -Force
+    if(-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)){exit 44}
+    $acl=Get-Acl -LiteralPath $current
+    if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $trusted){exit 41}
+    $rules=@($acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier]))
+    foreach($rule in $rules){
+      if($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $mask) -ne 0 -and $rule.IdentityReference.Value -notin @($sid,'S-1-5-18','S-1-5-32-544','S-1-3-0')){exit 43}
+    }
+    if(-not $createChecked -and $env:CAVEAT_REQUIRE_CREATE -eq '1'){
+      $createChecked=$true
+      $rights=[System.Security.AccessControl.FileSystemRights]0
+      foreach($rule in $rules){
+        if($rule.AccessControlType -eq 'Deny' -and $rule.IdentityReference.Value -in $tokenSids -and ($rule.FileSystemRights -band $mask) -ne 0){exit 46}
+        if($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Value -eq $sid){$rights=$rights -bor $rule.FileSystemRights}
+      }
+      if(($rights -band [System.Security.AccessControl.FileSystemRights]::CreateDirectories) -eq 0){exit 46}
+    }
+  }
+  if($current.Equals($homePath,[System.StringComparison]::OrdinalIgnoreCase)){break}
+  $next=[System.IO.Path]::GetDirectoryName($current)
+  if(-not $next -or $next.Length -lt $homePath.Length){exit 45}
+  $current=$next
+}
+if(Test-Path -LiteralPath $root){$env:CAVEAT_ACL_PATH=$root;` + WINDOWS_ACL_VERIFY + '}';
+  runAclScript(path, true, script, { CAVEAT_DEPLOY_HOME: userHome, CAVEAT_REQUIRE_CREATE: requireCreate ? '1' : '0' });
+}
+/** Caller-verified source may be readable, but no ordinary foreign writer/owner. */
+export function runWindowsManagedSourceAcl(path: string) {
+  const script = String.raw`
+$ErrorActionPreference='Stop'
+$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+$trusted=@($sid,'S-1-5-18','S-1-5-32-544')
+$mask=[System.Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership'
+$items=@(Get-Item -LiteralPath $env:CAVEAT_ACL_PATH -Force)+@(Get-ChildItem -LiteralPath $env:CAVEAT_ACL_PATH -Force -Recurse)
+foreach($item in $items){
+  if($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint){exit 44}
+  $acl=Get-Acl -LiteralPath $item.FullName
+  if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -notin $trusted){exit 41}
+  foreach($rule in $acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){
+    if($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $mask) -ne 0 -and $rule.IdentityReference.Value -notin @($sid,'S-1-5-18','S-1-5-32-544','S-1-3-0')){exit 43}
+  }
+}`;
+  runAclScript(path, true, script);
 }
 function runAclScript(path: string, directory: boolean, script: string, extraEnv: NodeJS.ProcessEnv = {}) {
   const result = spawnSync('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, ...extraEnv, CAVEAT_ACL_PATH: path, CAVEAT_ACL_DIRECTORY: directory ? '1' : '0' }, encoding: 'utf-8', timeout: WINDOWS_ACL_TIMEOUT_MS, windowsHide: true });

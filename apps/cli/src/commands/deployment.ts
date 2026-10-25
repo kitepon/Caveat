@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '@caveat/core';
+import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '@caveat/core';
 
 function installerPackageRoot() {
   let path = dirname(fileURLToPath(import.meta.url));
@@ -12,6 +12,10 @@ function installerPackageRoot() {
     if (path === parent) throw Error('managed_deployment_installer_package_missing');
     path = parent;
   }
+}
+export function deploymentPreflight(packageRoot?: string) {
+  const installer = installerPackageRoot();
+  return preflightManagedDeployment(packageRoot ?? installer, { entrySourceRoot: installer });
 }
 export function deploymentStage(packageRoot?: string) {
   const installer = installerPackageRoot();

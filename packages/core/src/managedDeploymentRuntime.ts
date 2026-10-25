@@ -1,14 +1,15 @@
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute, sep } from 'node:path';
+import { join, resolve, relative, isAbsolute, dirname, basename, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { isWindows } from './platform.js';
+import { legacyManagedRoot, legacyHomeFromRoot, selectExistingDeploymentRoot } from './managedDeploymentLegacy.js';
 import type { runWindowsAcl } from './privateWindowsAcl.js';
 
 export type FileRecord = { path: string; sha256: string; bytes: number };
 export type Manifest = { schema: 1; version: string; files: FileRecord[] };
 export type Pointer = { schema: 1; release: string; manifestSha256: string };
-export type ManagedRuntimeOptions = { userHome?: string; windows?: boolean; aclRunner?: typeof runWindowsAcl };
+export type ManagedRuntimeOptions = { userHome?: string; root?: string; windows?: boolean; aclRunner?: typeof runWindowsAcl };
 const sha = (data: string | Buffer) => createHash('sha256').update(data).digest('hex');
 const releasePattern = /^\d+\.\d+\.\d+-[a-f0-9]{20}$/;
 const versionPattern = /^\d+\.\d+\.\d+$/;
@@ -20,11 +21,25 @@ function canonicalHome(userHome = homedir()) {
   // user profile. Descendants of the canonical home still reject redirects.
   return existsSync(path) ? realpathSync(path) : path;
 }
-export function managedDeploymentPaths(userHome = homedir()) {
-  const root = join(canonicalHome(userHome), '.local', 'share', 'caveat', 'managed-v1');
+export function managedDeploymentPaths(userHome = homedir(), explicitRoot?: string) {
+  const home = canonicalHome(userHome);
+  const modern = join(home, '.caveat-deploy', 'managed-v1');
+  const legacy = legacyManagedRoot(home);
+  const root = explicitRoot ?? selectExistingDeploymentRoot(home, modern);
+  if (root !== modern && root !== legacy) fail('invalid_root');
   return { root, releases: join(root, 'releases'), entry: join(root, 'entry'),
     launcher: join(root, 'entry', 'caveat.mjs'), runtime: join(root, 'entry', 'managed-deployment.js'),
     pointer: join(root, 'active.json'), lock: join(root, 'installer.lock') };
+}
+/** The loaded entry selects its own protected root, independent of cwd/HOME. */
+export function readManagedDeploymentAtRoot(root: string) {
+  const path = resolve(root), parent = dirname(path);
+  if (basename(path) !== 'managed-v1') fail('invalid_root');
+  let userHome: string;
+  if (basename(parent) === '.caveat-deploy') userHome = dirname(parent);
+  else if (legacyHomeFromRoot(path)) userHome = legacyHomeFromRoot(path)!;
+  else return fail('invalid_root');
+  return readManagedDeployment({ userHome, root: path });
 }
 function ownerStat(path: string, directory: boolean, options: ManagedRuntimeOptions) {
   const s = lstatSync(path);
@@ -33,7 +48,7 @@ function ownerStat(path: string, directory: boolean, options: ManagedRuntimeOpti
   return s;
 }
 function assertAncestors(options: ManagedRuntimeOptions) {
-  const paths = managedDeploymentPaths(options.userHome);
+  const paths = managedDeploymentPaths(options.userHome, options.root);
   const home = canonicalHome(options.userHome);
   ownerStat(home, true, options);
   let path = home;
@@ -44,7 +59,7 @@ function assertAncestors(options: ManagedRuntimeOptions) {
   return paths;
 }
 function checkReleaseMetadata(pointer: Pointer, options: ManagedRuntimeOptions) {
-  const paths = managedDeploymentPaths(options.userHome);
+  const paths = managedDeploymentPaths(options.userHome, options.root);
   if (pointer.schema !== 1 || !releasePattern.test(pointer.release) || !/^[a-f0-9]{64}$/.test(pointer.manifestSha256)) fail('invalid_pointer');
   const releaseRoot = join(paths.releases, pointer.release);
   ownerStat(paths.releases, true, options); ownerStat(releaseRoot, true, options);
@@ -70,7 +85,7 @@ export function readManagedDeployment(options: ManagedRuntimeOptions = {}) {
 }
 /** Direct npm callers register the active stable entry when it owns this package. */
 export function managedRegistrationPath(cliScriptPath: string, options: ManagedRuntimeOptions = {}) {
-  const paths = managedDeploymentPaths(options.userHome);
+  const paths = managedDeploymentPaths(options.userHome, options.root);
   if (!existsSync(paths.pointer)) return cliScriptPath;
   const active = readManagedDeployment(options);
   // A managed installation explicitly selects its active release. An npm-bin

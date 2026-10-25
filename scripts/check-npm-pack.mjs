@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnCommandSync } from './process-command.mjs';
 import { measureManagedHookTiming } from './managed-hook-timing.mjs';
+import { waitForFixtureWorkers } from './fixture-workers.mjs';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -10,7 +11,8 @@ import { gunzipSync } from 'node:zlib';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps', 'cli');
 const tempDir = mkdtempSync(join(tmpdir(), 'caveat-npm-pack-'));
-let managedEntrySmoke, managedHookTiming;
+let managedEntrySmoke, managedHookTiming, primaryError;
+const fixtureCliScripts = [];
 
 try {
   const tarball = packCli(tempDir);
@@ -75,8 +77,21 @@ try {
       2,
     ) + '\n',
   );
+} catch (error) {
+  primaryError = error;
+  throw error;
 } finally {
-  rmSync(tempDir, { recursive: true, force: true });
+  try {
+    if (fixtureCliScripts.length) {
+      const workers = await waitForFixtureWorkers(tempDir, fixtureCliScripts);
+      process.stderr.write(`[caveat:fixture-workers] ${JSON.stringify(workers)}\n`);
+    }
+    rmSync(tempDir, { recursive: true, force: false, maxRetries: 5, retryDelay: 200 });
+    if (existsSync(tempDir)) throw Error('owned_pack_fixture_cleanup_incomplete');
+  } catch (cleanupError) {
+    if (primaryError) throw new AggregateError([primaryError, cleanupError], 'pack check and owned fixture cleanup failed');
+    throw cleanupError;
+  }
 }
 
 function packCli(packDestination) {
@@ -141,6 +156,10 @@ function installAndReadVersion(tarball, expectedVersion) {
     if (result.status !== 0) throw Error(`packed deployment ${args[0]} failed: ${result.stderr}`);
     return JSON.parse(result.stdout);
   };
+  const preflight = manage(['preflight']);
+  assertEqual(preflight.readOnly, true, 'preflight readOnly');
+  assertEqual(preflight.stageAllowed, true, 'preflight stageAllowed');
+  if (existsSync(preflight.root)) throw Error('read-only preflight created the managed root');
   const staged = manage(['stage']); manage(['activate', staged.release]);
   const timings = [];
   for (const args of [['--version'], ['--help']]) {
@@ -157,6 +176,7 @@ function installAndReadVersion(tarball, expectedVersion) {
   if(oldInstall.error)throw oldInstall.error;
   if(oldInstall.status!==0)throw Error(`old published baseline install failed: ${oldInstall.stderr}`);
   const packageAt=dir=>existsSync(join(dir,'node_modules','caveat-cli')) ? join(dir,'node_modules','caveat-cli') : join(dir,'lib','node_modules','caveat-cli');
+  fixtureCliScripts.push(...[prefix,oldPrefix].map(dir=>join(packageAt(dir),'dist','caveat.js')));
   managedHookTiming=measureManagedHookTiming(packageAt(prefix),packageAt(oldPrefix),join(tempDir,'normal-hook-comparison'));
   return actualVersion;
 }

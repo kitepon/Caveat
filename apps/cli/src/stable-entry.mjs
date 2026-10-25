@@ -2,14 +2,13 @@
 import { dirname } from 'node:path';
 import { lstatSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { readManagedDeployment } from './managed-deployment.js';
+import { readManagedDeploymentAtRoot } from './managed-deployment.js';
 
 // This v1 entry is version independent. Installer updates replace active.json,
 // never this command's definition. Keep argv[1] stable through the product import.
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const userHome = dirname(dirname(dirname(dirname(root))));
 try {
-  const active = readManagedDeployment({ userHome });
+  const active = readManagedDeploymentAtRoot(root);
   // File identity handles drive-case/8.3/extended Windows spellings without
   // accepting a symlink or changing the original stable argv registration.
   const invoked = lstatSync(process.argv[1], { bigint: true });
