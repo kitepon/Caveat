@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnCommandSync } from './process-command.mjs';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { gunzipSync } from 'node:zlib';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps', 'cli');
 const tempDir = mkdtempSync(join(tmpdir(), 'caveat-npm-pack-'));
+let managedEntrySmoke;
 
 try {
   const tarball = packCli(tempDir);
@@ -57,6 +58,7 @@ try {
         package: manifest.name,
         version: manifest.version,
         installedVersion,
+        managedEntrySmoke,
         bin: manifest.bin,
         dependencyCount: Object.keys(manifest.dependencies ?? {}).length,
       },
@@ -122,6 +124,25 @@ function installAndReadVersion(tarball, expectedVersion) {
 
   const actualVersion = version.stdout.trim();
   assertEqual(actualVersion, expectedVersion, 'installed caveat --version');
+  const profile = join(tempDir, 'managed-profile'); mkdirSync(profile, { mode: 0o700 });
+  const env = { ...process.env, HOME: profile, USERPROFILE: profile };
+  const manage = (args) => {
+    const result = spawnCommandSync(caveat, ['deployment', ...args, '--json'], { env, encoding: 'utf8', timeout: 60000, maxBuffer: 1024 * 1024 });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw Error(`packed deployment ${args[0]} failed: ${result.stderr}`);
+    return JSON.parse(result.stdout);
+  };
+  const staged = manage(['stage']); manage(['activate', staged.release]);
+  const timings = [];
+  for (const args of [['--version'], ['--help']]) {
+    const started = performance.now();
+    const result = spawnCommandSync(process.execPath, [staged.launcher, ...args], { env, encoding: 'utf8', timeout: 5000, maxBuffer: 1024 * 1024 });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw Error(`packed managed entry ${args[0]} failed: ${result.stderr}`);
+    if (args[0] === '--version') assertEqual(result.stdout.trim(), expectedVersion, 'packed managed version');
+    timings.push({ operation: args[0], elapsedMs: Math.round(performance.now() - started), childLimitMs: 5000 });
+  }
+  managedEntrySmoke = { status: 'ok', version: expectedVersion, isolatedProfile: true, timings };
   return actualVersion;
 }
 
