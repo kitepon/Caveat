@@ -3,6 +3,7 @@ import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { deriveRoleTexts } from './frontmatter.js';
+import { assertSqliteSearchCapability } from './runtimeCapabilities.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_PATH = join(here, 'schema.sql');
@@ -26,6 +27,7 @@ export interface OpenDbOptions {
 }
 
 export function openDb(opts: OpenDbOptions): DatabaseSync {
+  assertSqliteSearchCapability();
   const parent = dirname(opts.path);
   if (!existsSync(parent)) mkdirSync(parent, { recursive: true });
   const db = new DatabaseSync(opts.path);

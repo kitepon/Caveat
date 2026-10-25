@@ -12,6 +12,8 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 
 ## 真実の源と状態
 
+SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. This candidate does not change the numerical minimum Node version; adopting its supported-runtime wording remains a product review decision.
+
 - 正本はmarkdown-in-git。SQLite FTS5 indexは常に再構築できる派生物。
 - 自分の知識は既定で`~/.caveat/own/`、indexは`~/.caveat/index/caveat.db`。
 - ユーザー設定の正本は`~/.caveatrc.json`だけ。`knowledgeRepo`で知識repoの場所を変更でき、
