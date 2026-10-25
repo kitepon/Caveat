@@ -3,9 +3,16 @@
 // SQLite open recreate directories during recursive removal.
 import { spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
+import { relative, isAbsolute } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function waitForFixtureWorkers(root, timeoutMs = 30000) {
+export async function waitForFixtureWorkers(root, cliScripts, timeoutMs = 30000) {
+  if (!Array.isArray(cliScripts) || !cliScripts.length) throw Error('fixture_cli_scripts_required');
+  const canonicalRoot = realpathSync(root);
+  for (const script of cliScripts) {
+    const path = relative(canonicalRoot, realpathSync(script));
+    if (!path || path === '..' || path.startsWith('../') || path.startsWith('..\\') || isAbsolute(path)) throw Error('cli_script_outside_fixture');
+  }
   const roots = [...new Set([root, realpathSync(root)])];
   const deadline = Date.now() + timeoutMs, seen = new Set();
   let empty = 0;

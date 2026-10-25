@@ -12,6 +12,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps', 'cli');
 const tempDir = mkdtempSync(join(tmpdir(), 'caveat-npm-pack-'));
 let managedEntrySmoke, managedHookTiming, primaryError;
+const fixtureCliScripts = [];
 
 try {
   const tarball = packCli(tempDir);
@@ -81,8 +82,10 @@ try {
   throw error;
 } finally {
   try {
-    const workers = await waitForFixtureWorkers(tempDir);
-    process.stderr.write(`[caveat:fixture-workers] ${JSON.stringify(workers)}\n`);
+    if (fixtureCliScripts.length) {
+      const workers = await waitForFixtureWorkers(tempDir, fixtureCliScripts);
+      process.stderr.write(`[caveat:fixture-workers] ${JSON.stringify(workers)}\n`);
+    }
     rmSync(tempDir, { recursive: true, force: false, maxRetries: 5, retryDelay: 200 });
     if (existsSync(tempDir)) throw Error('owned_pack_fixture_cleanup_incomplete');
   } catch (cleanupError) {
@@ -173,6 +176,7 @@ function installAndReadVersion(tarball, expectedVersion) {
   if(oldInstall.error)throw oldInstall.error;
   if(oldInstall.status!==0)throw Error(`old published baseline install failed: ${oldInstall.stderr}`);
   const packageAt=dir=>existsSync(join(dir,'node_modules','caveat-cli')) ? join(dir,'node_modules','caveat-cli') : join(dir,'lib','node_modules','caveat-cli');
+  fixtureCliScripts.push(...[prefix,oldPrefix].map(dir=>join(packageAt(dir),'dist','caveat.js')));
   managedHookTiming=measureManagedHookTiming(packageAt(prefix),packageAt(oldPrefix),join(tempDir,'normal-hook-comparison'));
   return actualVersion;
 }
