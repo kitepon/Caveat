@@ -44,6 +44,7 @@ try {
     'package/LICENSE',
     'package/dist/index.js',
     'package/dist/privateWindowsAclWorker.js',
+    'package/dist/mcp-server.js',
     'package/dist/stable-entry.mjs',
     'package/dist/managed-deployment.js',
     'package/dist/schema.sql',

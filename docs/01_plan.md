@@ -501,3 +501,7 @@ The first migration from version-specific commands requires review/trust of the 
 ### Windows hookの保護保存transport（未公開source）
 
 Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。
+
+## MCP runtimeの読込み境界（次版source）
+
+通常hook/検索等はMCP SDKのmodule評価を必要としない。MCP server実装はpack必須asset `dist/mcp-server.js` に分離し、`mcp-server` command境界で読み込む。読込みとserver起動の失敗は従来の `CAVEAT.MCP_SERVER_FAILED` を記録して元例外を返す。MCPの検証/transport/ツール契約を省略せず、通常stdio経路で受け入れる。固定managed entry/runtimeのbytesを変更しない。
