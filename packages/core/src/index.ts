@@ -41,3 +41,5 @@ export * from './hookDiagnostics.js';
 export * from './runtimeErrorReport.js';
 export * from './jevObservations.js';
 export * from './platform.js';
+
+export { createWindowsAclSession } from './privateWindowsAclSession.js';

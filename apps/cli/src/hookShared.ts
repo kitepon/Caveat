@@ -17,6 +17,7 @@ import {
   markHit,
   openDb,
   observeRuntimeError,
+  createWindowsAclSession,
   observeHookDiagnostic,
   type HookDiagnosticPhase,
   type Logger,
@@ -72,10 +73,19 @@ export function errorMessage(err: unknown): string {
 }
 
 function reportHookError(host: HookHost, phase: HookDiagnosticPhase, err: unknown): void {
-  observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION,
-    impact: phase === 'markHit error' || phase === 'query log error' || phase === 'json parse error'
-      ? 'operation_failed' : 'feature_unavailable' });
-  observeHookDiagnostic(host.errorCode, phase, err, { version: CAVEAT_VERSION });
+  const acl = createWindowsAclSession();
+  try {
+    observeRuntimeError(host.errorCode, { version: CAVEAT_VERSION, aclRunner: acl.run,
+      impact: phase === 'markHit error' || phase === 'query log error' || phase === 'json parse error'
+        ? 'operation_failed' : 'feature_unavailable' });
+    observeHookDiagnostic(host.errorCode, phase, err, { version: CAVEAT_VERSION, aclRunner: acl.run });
+  } finally {
+    try { acl.close(); }
+    catch (cleanupError) {
+      process.stderr.write(`[${host.stderrTag}] ${phase}: ${errorMessage(err)}\n`);
+      throw cleanupError;
+    }
+  }
   process.stderr.write(`[${host.stderrTag}] ${phase}: ${errorMessage(err)}\n`);
   // A hook that fails this early never reaches the stop-time trigger, so a
   // Caveat that is broken outright would record errors and never send them.
