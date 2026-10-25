@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync, lstatSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync, lstatSync, copyFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
@@ -11,7 +11,8 @@ const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'caveat-managed-')); roots.push(root);
-  const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
+  const profile = join(root, 'profile'); mkdirSync(profile, { mode: 0o700 });
+  const userHome = realpathSync(profile);
   // These are semantic store fixtures, not native Windows ACL acceptance.
   const options = { userHome, aclRunner: () => {}, aclTreeRunner: () => {}, aclVerifyTreeRunner: () => {}, aclSourceRunner: () => {} };
   const source = (version: string) => {

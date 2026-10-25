@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnCommandSync } from './process-command.mjs';
 import { measureManagedHookTiming } from './managed-hook-timing.mjs';
+import { waitForFixtureWorkers } from './fixture-workers.mjs';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -10,7 +11,7 @@ import { gunzipSync } from 'node:zlib';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps', 'cli');
 const tempDir = mkdtempSync(join(tmpdir(), 'caveat-npm-pack-'));
-let managedEntrySmoke, managedHookTiming;
+let managedEntrySmoke, managedHookTiming, primaryError;
 
 try {
   const tarball = packCli(tempDir);
@@ -75,8 +76,19 @@ try {
       2,
     ) + '\n',
   );
+} catch (error) {
+  primaryError = error;
+  throw error;
 } finally {
-  rmSync(tempDir, { recursive: true, force: true });
+  try {
+    const workers = await waitForFixtureWorkers(tempDir);
+    process.stderr.write(`[caveat:fixture-workers] ${JSON.stringify(workers)}\n`);
+    rmSync(tempDir, { recursive: true, force: false, maxRetries: 5, retryDelay: 200 });
+    if (existsSync(tempDir)) throw Error('owned_pack_fixture_cleanup_incomplete');
+  } catch (cleanupError) {
+    if (primaryError) throw new AggregateError([primaryError, cleanupError], 'pack check and owned fixture cleanup failed');
+    throw cleanupError;
+  }
 }
 
 function packCli(packDestination) {
