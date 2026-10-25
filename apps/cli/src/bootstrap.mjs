@@ -21,7 +21,7 @@ const explicitFlag = process.execArgv.some((arg) => flagPattern.test(arg.replace
 
 if (!hasSqlite && !explicitFlag && process.allowedNodeEnvironmentFlags.has('--experimental-sqlite')) {
   const child = spawn(process.execPath, [
-    ...process.execArgv, '--experimental-sqlite', fileURLToPath(import.meta.url), ...process.argv.slice(2),
+    ...process.execArgv, '--experimental-sqlite', process.argv[1] ?? fileURLToPath(import.meta.url), ...process.argv.slice(2),
   ], { stdio: 'inherit', shell: false });
   const forwardInterrupt = () => child.kill('SIGINT');
   const forwardTerminate = () => child.kill('SIGTERM');

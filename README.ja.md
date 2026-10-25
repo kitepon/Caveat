@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.0。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.1。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -353,3 +353,7 @@ iterative 開発時は `apps/cli/` 内で `npm link` するとグローバル sh
 MIT
 
 Factory private evidence v1は既定OFFの隔離契約候補。このbuildは対応transportを宣言せず、private証拠の送信・保存を行わない。製品がprotocolと欠測条件を所有する。
+
+### 任意の版並置と固定入口
+
+`caveat deployment stage --json`で検証済みnpm packageを本人専用領域へ並べ、`caveat deployment activate <release-id> --json`で選択します。返された固定launcherを既存Nodeから実行して`init`してください。その後の更新・戻しも同じ入口で版を選ぶため、MCP/hookの登録文字列は変わりません。`caveat deployment status --json`で選択中の内容を検証できます。初回移行ではCodexの正規の定義確認が一度必要です。installerは信用を付与せず、Node/PATHも変えません。詳細は[製品契約](docs/01_plan.md#managed-deployment-and-stable-hook-identity)を参照してください。

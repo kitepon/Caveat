@@ -6,6 +6,7 @@ import {
   commandTokens,
   isCanonicalAsset,
   quoteCommandPath,
+  resolveRegistrationCliPath,
   writeJsonWithBackup,
 } from './installShared.js';
 
@@ -214,6 +215,7 @@ function persist(opts: CursorInstallOptions, file: CursorHooksFile, changed: boo
 }
 
 export function installCursorHooks(opts: CursorInstallOptions): CursorInstallResult {
+  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const hooksPath = join(opts.cursorDir, 'hooks.json');
   const file = readHooks(hooksPath);
   const promptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
@@ -231,6 +233,7 @@ export function installCursorHooks(opts: CursorInstallOptions): CursorInstallRes
 }
 
 export function uninstallCursorHooks(opts: CursorInstallOptions): CursorInstallResult {
+  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const hooksPath = join(opts.cursorDir, 'hooks.json');
   const file = readHooks(hooksPath);
   const promptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');

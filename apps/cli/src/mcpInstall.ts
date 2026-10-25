@@ -1,7 +1,7 @@
 import { constants, existsSync, readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { parse, stringify } from 'smol-toml';
-import { isCanonicalAsset, writeFileWithBackup } from './installShared.js';
+import { isCanonicalAsset, writeFileWithBackup, resolveRegistrationCliPath } from './installShared.js';
 
 export type McpClient = 'claude' | 'codex' | 'grok' | 'cursor';
 
@@ -47,6 +47,7 @@ interface McpConfigOptions {
 
 /** 設定形式の差を製品内に閉じ込め、Caveat以外の登録と利用者の指定を保持する。 */
 export function installMcpClient(options: McpConfigOptions & { nodePath: string; cliScriptPath: string }) {
+  options = { ...options, cliScriptPath: resolveRegistrationCliPath(options.cliScriptPath) };
   return updateMcpClient(options, (previous) => ({
     ...previous,
     ...(options.client === 'claude' ? { type: 'stdio', env: previous?.env ?? {} } : {}),

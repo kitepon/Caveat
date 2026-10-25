@@ -354,3 +354,11 @@ The canonical three-OS CI uses each runner's installed Node and does not establi
 Minimum-Node private147 and the 3OS x 4harness actual-use matrix remain separate, unverified acceptance.
 Local fake-entry regressions, build/pack and CI do not authorize real diagnostics/sync, host configuration,
 publication, enabling private evidence, or real private transport.
+
+## Managed-entry acceptance
+
+Build the standalone managed runtime and ship both `dist/stable-entry.mjs` and `dist/managed-deployment.js`. Verify that runtime can load before the minimum-Node SQLite bootstrap. The isolated launcher test stages two fixture versions, invokes the normal bootstrap/argv entry, selects and rolls back, and checks unchanged four-client and native-hook definitions. Windows uses real owner-only root/tree ACLs in that acceptance; pure store fixtures use an injected ACL seam and are not native ACL evidence.
+
+For native hook identity, run `node scripts/managed-native-hash-proof.mjs apps/cli/dist <codex-executable-or-codex.js>` in each accepted OS environment. It uses an owned isolated profile and only initialize/hooks/list, never a thread/model, hook execution or trust write. The three untrusted fixture definitions must retain the same key/currentHash through selection and rollback. Preserve OS/runtime and source/archive identity with the result. Do not treat a Linux proof as Windows/macOS acceptance.
+
+Before migration, fix the real stable definitions and obtain their normal one-time trust decision. Preserve old registrations/payload until the stable entry is accepted. After migration, compare native hooks/list hashes and all other products' trust across a normal version selection and rollback. A managed deployment is not complete merely because static hook diagnostics say installed.

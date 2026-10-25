@@ -1,7 +1,7 @@
 import { constants, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Logger } from '@caveat/core';
-import { claudeMcpConfigPath, commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup } from './installShared.js';
+import { claudeMcpConfigPath, commandTokens, isCanonicalAsset, quoteCommandPath, writeJsonWithBackup, resolveRegistrationCliPath } from './installShared.js';
 import { installMcpClient, isCaveatStdioMcpRegistration, uninstallMcpClient } from './mcpInstall.js';
 
 export interface ClaudeInstallOptions {
@@ -166,6 +166,7 @@ function configureMcp(opts: ClaudeInstallOptions, remove = false): ClaudeInstall
 export function installClaudeIntegration(
   opts: ClaudeInstallOptions,
 ): ClaudeInstallResult {
+  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const settingsPath = join(opts.claudeDir, 'settings.json');
   const settings = readSettings(settingsPath);
 
@@ -213,6 +214,7 @@ export function installClaudeIntegration(
 export function uninstallClaudeIntegration(
   opts: ClaudeInstallOptions,
 ): ClaudeInstallResult {
+  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const settingsPath = join(opts.claudeDir, 'settings.json');
   const settings = readSettings(settingsPath);
 

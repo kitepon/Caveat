@@ -40,7 +40,14 @@ function restoreNodePrefix(content: string): string {
 }
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/privateEvidence/validation.ts', 'src/privateEvidence/origin.ts', 'src/privateEvidence/candidate.ts'],
+  entry: {
+    index: 'src/index.ts',
+    'privateEvidence/validation': 'src/privateEvidence/validation.ts',
+    'privateEvidence/origin': 'src/privateEvidence/origin.ts',
+    'privateEvidence/candidate': 'src/privateEvidence/candidate.ts',
+    'managed-deployment': '../../packages/core/src/managedDeployment.ts',
+  },
+  splitting: false,
   format: ['esm'],
   dts: false,
   clean: true,
@@ -71,6 +78,7 @@ export default defineConfig({
     const bootstrapPath = join(distDir, 'caveat.js');
     copyFileSync(join(__dirname, 'src', 'bootstrap.mjs'), bootstrapPath);
     chmodSync(bootstrapPath, 0o755);
+    copyFileSync(join(__dirname, 'src', 'stable-entry.mjs'), join(distDir, 'stable-entry.mjs'));
 
     copyFileSync(coreSchema, join(distDir, 'schema.sql'));
     const destMigrations = join(distDir, 'migrations');

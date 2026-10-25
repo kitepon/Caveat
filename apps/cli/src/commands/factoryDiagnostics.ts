@@ -8,7 +8,7 @@ import { isCanonicalCaveatClaudeHookCommand, isCaveatClaudeMcpRegistration } fro
 import { diagnoseCursorHookConnector } from '../cursorInstall.js';
 import type { CliContext } from '../context.js';
 import { CAVEAT_VERSION } from '../version.js';
-import { resolveAgentConfigPaths } from '../installShared.js';
+import { resolveAgentConfigPaths, resolveRegistrationCliPath } from '../installShared.js';
 import { isCaveatStdioMcpRegistration } from '../mcpInstall.js';
 
 type Status = 'ready' | 'not_ready' | 'unverified';
@@ -99,7 +99,7 @@ export function factoryDiagnostics(
   requiredConnectors: readonly FactoryConnector[] = [],
 ) {
   const { claudeDir, claudeMcp, cursorDir, grokHome } = resolveAgentConfigPaths(ctx.userHome);
-  const nodePath = process.execPath; const cliScriptPath = process.argv[1] ?? '';
+  const nodePath = process.execPath; const cliScriptPath = resolveRegistrationCliPath(process.argv[1] ?? '');
   const db = database(ctx.paths.dbPath); const feature = codexFeature(codexHome); let installedCodexHooks: { userPromptSubmit: boolean; postToolUse: boolean; stop: boolean } | null = null; try { installedCodexHooks = codexHooks(codexHome, nodePath, cliScriptPath); } catch {}
   const codexHook = (present: boolean | undefined) => present === undefined ? unverified('config_unreadable') : !present ? hook(false) : feature.status === 'ready' ? hook(true) : { ...feature };
   const grokMcp = grokRegistration(join(grokHome, 'config.toml'), nodePath, cliScriptPath);

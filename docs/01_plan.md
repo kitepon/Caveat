@@ -461,3 +461,17 @@ POSIX親の強制終了と起動直後signal、preload（--require/--import）�
 根拠は[Node22.5のSQLite flag](https://nodejs.org/download/release/v22.5.0/docs/api/cli.html#--experimental-sqlite)と
 [Node22.13のunflag変更](https://nodejs.org/en/blog/release/v22.13.0)。runtimeのversion文字列だけで
 新しいprivate能力やnative安全性を推測しない。このlauncher修理はprivate evidence候補と独立して扱う。
+
+## Managed deployment and stable hook identity
+
+`caveat deployment stage --json [--package-root <verified-installed-package>]` copies the caller-verified npm package into the current user's `.local/share/caveat/managed-v1/releases/`. The current installer supplies the immutable v1 entry assets even when staging a prior package. Stage returns a content-bound release ID and changes no AI registration or trust.
+
+`caveat deployment activate <release-id> --json` validates the staged payload and atomically replaces one `active.json` in the managed root. It returns the previous release ID; activate that ID to roll back. `caveat deployment status --json` independently verifies the selected payload. A busy installer lock, unsafe owner/mode/ACL/ancestor, redirected path, changed entry protocol, malformed pointer or changed payload stops the operation. An invalid target leaves the previous pointer intact. `activate --recover-invalid-pointer` explicitly retains a damaged prior pointer before selecting the independently verified target; normal activation rejects that corruption. Stale installer locks require owner inspection; the tool does not delete an unverified competing lock.
+
+Use the returned `entry/caveat.mjs` with the existing Node for the initial managed `init` and subsequent product commands. The shared Claude/Codex/Cursor and MCP installers select this same entry whenever a managed deployment is active. Normal npm use without a managed deployment retains the existing entry. New npm installation alone does not change the managed selection; stage and activate it explicitly. No Node, PATH, provider credential or native schedule is changed by deployment commands.
+
+The entry validates the complete selected manifest and imports the shipped bootstrap in the same process, preserving the stable argv path. POSIX and Windows both replace the pointer with a same-directory rename after flushing the completed temporary file. Readers see a complete prior or next pointer. Registration definitions, their Codex currentHash values, and the v1 entry bytes remain unchanged across normal release selection and rollback. Changing the entry protocol itself requires a deliberate migration.
+
+The managed root, entry, pointer and staged payload are owned by the current user. POSIX ancestors reject group/other write access and links. Windows ancestors reject write access by other ordinary principals (SYSTEM/Administrators remain privileged); the managed root and every staged descendant are sealed to the current SID. OS permissions cannot distinguish this installer from another process running as the same user. Protection against a malicious same-user process or an administrator is outside this guarantee.
+
+Migration changes the former version-specific hook definition once and requires the user to review/trust the exact new definition through Codex's normal trust flow. The installer never writes trusted_hash, grants trust to another product, or bypasses hook review. Static `installed` diagnostics do not establish native trust or actual conversation acceptance.
