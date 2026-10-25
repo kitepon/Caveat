@@ -4,13 +4,16 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
+import { join, resolve, dirname, delimiter } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { commandInvocation } from './process-command.mjs';
 
 const built = resolve(process.argv[2] ?? 'apps/cli/dist');
-const executable = process.argv[3] ?? 'codex';
+const search = [dirname(process.execPath), ...(process.env.PATH ?? '').split(delimiter), join(homedir(), '.local/bin'), join(homedir(), 'AppData/Roaming/npm'), '/opt/homebrew/bin', '/usr/local/bin'];
+const executable = process.argv[3] ?? search.flatMap(dir => ['codex','codex.exe','codex.cmd'].map(name=>join(dir,name))).find(path=>existsSync(path));
+assert.ok(executable, 'Codex CLI is required for native hook-hash acceptance; no model or authentication is used');
 const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths } = await import(pathToFileURL(join(built, 'managed-deployment.js')));
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
@@ -36,7 +39,8 @@ try {
   }
   writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\n', { mode: 0o600 });
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
-  child = spawn(executable.endsWith('.js') ? process.execPath : executable, [...(executable.endsWith('.js') ? [executable] : []), 'app-server'], { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true });
+  const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
+  child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true });
   child.stderr.on('data', () => {});
   lines = createInterface({ input: child.stdout });
   lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });

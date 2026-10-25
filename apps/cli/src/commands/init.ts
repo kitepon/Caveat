@@ -32,7 +32,7 @@ import {
 import { askOnce, defaultGitHubRepoUrl, runGh, type GhRunner } from '../ghSetup.js';
 import { resolveHookNodePath } from '../nodePath.js';
 import { installMcpClient } from '../mcpInstall.js';
-import { resolveAgentConfigPaths } from '../installShared.js';
+import { resolveAgentConfigPaths, resolveRegistrationCliPath } from '../installShared.js';
 import { validatePublishTarget } from './publish.js';
 
 export interface InitOptions {
@@ -65,6 +65,7 @@ export async function runInit(
   opts: InitOptions = { skipClaude: false, dryRun: false },
   dependencies: InitDependencies = {},
 ): Promise<void> {
+  const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1], ctx.userHome) : undefined;
   const isTty = dependencies.isTty ?? (() => Boolean(process.stdin.isTTY));
   const confirm = dependencies.confirm ?? askOnce;
   const ghRunner = dependencies.ghRunner ?? runGh;
@@ -230,7 +231,6 @@ export async function runInit(
   if (opts.skipClaude) {
     ctx.logger.info('Claude Code integration skipped (--skip-claude)');
   } else {
-    const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
       ctx.logger.warn('cannot determine CLI script path; skipping Claude integration');
     } else {
@@ -253,7 +253,6 @@ export async function runInit(
     codexHookState = 'skipped';
     ctx.logger.info('Codex hook integration skipped (--skip-codex-hook)');
   } else if (codexAvailable) {
-    const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
       codexHookState = 'skipped';
       ctx.logger.warn('cannot determine CLI script path; skipping Codex hook integration');
@@ -283,7 +282,6 @@ export async function runInit(
     cursorHookState = 'skipped';
     ctx.logger.info('Cursor hook integration skipped (--skip-cursor-hook)');
   } else if (existsSync(cursorDir)) {
-    const cliScriptPath = process.argv[1];
     if (!cliScriptPath) {
       cursorHookState = 'skipped';
       ctx.logger.warn('cannot determine CLI script path; skipping Cursor hook integration');
@@ -307,7 +305,6 @@ export async function runInit(
     }
   }
 
-  const cliScriptPath = process.argv[1];
   if (!cliScriptPath) throw new Error('mcp_setup_failed: CLIの実行パスを取得できません');
   for (const [client, configPath, available] of [
     ['codex', join(codexHome, 'config.toml'), codexAvailable || existsSync(codexHome)],
@@ -406,7 +403,7 @@ export interface UninstallOptions {
 }
 
 export function runUninstall(ctx: CliContext, opts: UninstallOptions): void {
-  const cliScriptPath = process.argv[1];
+  const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1], ctx.userHome) : undefined;
   if (!cliScriptPath) {
     ctx.logger.error('cannot determine CLI script path');
     process.exit(1);

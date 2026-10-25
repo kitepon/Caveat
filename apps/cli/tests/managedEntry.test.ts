@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -8,9 +8,12 @@ import { installMcpClient } from '../src/mcpInstall.js';
 import { installClaudeIntegration } from '../src/claudeInstall.js';
 import { installCodexHooks } from '../src/codexHookInstall.js';
 import { installCursorHooks } from '../src/cursorInstall.js';
+import { buildContext } from '../src/context.js';
+import { runInit } from '../src/commands/init.js';
+import { parse } from 'smol-toml';
 
 describe('shipped stable entry and normal host installers', () => {
-  it('dispatches both releases and rollback with fixed argv, entry bytes and four-client/hook definitions', () => {
+  it('dispatches both releases and rollback with fixed argv, entry bytes and four-client/hook definitions', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-managed-bin-'));
     const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
     const options = { userHome };
@@ -45,11 +48,25 @@ describe('shipped stable entry and normal host installers', () => {
         install(); baseline ??= snapshot(); expect(snapshot()).toEqual(baseline);
         expect(readFileSync(paths.launcher)).toEqual(entry); expect(readFileSync(paths.runtime)).toEqual(runtime);
       }
+      // The public init entry resolves the selected path once in its own profile;
+      // the low-level config writers still honor their explicit caller paths.
+      for (const [key,dir] of [['CLAUDE_CONFIG_DIR','.claude'],['CODEX_HOME','.codex'],['GROK_HOME','.grok'],['CURSOR_HOME','.cursor']]) {
+        mkdirSync(join(userHome,dir!),{recursive:true});vi.stubEnv(key!,join(userHome,dir!));
+      }
+      const ctx=buildContext(logger,{userHome,caveatHome:join(userHome,'.caveat')});
+      const initialize=()=>runInit(ctx,{skipClaude:false,dryRun:false,yes:true},{isTty:()=>false,codexAvailable:()=>true});
+      await initialize();
+      expect(JSON.parse(readFileSync(join(userHome,'.claude/.claude.json'),'utf8')).mcpServers.caveat.args[1]).toBe(paths.launcher);
+      expect(parse(readFileSync(join(userHome,'.codex/config.toml'),'utf8')).mcp_servers).toMatchObject({caveat:{args:['--disable-warning=ExperimentalWarning',paths.launcher,'mcp-server']}});
+      const normalFiles=['.claude/settings.json','.claude/.claude.json','.codex/hooks.json','.codex/config.toml','.grok/config.toml','.cursor/hooks.json','.cursor/mcp.json'];
+      const normalSnapshot=()=>normalFiles.map(f=>readFileSync(join(userHome,f),'utf8'));
+      const normalBefore=normalSnapshot();
+      activateManagedDeployment(b.release,options);await initialize();expect(normalSnapshot()).toEqual(normalBefore);
       // A damaged pointer never dispatches an arbitrary path or writes a registration.
       const before = snapshot(); writeFileSync(paths.pointer, '{invalid');
       const rejected = spawnSync(process.execPath, [paths.launcher], { encoding: 'utf8', timeout: 5000 });
       expect(rejected.status).toBe(1); expect(rejected.stdout).toBe('');
       expect(rejected.stderr).toContain('managed deployment is unavailable'); expect(snapshot()).toEqual(before);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); }
   }, 90000);
 });

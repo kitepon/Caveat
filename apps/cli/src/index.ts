@@ -28,7 +28,7 @@ import {
   runCommunityRemove,
 } from './commands/community.js';
 import { resolveHookNodePath } from './nodePath.js';
-import { resolveAgentConfigPaths } from './installShared.js';
+import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installShared.js';
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
@@ -319,7 +319,7 @@ codexHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -352,7 +352,7 @@ codexHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--codex-home <path>', 'Codex home directory', agentPaths.codexHome)
   .action((opts: { dryRun: boolean; codexHome: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -416,7 +416,7 @@ cursorHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);
@@ -441,7 +441,7 @@ cursorHook
   .option('--dry-run', 'show planned changes without writing', false)
   .option('--cursor-dir <path>', 'Cursor home directory', agentPaths.cursorDir)
   .action((opts: { dryRun: boolean; cursorDir: string }) => {
-    const cliScriptPath = process.argv[1];
+    const cliScriptPath = process.argv[1] ? resolveRegistrationCliPath(process.argv[1]) : undefined;
     if (!cliScriptPath) {
       process.stderr.write('[caveat:error] cannot determine CLI script path\n');
       process.exit(1);

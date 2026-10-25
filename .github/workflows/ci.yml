@@ -49,4 +49,5 @@ jobs:
         corepack pnpm typecheck &&
         corepack pnpm check:release-smoke &&
         corepack pnpm test:claude-fresh-session-smoke &&
-        corepack pnpm test
+        corepack pnpm test &&
+        node scripts/managed-native-hash-proof.mjs

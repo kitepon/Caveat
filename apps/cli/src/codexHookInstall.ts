@@ -2,7 +2,7 @@ import { constants, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { powershellCallPrefix, type Logger } from '@caveat/core';
 import { parse as parseToml } from 'smol-toml';
-import { commandTokens, isCanonicalAsset, quoteCommandPath, writeFileWithBackup, writeJsonWithBackup, resolveRegistrationCliPath } from './installShared.js';
+import { commandTokens, isCanonicalAsset, quoteCommandPath, writeFileWithBackup, writeJsonWithBackup } from './installShared.js';
 
 export interface CodexHookInstallOptions {
   codexHome: string;
@@ -343,7 +343,6 @@ function maskTomlStringsAndComments(raw: string): string {
 }
 
 export function installCodexHooks(opts: CodexHookInstallOptions): CodexHookInstallResult {
-  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const hooksPath = join(opts.codexHome, 'hooks.json');
   const configPath = join(opts.codexHome, 'config.toml');
   const rawConfig = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '';
@@ -405,7 +404,6 @@ export function installCodexHooks(opts: CodexHookInstallOptions): CodexHookInsta
 }
 
 export function uninstallCodexHooks(opts: CodexHookInstallOptions): CodexHookInstallResult {
-  opts = { ...opts, cliScriptPath: resolveRegistrationCliPath(opts.cliScriptPath) };
   const hooksPath = join(opts.codexHome, 'hooks.json');
   const hooksJson = readHooks(hooksPath);
   const userPromptSubmitRemoved = removeHook(

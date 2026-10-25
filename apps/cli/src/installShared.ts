@@ -4,8 +4,8 @@ import { homedir } from 'node:os';
 import { managedRegistrationPath } from '@caveat/core';
 
 /** All host installers share the selected managed entry; no trust is written. */
-export function resolveRegistrationCliPath(path: string): string {
-  return managedRegistrationPath(path);
+export function resolveRegistrationCliPath(path: string, userHome = homedir()): string {
+  return path ? managedRegistrationPath(path, { userHome }) : path;
 }
 
 /**
