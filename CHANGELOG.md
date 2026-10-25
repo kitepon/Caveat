@@ -2,6 +2,11 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.21.2 (2026-10-25)
+
+- Stage caller-owned npm packages with normal POSIX umask 002 inside a verified private source ancestor, then seal and verify the newly copied payload. Original package permissions and unsafe managed-root rejection remain unchanged.
+- Read the candidate version from its package manifest in managed hook comparisons.
+
 ## [0.21.1] — 2026-10-25
 
 ### Fixed

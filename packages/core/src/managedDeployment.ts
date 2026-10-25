@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, lstatSync, readdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
-import { join, resolve, relative, isAbsolute, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, chmodSync, lstatSync, readdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path';
 import { isWindows } from './platform.js';
 import { runWindowsAcl, runWindowsAclPrivateTree, runWindowsAclVerifyPrivateTree, runWindowsManagedRootAcl } from './privateWindowsAcl.js';
 import { managedDeploymentPaths, readManagedDeployment, managedDeploymentInternal } from './managedDeploymentRuntime.js';
@@ -19,12 +19,17 @@ const MAX_BYTES = 128 * 1024 * 1024;
 function safeRelative(file: string) {
   if (!file || isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..')) fail('invalid_manifest_path');
 }
-function inventory(root: string, options: ManagedRuntimeOptions): FileRecord[] {
+function inventory(root: string, options: ManagedRuntimeOptions, privateSource = false): FileRecord[] {
   const files: FileRecord[] = []; let bytes = 0;
   function walk(path: string) {
     const s = lstatSync(path);
     if (s.isSymbolicLink()) fail('source_link');
-    ownerStat(path, s.isDirectory(), options);
+    // A caller-owned source below an owner-only ancestor cannot be modified
+    // by another user even when npm's normal umask leaves interior group-write
+    // bits. Destination files are independently sealed and verified below.
+    if (privateSource && !(options.windows ?? isWindows())) {
+      if (typeof process.getuid === 'function' && s.uid !== process.getuid()) fail('unsafe_owner_or_mode');
+    } else ownerStat(path, s.isDirectory(), options);
     if (s.isDirectory()) for (const name of readdirSync(path).sort()) walk(join(path, name));
     else {
       if (!s.isFile() || s.nlink !== 1) fail('source_not_regular');
@@ -35,6 +40,27 @@ function inventory(root: string, options: ManagedRuntimeOptions): FileRecord[] {
     }
   }
   walk(root); return files;
+}
+function hasPrivateSourceAncestor(source: string, options: ManagedRuntimeOptions) {
+  if (options.windows ?? isWindows()) return false;
+  let path = source;
+  for (;;) {
+    const stat = lstatSync(path);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) fail('source_link');
+    if (typeof process.getuid === 'function' && stat.uid === process.getuid() && (stat.mode & 0o077) === 0 && (stat.mode & 0o100) !== 0) return true;
+    const parent = dirname(path); if (parent === path) return false; path = parent;
+  }
+}
+/** Seal only the newly copied payload, never the supplied package or root. */
+function sealPosixCopy(root: string, options: ManagedRuntimeOptions) {
+  if (options.windows ?? isWindows()) return;
+  function walk(path: string) {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile()) || (typeof process.getuid === 'function' && stat.uid !== process.getuid())) fail('unsafe_path');
+    chmodSync(path, stat.isDirectory() || (stat.mode & 0o100) !== 0 ? 0o700 : 0o600);
+    if (stat.isDirectory()) for (const name of readdirSync(path)) walk(join(path, name));
+  }
+  walk(root);
 }
 function verifyRoot(options: ManagedDeploymentOptions) {
   const paths = assertAncestors(options);
@@ -132,7 +158,9 @@ export function recoverManagedInstallerLock(options: ManagedDeploymentOptions = 
 /** Stage the caller-verified npm package; this does not edit registrations or trust. */
 export function stageManagedDeployment(packageRoot: string, options: ManagedDeploymentOptions = {}) {
   const source = resolve(packageRoot);
-  const sourceFiles = inventory(source, options);
+  const sourceFiles = inventory(source, options, hasPrivateSourceAncestor(source, options));
+  const entrySource = resolve(options.entrySourceRoot ?? source);
+  const entryFiles = entrySource === source ? sourceFiles : inventory(entrySource, options, hasPrivateSourceAncestor(entrySource, options));
   const pkg = JSON.parse(readFileSync(join(source, 'package.json'), 'utf8'));
   if (pkg.name !== 'caveat-cli' || !versionPattern.test(pkg.version) || pkg.bin?.caveat !== 'dist/caveat.js') fail('invalid_package');
   const manifest: Manifest = { schema: 1, version: pkg.version, files: sourceFiles };
@@ -141,7 +169,8 @@ export function stageManagedDeployment(packageRoot: string, options: ManagedDepl
   return withInstallerLock(options, paths => {
     const entrySources = [['caveat.mjs', 'stable-entry.mjs'], ['managed-deployment.js', 'managed-deployment.js']] as const;
     for (const [name, from] of entrySources) {
-      const bytes = readFileSync(join(options.entrySourceRoot ?? source, 'dist', from));
+      const bytes = readFileSync(join(entrySource, 'dist', from));
+      if (sha(bytes) !== entryFiles.find(file => file.path === `dist/${from}`)?.sha256) fail('entry_source_changed');
       const target = join(paths.entry, name);
       if (existsSync(target)) {
         ownerStat(target, false, options);
@@ -160,6 +189,7 @@ export function stageManagedDeployment(packageRoot: string, options: ManagedDepl
       mkdirSync(staging, { mode: 0o700 });
       try {
         cpSync(source, join(staging, 'package'), { recursive: true, dereference: false, preserveTimestamps: true });
+        sealPosixCopy(join(staging, 'package'), options);
         if (JSON.stringify(inventory(join(staging, 'package'), options)) !== JSON.stringify(sourceFiles)) fail('stage_copy_changed');
         writeFileSync(join(staging, 'manifest.json'), manifestBytes, { flag: 'wx', mode: 0o600 });
         if (options.windows ?? isWindows()) (options.aclTreeRunner ?? runWindowsAclPrivateTree)(staging);

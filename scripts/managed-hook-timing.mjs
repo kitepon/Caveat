@@ -2,10 +2,11 @@
 // Invokes ordinary successful hooks directly: no native trust or provider calls.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export function measureManagedHookTiming(candidateRoot, oldRoot, fixtureRoot) {
+  const candidateVersion=JSON.parse(readFileSync(join(candidateRoot,'package.json'),'utf8')).version;
   const candidateCli=join(candidateRoot,'dist','caveat.js'), oldCli=join(oldRoot,'dist','caveat.js');
   const modes=[['old-direct',oldCli],['candidate-direct',candidateCli],['candidate-managed',candidateCli]];
   const rows=[];
@@ -19,7 +20,7 @@ export function measureManagedHookTiming(candidateRoot, oldRoot, fixtureRoot) {
       assert.ok(!/store_unavailable|\[caveat:fatal\]/.test(x.stderr),x.stderr);
       return {elapsedMs:Math.round(performance.now()-start),stdout:x.stdout,stderrBytes:Buffer.byteLength(x.stderr),childLimitMs:limit};
     };
-    const version=run(cli,['--version']).stdout.trim();assert.equal(version,mode==='old-direct'?'0.20.3':'0.21.1');
+    const version=run(cli,['--version']).stdout.trim();assert.equal(version,mode==='old-direct'?'0.20.3':candidateVersion);
     // Ordinary product configuration/init, all paths belong to this fixture.
     run(candidateCli,['init','--yes'],undefined,60000);
     let entry=cli;

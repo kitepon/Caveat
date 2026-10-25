@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync, lstatSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -126,6 +126,24 @@ describe('managed deployment transaction and protected payload', () => {
     expect(readFileSync(f.paths.pointer)).toEqual(before);expect(managedInstallerLockStatus(f.options).state).toBe('absent');
     writeFileSync(f.paths.lock,'malformed',{flag:'wx',mode:0o600});
     expect(()=>recoverManagedInstallerLock(f.options)).toThrow('lock_invalid');expect(existsSync(f.paths.lock)).toBe(true);
+  });
+
+  it.skipIf(isWindows())('stages npm umask-002 files inside a private source ancestor, seals the copy and leaves the source unchanged', () => {
+    const f=fixture(), source=f.source('1.0.0');
+    for(const path of [source,join(source,'dist')])chmodSync(path,0o775);
+    for(const file of ['package.json','dist/caveat.js','dist/stable-entry.mjs','dist/managed-deployment.js'])chmodSync(join(source,file),file==='dist/caveat.js'?0o775:0o664);
+    const sourceBytes=readFileSync(join(source,'dist/caveat.js'));
+    const staged=stageManagedDeployment(source,f.options);activateManagedDeployment(staged.release,f.options);
+    expect(verifyManagedDeployment(f.options).manifest.version).toBe('1.0.0');
+    const copied=join(f.paths.releases,staged.release,'package');
+    expect(lstatSync(copied).mode&0o777).toBe(0o700);
+    expect(lstatSync(join(copied,'package.json')).mode&0o777).toBe(0o600);
+    expect(lstatSync(join(copied,'dist/caveat.js')).mode&0o777).toBe(0o700);
+    expect(lstatSync(source).mode&0o777).toBe(0o775);expect(lstatSync(join(source,'package.json')).mode&0o777).toBe(0o664);
+    expect(readFileSync(join(source,'dist/caveat.js'))).toEqual(sourceBytes);
+    chmodSync(f.paths.root,0o777);
+    expect(()=>stageManagedDeployment(source,f.options)).toThrow('unsafe_owner_or_mode');
+    chmodSync(f.paths.root,0o700);
   });
 
 });
