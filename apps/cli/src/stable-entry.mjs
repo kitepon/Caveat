@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { dirname } from 'node:path';
+import { lstatSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { readManagedDeployment } from './managed-deployment.js';
 
@@ -9,7 +10,11 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const userHome = dirname(dirname(dirname(dirname(root))));
 try {
   const active = readManagedDeployment({ userHome });
-  if (process.argv[1] !== fileURLToPath(import.meta.url)) throw Error('managed_entry_identity_mismatch');
+  // File identity handles drive-case/8.3/extended Windows spellings without
+  // accepting a symlink or changing the original stable argv registration.
+  const invoked = lstatSync(process.argv[1], { bigint: true });
+  const expected = lstatSync(active.launcher, { bigint: true });
+  if (invoked.isSymbolicLink() || invoked.dev !== expected.dev || invoked.ino !== expected.ino) throw Error('managed_entry_identity_mismatch');
   await import(pathToFileURL(active.cliScriptPath).href);
 } catch (error) {
   // Keep the concrete refusal diagnostic on stderr; never print a malformed

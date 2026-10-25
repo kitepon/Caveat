@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnCommandSync } from './process-command.mjs';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { measureManagedHookTiming } from './managed-hook-timing.mjs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import { gunzipSync } from 'node:zlib';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageDir = join(repoRoot, 'apps', 'cli');
 const tempDir = mkdtempSync(join(tmpdir(), 'caveat-npm-pack-'));
-let managedEntrySmoke;
+let managedEntrySmoke, managedHookTiming;
 
 try {
   const tarball = packCli(tempDir);
@@ -51,7 +52,7 @@ try {
   // The fixed runtime must remain independent of mutable installer code and
   // the product/SQLite graph, so application releases do not alter its bytes.
   const fixedRuntime = entries.get('package/dist/managed-deployment.js').data.toString('utf8');
-  if (/stageManagedDeployment|activateManagedDeployment|SetAccessControl|node:sqlite|better-sqlite3/.test(fixedRuntime)) {
+  if (/stageManagedDeployment|activateManagedDeployment|SetAccessControl|runWindowsManagedRootAcl|readdirSync|spawnSync\s*\(|node:sqlite|better-sqlite3/.test(fixedRuntime)) {
     throw new Error('fixed managed runtime contains mutable installer or product dependencies');
   }
 
@@ -66,6 +67,7 @@ try {
         version: manifest.version,
         installedVersion,
         managedEntrySmoke,
+        managedHookTiming,
         bin: manifest.bin,
         dependencyCount: Object.keys(manifest.dependencies ?? {}).length,
       },
@@ -150,6 +152,12 @@ function installAndReadVersion(tarball, expectedVersion) {
     timings.push({ operation: args[0], elapsedMs: Math.round(performance.now() - started), childLimitMs: 5000 });
   }
   managedEntrySmoke = { status: 'ok', version: expectedVersion, isolatedProfile: true, timings };
+  const oldPrefix=join(tempDir,'old-prefix');
+  const oldInstall=spawnCommandSync(npmCommand(),['install','--global','caveat-cli@0.20.3','--prefix',oldPrefix,'--ignore-scripts','--no-audit','--no-fund','--loglevel=error'],{encoding:'utf8',maxBuffer:1024*1024});
+  if(oldInstall.error)throw oldInstall.error;
+  if(oldInstall.status!==0)throw Error(`old published baseline install failed: ${oldInstall.stderr}`);
+  const packageAt=dir=>existsSync(join(dir,'node_modules','caveat-cli')) ? join(dir,'node_modules','caveat-cli') : join(dir,'lib','node_modules','caveat-cli');
+  managedHookTiming=measureManagedHookTiming(packageAt(prefix),packageAt(oldPrefix),join(tempDir,'normal-hook-comparison'));
   return actualVersion;
 }
 

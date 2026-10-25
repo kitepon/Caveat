@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { isWindows } from '../src/platform.js';
-import { activateManagedDeployment, stageManagedDeployment, readManagedDeployment, managedRegistrationPath, managedDeploymentPaths } from '../src/managedDeployment.js';
+import { activateManagedDeployment, stageManagedDeployment, readManagedDeployment, managedRegistrationPath, managedDeploymentPaths, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '../src/managedDeployment.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const r of roots.splice(0)) rmSync(r, { recursive: true, force: true }); });
@@ -11,7 +12,7 @@ function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'caveat-managed-')); roots.push(root);
   const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
   // These are semantic store fixtures, not native Windows ACL acceptance.
-  const options = { userHome, aclRunner: () => {}, aclTreeRunner: () => {} };
+  const options = { userHome, aclRunner: () => {}, aclTreeRunner: () => {}, aclVerifyTreeRunner: () => {} };
   const source = (version: string) => {
     const dir = join(root, version); mkdirSync(join(dir, 'dist'), { recursive: true, mode: 0o700 });
     writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'caveat-cli', version, bin: { caveat: 'dist/caveat.js' } }));
@@ -90,4 +91,41 @@ describe('managed deployment transaction and protected payload', () => {
     expect(readManagedDeployment(options).manifest.version).toBe('1.0.0');
     expect(staged.launcher).toBe(f.paths.launcher);
   });
+  it('keeps startup independent of ACL processes and payload scans, while status detects changed payloads', () => {
+    const f=fixture(), a=stageManagedDeployment(f.source('1.0.0'),f.options);
+    activateManagedDeployment(a.release,f.options);
+    const noAcl={...f.options,windows:true,aclRunner:()=>{throw Error('ACL must not run at startup');}};
+    expect(readManagedDeployment(noAcl).manifest.version).toBe('1.0.0');
+    writeFileSync(join(f.paths.releases,a.release,'package','package.json'),'changed payload');
+    expect(readManagedDeployment(noAcl).manifest.version).toBe('1.0.0');
+    expect(()=>verifyManagedDeployment(f.options)).toThrow('payload_changed');
+    const manifest=join(f.paths.releases,a.release,'manifest.json');writeFileSync(manifest,'changed manifest');
+    expect(()=>readManagedDeployment(noAcl)).toThrow('manifest_changed');
+  });
+  it.skipIf(isWindows())('still rejects writable runtime metadata and redirected entry or CLI paths at startup', () => {
+    const f=fixture(), a=stageManagedDeployment(f.source('1.0.0'),f.options);activateManagedDeployment(a.release,f.options);
+    for(const path of [f.paths.root,f.paths.entry,f.paths.pointer,join(f.paths.releases,a.release),join(f.paths.releases,a.release,'manifest.json')]){
+      chmodSync(path,0o777);expect(()=>readManagedDeployment(f.options)).toThrow('unsafe_owner_or_mode');chmodSync(path,path===f.paths.pointer||path.endsWith('manifest.json')?0o600:0o700);
+    }
+    const original=readFileSync(f.paths.launcher), outside=join(f.root,'entry-outside');writeFileSync(outside,original);rmSync(f.paths.launcher);symlinkSync(outside,f.paths.launcher);
+    expect(()=>readManagedDeployment(f.options)).toThrow('unsafe_path');
+    rmSync(f.paths.launcher);writeFileSync(f.paths.launcher,original,{mode:0o600});
+    const cli=join(f.paths.releases,a.release,'package','dist','caveat.js');rmSync(cli);symlinkSync(outside,cli);
+    expect(()=>readManagedDeployment(f.options)).toThrow('unsafe_path');
+  });
+  it('diagnoses a held or abandoned lock and recovers only an explicitly confirmed absent owner', () => {
+    const f=fixture(), a=stageManagedDeployment(f.source('1.0.0'),f.options);activateManagedDeployment(a.release,f.options);
+    const before=readFileSync(f.paths.pointer), startedAt=new Date().toISOString();
+    writeFileSync(f.paths.lock,JSON.stringify({schema:1,pid:process.pid,startedAt}),{flag:'wx',mode:0o600});
+    expect(managedInstallerLockStatus(f.options)).toEqual({state:'busy',pid:process.pid,startedAt});
+    expect(()=>recoverManagedInstallerLock(f.options)).toThrow('installer_busy');expect(readFileSync(f.paths.pointer)).toEqual(before);
+    const exited=spawnSync(process.execPath,['-e',''],{timeout:5000});expect(exited.status).toBe(0);
+    writeFileSync(f.paths.lock,JSON.stringify({schema:1,pid:exited.pid,startedAt}));
+    expect(managedInstallerLockStatus(f.options).state).toBe('stale');
+    expect(recoverManagedInstallerLock(f.options)).toEqual({removed:true,previousPid:exited.pid,startedAt});
+    expect(readFileSync(f.paths.pointer)).toEqual(before);expect(managedInstallerLockStatus(f.options).state).toBe('absent');
+    writeFileSync(f.paths.lock,'malformed',{flag:'wx',mode:0o600});
+    expect(()=>recoverManagedInstallerLock(f.options)).toThrow('lock_invalid');expect(existsSync(f.paths.lock)).toBe(true);
+  });
+
 });

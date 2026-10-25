@@ -32,7 +32,7 @@ import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installSh
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
-import { deploymentStage, deploymentActivate, deploymentStatus } from './commands/deployment.js';
+import { deploymentStage, deploymentActivate, deploymentStatus, deploymentUnlock } from './commands/deployment.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -68,7 +68,9 @@ deployment.command('activate <release>').requiredOption('--json', 'emit the acti
   .option('--recover-invalid-pointer', 'retain an invalid pointer and explicitly select this verified release', false)
   .action((release: string, opts: { recoverInvalidPointer: boolean }) => { process.stdout.write(`${JSON.stringify(deploymentActivate(release, opts.recoverInvalidPointer))}\n`); });
 deployment.command('status').requiredOption('--json', 'verify and report the selected release')
-  .action(() => { process.stdout.write(`${JSON.stringify(deploymentStatus())}\n`); });
+  .action(() => { const result = deploymentStatus(); process.stdout.write(`${JSON.stringify(result)}\n`); if (result.status !== 'ready') process.exitCode = 1; });
+deployment.command('unlock').requiredOption('--json', 'explicitly remove an installer lock after verifying its process is absent')
+  .action(() => { process.stdout.write(`${JSON.stringify(deploymentUnlock())}\n`); });
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
 type AutosyncOptions = { caveatHome?: string; userHome?: string; dryRun?: boolean };
 const autosyncCommand = (parent: Command, name: string) => parent.command(name)

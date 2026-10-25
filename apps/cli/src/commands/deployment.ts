@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageManagedDeployment, activateManagedDeployment, readManagedDeployment } from '@caveat/core';
+import { stageManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '@caveat/core';
 
 function installerPackageRoot() {
   let path = dirname(fileURLToPath(import.meta.url));
@@ -19,6 +19,12 @@ export function deploymentStage(packageRoot?: string) {
 }
 export function deploymentActivate(release: string, recoverInvalidPointer = false) { return activateManagedDeployment(release, { recoverInvalidPointer }); }
 export function deploymentStatus() {
-  const active = readManagedDeployment();
-  return { release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true };
+  const lock = managedInstallerLockStatus();
+  try {
+    const active = verifyManagedDeployment();
+    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock };
+  } catch (error) {
+    return { status: 'unavailable' as const, payloadVerified: false, lock, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
+  }
 }
+export function deploymentUnlock() { return recoverManagedInstallerLock(); }

@@ -2,8 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths } from '@caveat/core';
+import { join, resolve, toNamespacedPath } from 'node:path';
+import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths, isWindows } from '@caveat/core';
 import { installMcpClient } from '../src/mcpInstall.js';
 import { installClaudeIntegration } from '../src/claudeInstall.js';
 import { installCodexHooks } from '../src/codexHookInstall.js';
@@ -46,6 +46,12 @@ describe('shipped stable entry and normal host installers', () => {
         expect(run.status, run.stderr).toBe(0);
         expect(JSON.parse(run.stdout)).toEqual({ version, entry: paths.launcher, args: ['one value', '日本語'] });
         install(); baseline ??= snapshot(); expect(snapshot()).toEqual(baseline);
+        const command=JSON.parse(readFileSync(join(configs,'codex/hooks.json'),'utf8')).hooks.PostToolUse[0].hooks[0].command;
+        const registered=spawnSync(isWindows()?'pwsh.exe':'/bin/sh',isWindows()?['-NoProfile','-NonInteractive','-Command',command]:['-c',command],{encoding:'utf8',timeout:5000});
+        expect(registered.status,registered.stderr).toBe(0);expect(JSON.parse(registered.stdout)).toMatchObject({version,args:['codex-hook','post-tool-use']});
+        if(isWindows()) for(const spelling of [paths.launcher.replace(/^[A-Z]/,c=>c.toLowerCase()),toNamespacedPath(paths.launcher)]){
+          const alias=spawnSync(process.execPath,[spelling],{encoding:'utf8',timeout:5000});expect(alias.status,alias.stderr).toBe(0);expect(JSON.parse(alias.stdout).version).toBe(version);
+        }
         expect(readFileSync(paths.launcher)).toEqual(entry); expect(readFileSync(paths.runtime)).toEqual(runtime);
       }
       // The public init entry resolves the selected path once in its own profile;

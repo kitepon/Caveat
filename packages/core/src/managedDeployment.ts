@@ -1,18 +1,64 @@
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, openSync, closeSync, fsyncSync } from 'node:fs';
-import { join, resolve, relative, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, lstatSync, readdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
+import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { isWindows } from './platform.js';
-import { runWindowsAcl, runWindowsAclPrivateTree, runWindowsManagedRootAcl } from './privateWindowsAcl.js';
+import { runWindowsAcl, runWindowsAclPrivateTree, runWindowsAclVerifyPrivateTree, runWindowsManagedRootAcl } from './privateWindowsAcl.js';
 import { managedDeploymentPaths, readManagedDeployment, managedDeploymentInternal } from './managedDeploymentRuntime.js';
-import type { Manifest, Pointer, ManagedRuntimeOptions } from './managedDeploymentRuntime.js';
+import type { Manifest, Pointer, FileRecord, ManagedRuntimeOptions } from './managedDeploymentRuntime.js';
 export { managedDeploymentPaths, readManagedDeployment, managedRegistrationPath } from './managedDeploymentRuntime.js';
 
 export type ManagedDeploymentOptions = ManagedRuntimeOptions & {
   entrySourceRoot?: string;
   aclTreeRunner?: typeof runWindowsAclPrivateTree;
+  aclVerifyTreeRunner?: typeof runWindowsAclVerifyPrivateTree;
   recoverInvalidPointer?: boolean;
 };
-const { sha, fail, canonicalHome, ownerStat, assertAncestors, inventory, checkRelease, versionPattern, releasePattern } = managedDeploymentInternal;
+const { sha, fail, canonicalHome, ownerStat, assertAncestors, checkReleaseMetadata, versionPattern, releasePattern } = managedDeploymentInternal;
+const MAX_FILES = 4096;
+const MAX_BYTES = 128 * 1024 * 1024;
+function safeRelative(file: string) {
+  if (!file || isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..')) fail('invalid_manifest_path');
+}
+function inventory(root: string, options: ManagedRuntimeOptions): FileRecord[] {
+  const files: FileRecord[] = []; let bytes = 0;
+  function walk(path: string) {
+    const s = lstatSync(path);
+    if (s.isSymbolicLink()) fail('source_link');
+    ownerStat(path, s.isDirectory(), options);
+    if (s.isDirectory()) for (const name of readdirSync(path).sort()) walk(join(path, name));
+    else {
+      if (!s.isFile() || s.nlink !== 1) fail('source_not_regular');
+      bytes += s.size;
+      if (files.length >= MAX_FILES || bytes > MAX_BYTES) fail('payload_too_large');
+      const name = relative(root, path).split(sep).join('/'); safeRelative(name);
+      files.push({ path: name, sha256: sha(readFileSync(path)), bytes: s.size });
+    }
+  }
+  walk(root); return files;
+}
+function verifyRoot(options: ManagedDeploymentOptions) {
+  const paths = assertAncestors(options);
+  if (options.windows ?? isWindows()) {
+    if (options.aclRunner) options.aclRunner(paths.root, true, false);
+    else runWindowsManagedRootAcl(paths.root, canonicalHome(options.userHome));
+    const metadata = [paths.entry, paths.pointer].filter(path => existsSync(path));
+    if (metadata.length) (options.aclVerifyTreeRunner ?? runWindowsAclVerifyPrivateTree)(metadata[0]!, metadata.slice(1));
+  }
+  return paths;
+}
+function checkRelease(pointer: Pointer, options: ManagedDeploymentOptions) {
+  const checked = checkReleaseMetadata(pointer, options);
+  if (options.windows ?? isWindows()) (options.aclVerifyTreeRunner ?? runWindowsAclVerifyPrivateTree)(join(managedDeploymentPaths(options.userHome).releases, pointer.release));
+  if (JSON.stringify(inventory(checked.packageRoot, options)) !== JSON.stringify(checked.manifest.files)) fail('payload_changed');
+  const pkg = JSON.parse(readFileSync(join(checked.packageRoot, 'package.json'), 'utf8'));
+  if (pkg.name !== 'caveat-cli' || pkg.version !== checked.manifest.version || pkg.bin?.caveat !== 'dist/caveat.js') fail('invalid_package');
+  return checked;
+}
+/** Full content and native ACL verification belongs to installer/status. */
+export function verifyManagedDeployment(options: ManagedDeploymentOptions = {}) {
+  verifyRoot(options);
+  return checkRelease(readManagedDeployment(options).pointer, options);
+}
 function createRoot(options: ManagedDeploymentOptions) {
   const paths = managedDeploymentPaths(options.userHome);
   const home = canonicalHome(options.userHome);
@@ -30,7 +76,7 @@ function createRoot(options: ManagedDeploymentOptions) {
     }
     ownerStat(path, true, options);
   }
-  assertAncestors(options);
+  verifyRoot(options);
   for (const path of [paths.releases, paths.entry]) {
     if (!existsSync(path)) mkdirSync(path, { mode: 0o700 });
     ownerStat(path, true, options);
@@ -40,9 +86,48 @@ function createRoot(options: ManagedDeploymentOptions) {
 function withInstallerLock<T>(options: ManagedDeploymentOptions, fn: (paths: ReturnType<typeof managedDeploymentPaths>) => T): T {
   const paths = createRoot(options);
   let fd: number;
-  try { fd = openSync(paths.lock, 'wx', 0o600); } catch { return fail('installer_busy'); }
-  try { return fn(paths); }
+  try { fd = openSync(paths.lock, 'wx', 0o600); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return fail('installer_busy'); throw error; }
+  try {
+    writeFileSync(fd, JSON.stringify({ schema: 1, pid: process.pid, startedAt: new Date().toISOString() }) + '\n');
+    fsyncSync(fd);
+    return fn(paths);
+  }
   finally { closeSync(fd); rmSync(paths.lock); }
+}
+type InstallerLock = { schema: 1; pid: number; startedAt: string };
+function readInstallerLock(options: ManagedDeploymentOptions) {
+  const paths = managedDeploymentPaths(options.userHome);
+  if (!existsSync(paths.lock)) return null;
+  const stat = ownerStat(paths.lock, false, options);
+  if (stat.size > 1024) fail('lock_invalid');
+  const bytes = readFileSync(paths.lock);
+  let value: InstallerLock;
+  try { value = JSON.parse(bytes.toString()) as InstallerLock; } catch { return fail('lock_invalid'); }
+  if (!value || typeof value !== 'object' || Object.keys(value).sort().join(',') !== 'pid,schema,startedAt' || value.schema !== 1 || !Number.isInteger(value.pid) || value.pid < 1 || value.pid > 2147483647 || typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt))) fail('lock_invalid');
+  // ESRCH is the only positive proof of absence. EPERM/other errors, including
+  // PID reuse, remain conservatively busy; age alone never permits removal.
+  let state: 'busy' | 'stale' = 'busy';
+  try { process.kill(value.pid, 0); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') state = 'stale'; }
+  return { value, bytes, stat, state };
+}
+export function managedInstallerLockStatus(options: ManagedDeploymentOptions = {}) {
+  const paths = managedDeploymentPaths(options.userHome);
+  if (!existsSync(paths.root)) return { state: 'absent' as const };
+  verifyRoot(options);
+  const lock = readInstallerLock(options);
+  return lock ? { state: lock.state, pid: lock.value.pid, startedAt: lock.value.startedAt } : { state: 'absent' as const };
+}
+/** Explicitly recover only an owner-only lock whose process no longer exists. */
+export function recoverManagedInstallerLock(options: ManagedDeploymentOptions = {}) {
+  const paths = verifyRoot(options), lock = readInstallerLock(options);
+  if (!lock) return { removed: false };
+  if (lock.state !== 'stale') fail('installer_busy');
+  const current = ownerStat(paths.lock, false, options);
+  if (current.dev !== lock.stat.dev || current.ino !== lock.stat.ino || !readFileSync(paths.lock).equals(lock.bytes)) fail('lock_changed');
+  rmSync(paths.lock);
+  return { removed: true, previousPid: lock.value.pid, startedAt: lock.value.startedAt };
 }
 /** Stage the caller-verified npm package; this does not edit registrations or trust. */
 export function stageManagedDeployment(packageRoot: string, options: ManagedDeploymentOptions = {}) {
@@ -75,9 +160,9 @@ export function stageManagedDeployment(packageRoot: string, options: ManagedDepl
       mkdirSync(staging, { mode: 0o700 });
       try {
         cpSync(source, join(staging, 'package'), { recursive: true, dereference: false, preserveTimestamps: true });
-        if (options.windows ?? isWindows()) (options.aclTreeRunner ?? runWindowsAclPrivateTree)(join(staging, 'package'));
         if (JSON.stringify(inventory(join(staging, 'package'), options)) !== JSON.stringify(sourceFiles)) fail('stage_copy_changed');
         writeFileSync(join(staging, 'manifest.json'), manifestBytes, { flag: 'wx', mode: 0o600 });
+        if (options.windows ?? isWindows()) (options.aclTreeRunner ?? runWindowsAclPrivateTree)(staging);
         renameSync(staging, target);
       } finally { rmSync(staging, { recursive: true, force: true }); }
     }
@@ -111,7 +196,7 @@ export function activateManagedDeployment(release: string, options: ManagedDeplo
     try {
       const fd = openSync(temporary, 'wx', 0o600);
       try { writeFileSync(fd, JSON.stringify(next) + '\n'); fsyncSync(fd); } finally { closeSync(fd); }
-      assertAncestors(options);
+      verifyRoot(options);
       if (previousBytes ? !readFileSync(paths.pointer).equals(previousBytes) : existsSync(paths.pointer)) fail('pointer_changed');
       renameSync(temporary, paths.pointer);
     } finally { rmSync(temporary, { force: true }); }

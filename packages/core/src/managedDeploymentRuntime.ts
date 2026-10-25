@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { isWindows } from './platform.js';
-import { runWindowsManagedRootAcl } from './privateWindowsAcl.js';
 import type { runWindowsAcl } from './privateWindowsAcl.js';
 
 export type FileRecord = { path: string; sha256: string; bytes: number };
@@ -14,12 +13,7 @@ const sha = (data: string | Buffer) => createHash('sha256').update(data).digest(
 const releasePattern = /^\d+\.\d+\.\d+-[a-f0-9]{20}$/;
 const versionPattern = /^\d+\.\d+\.\d+$/;
 const MAX_FILES = 4096;
-const MAX_BYTES = 128 * 1024 * 1024;
 function fail(reason: string): never { throw Error(`managed_deployment_${reason}`); }
-function windowsRootCheck(root: string, home: string, options: ManagedRuntimeOptions) {
-  if (options.aclRunner) options.aclRunner(root, true, false);
-  else runWindowsManagedRootAcl(root, home);
-}
 function canonicalHome(userHome = homedir()) {
   const path=resolve(userHome);
   // macOS /var -> /private/var and other OS-level aliases may precede the
@@ -47,54 +41,32 @@ function assertAncestors(options: ManagedRuntimeOptions) {
     path = join(path, part); ownerStat(path, true, options);
   }
   if (realpathSync(paths.root) !== paths.root) fail('root_redirected');
-  if (options.windows ?? isWindows()) windowsRootCheck(paths.root, home, options);
   return paths;
 }
-function safeRelative(file: string) {
-  if (!file || isAbsolute(file) || file.includes('\\') || file.split('/').some(part => !part || part === '.' || part === '..')) fail('invalid_manifest_path');
-}
-function inventory(root: string, options: ManagedRuntimeOptions): FileRecord[] {
-  const files: FileRecord[] = []; let bytes = 0;
-  function walk(path: string) {
-    const s = lstatSync(path);
-    if (s.isSymbolicLink()) fail('source_link');
-    ownerStat(path, s.isDirectory(), options);
-    if (s.isDirectory()) for (const name of readdirSync(path).sort()) walk(join(path, name));
-    else {
-      if (!s.isFile() || s.nlink !== 1) fail('source_not_regular');
-      bytes += s.size;
-      if (files.length >= MAX_FILES || bytes > MAX_BYTES) fail('payload_too_large');
-      const name = relative(root, path).split(sep).join('/'); safeRelative(name);
-      files.push({ path: name, sha256: sha(readFileSync(path)), bytes: s.size });
-    }
-  }
-  walk(root); return files;
-}
-function checkRelease(pointer: Pointer, options: ManagedRuntimeOptions) {
+function checkReleaseMetadata(pointer: Pointer, options: ManagedRuntimeOptions) {
   const paths = managedDeploymentPaths(options.userHome);
   if (pointer.schema !== 1 || !releasePattern.test(pointer.release) || !/^[a-f0-9]{64}$/.test(pointer.manifestSha256)) fail('invalid_pointer');
   const releaseRoot = join(paths.releases, pointer.release);
   ownerStat(paths.releases, true, options); ownerStat(releaseRoot, true, options);
-  const manifestPath = join(releaseRoot, 'manifest.json'); ownerStat(manifestPath, false, options);
+  const manifestPath = join(releaseRoot, 'manifest.json');
+  if (ownerStat(manifestPath, false, options).size > 1024 * 1024) fail('manifest_too_large');
   const bytes = readFileSync(manifestPath);
   if (sha(bytes) !== pointer.manifestSha256) fail('manifest_changed');
   const manifest = JSON.parse(bytes.toString()) as Manifest;
   if (manifest.schema !== 1 || !versionPattern.test(manifest.version) || !pointer.release.startsWith(manifest.version + '-') || !Array.isArray(manifest.files) || manifest.files.length > MAX_FILES) fail('invalid_manifest');
   const packageRoot = join(releaseRoot, 'package');
-  const actual = inventory(packageRoot, options);
-  if (JSON.stringify(actual) !== JSON.stringify(manifest.files)) fail('payload_changed');
-  const pkg = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
-  if (pkg.name !== 'caveat-cli' || pkg.version !== manifest.version || pkg.bin?.caveat !== 'dist/caveat.js') fail('invalid_package');
+  ownerStat(packageRoot, true, options); ownerStat(join(packageRoot, 'dist'), true, options);
   const cliScriptPath = join(packageRoot, 'dist', 'caveat.js'); ownerStat(cliScriptPath, false, options);
   return { pointer, manifest, packageRoot, cliScriptPath, launcher: paths.launcher };
 }
+/** Startup checks only: no process creation or package-wide content scan. */
 export function readManagedDeployment(options: ManagedRuntimeOptions = {}) {
   const paths = assertAncestors(options);
   ownerStat(paths.entry, true, options); ownerStat(paths.launcher, false, options); ownerStat(paths.runtime, false, options);
-  ownerStat(paths.pointer, false, options);
+  if (ownerStat(paths.pointer, false, options).size > 1024) fail('pointer_too_large');
   const pointer = JSON.parse(readFileSync(paths.pointer, 'utf8')) as Pointer;
   if (Object.keys(pointer).sort().join(',') !== 'manifestSha256,release,schema') fail('invalid_pointer');
-  return checkRelease(pointer, options);
+  return checkReleaseMetadata(pointer, options);
 }
 /** Direct npm callers register the active stable entry when it owns this package. */
 export function managedRegistrationPath(cliScriptPath: string, options: ManagedRuntimeOptions = {}) {
@@ -106,4 +78,4 @@ export function managedRegistrationPath(cliScriptPath: string, options: ManagedR
   return active.launcher;
 }
 
-export const managedDeploymentInternal = { sha, fail, canonicalHome, ownerStat, assertAncestors, inventory, checkRelease, versionPattern, releasePattern };
+export const managedDeploymentInternal = { sha, fail, canonicalHome, ownerStat, assertAncestors, checkReleaseMetadata, versionPattern, releasePattern };

@@ -26,6 +26,14 @@ export function runWindowsAclPrivateTree(path: string) {
   const script = String.raw`$ErrorActionPreference='Stop';$items=@(Get-Item -LiteralPath $env:CAVEAT_ACL_PATH)+@(Get-ChildItem -LiteralPath $env:CAVEAT_ACL_PATH -Force -Recurse);foreach($item in $items){if($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint){exit 44};$env:CAVEAT_ACL_PATH=$item.FullName;$env:CAVEAT_ACL_DIRECTORY=if($item.PSIsContainer){'1'}else{'0'};` + windowsAclApplyScript() + '}';
   runAclScript(path, true, script);
 }
+/** Full installer/status recheck, never called by a hook's stable entry. */
+export function runWindowsAclVerifyPrivateTree(path: string, additionalPaths: string[] = []) {
+  // Inherited owner-only rules are equally private below the independently
+  // verified root. Reject additional principals, reparse points and foreign owners.
+  const verify = WINDOWS_ACL_VERIFY.replace(' -or $r.IsInherited', '');
+  const script = String.raw`$ErrorActionPreference='Stop';foreach($root in (ConvertFrom-Json $env:CAVEAT_ACL_VERIFY_PATHS)){$item=Get-Item -LiteralPath $root -Force;$items=@($item);if($item.PSIsContainer){$items+=@(Get-ChildItem -LiteralPath $root -Force -Recurse)};foreach($item in $items){if($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint){exit 44};$env:CAVEAT_ACL_PATH=$item.FullName;` + verify + '}}';
+  runAclScript(path, true, script, { CAVEAT_ACL_VERIFY_PATHS: JSON.stringify([path, ...additionalPaths]) });
+}
 /** Ancestors must not let another ordinary user replace an owner-only root. */
 export function runWindowsManagedRootAcl(path: string, userHome: string) {
   const script = String.raw`$ErrorActionPreference='Stop';$root=[System.IO.Path]::GetFullPath($env:CAVEAT_ACL_PATH);$homePath=[System.IO.Path]::GetFullPath($env:CAVEAT_DEPLOY_HOME);$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value;$current=$root;$mask=[System.Security.AccessControl.FileSystemRights]'Write,Delete,DeleteSubdirectoriesAndFiles,ChangePermissions,TakeOwnership';while($true){if(Test-Path -LiteralPath $current){$item=Get-Item -LiteralPath $current -Force;if(-not $item.PSIsContainer -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)){exit 44};$acl=Get-Acl -LiteralPath $current;if($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid){exit 41};foreach($rule in $acl.GetAccessRules($true,$true,[System.Security.Principal.SecurityIdentifier])){if($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $mask) -ne 0 -and $rule.IdentityReference.Value -notin @($sid,'S-1-5-18','S-1-5-32-544','S-1-3-0')){exit 43}}};if($current.Equals($homePath,[System.StringComparison]::OrdinalIgnoreCase)){break};$next=[System.IO.Path]::GetDirectoryName($current);if(-not $next -or $next.Length -lt $homePath.Length){exit 45};$current=$next};if(Test-Path -LiteralPath $root){$env:CAVEAT_ACL_PATH=$root;` + WINDOWS_ACL_VERIFY + '}';
