@@ -22,6 +22,18 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 - entryの主キーはsourceとidの組。sourceは`own`または`community/<handle>`。
 - schemaとmigrationは`packages/core/src/schema.sql`と`packages/core/src/migrations/`が所有する。
 
+## Entryの入出力契約
+
+record/updateのargumentsはJSON表現のUTF-8で1MiB、合成後Markdownは1MiB、raw frontmatterは64KiB、展開したgraphは10,000 node/edgeと深さ128を上限とする。transportの10MiB上限はSDK既定を維持し、製品の上限を無制限化しない。超過はfile/index/updated_at/onEntryWrittenの前に型付き`CAVEAT.ENTRY_INPUT_CONSTRAINT`として拒否し、MCPでは`isError:true`、field/limit/actual/measure/actual_kind/guidanceを返す。byte境界はexact、parserやgraphの打切り・alias展開をdump前に止める十分条件はlower_boundと明示する。この副作用前の型付き拒否だけをMCP_TOOL_FAILEDから除外し、未知/DB例外は従来の重大度で記録する。
+
+YAML以外のnamed frontmatter engineはgray-matterの呼出前に拒否する。YAML load/dumpは単一のCaveat schemaで行い、js-yaml4.3.2 parserに従来4.1.1のint/float scalar解決だけをMIT出典/SHA付きで組む。既存の非引用1_000はnumberとして保持し、同schemaでnumeric/yes/date-shaped stringだけを引用する。forceQuotesは使わない。parser maxDepth128と展開graphのdepth128は異なる尺度で、flow深さ110は受入、parser guardに到達した深さはtyped診断となる。循環や多重aliasはdump/JSON化前に有界検査する。
+
+上限は書込requestと最終生成物へ掛け、既存の超過fileを削除しない。indexは超過entryをskipし、既存rowはstaleとして保全する。`caveat entry-diagnostics --json`は最後のsource別scanで除外したsource/path/id、制約、数値、file SHA、観測時刻、stale/skippedを表示する。新規scanが失敗したsourceの過去診断を成功へ置換しない。`index --full`も検査前に全rowを削除せず全fileをrescanする。既存本文をpatchして上限内へ減らせる場合は保存できる。frontmatterが安全に復元できない場合だけ更新をtyped拒否し、raw整理へ案内する。
+
+`caveat_get`はid/sourceの従来応答を維持し、unindexed entryは診断のpathを指定して読める。超過/過深の場合は`raw_entry`、diagnosticsと明示offset/length/total/next_offsetのUTF-8 window（4..65536B）を返す。不正UTF-8はbase64と明示する。CLIは`caveat show [id] --path <relative.md> --source <source> --offset-bytes <n> --limit-bytes <n>`を使える。無言で切り詰めた全文や空frontmatterにしない。封緘communityの通常id取得は既存indexを使い、stale診断を添える。明示pathのraw取得は既存content keyでメモリ内復号し、復号Markdownをdiskへ書かず新しい認証を始めない。
+
+公開前に実4hostのown/community corpusをread-onlyで検査し、旧/新の意味差・超過・読取不可・採取中変更が0件であることをhash/件数/型差だけで確認する。本文やsecretを監査原本へ持ち出さず、非0件は製品判断へ戻す。設計probeやCI fixtureを実corpusへ代用しない。
+
 ## 配布境界
 
 `visibility`は配布範囲の上限である。

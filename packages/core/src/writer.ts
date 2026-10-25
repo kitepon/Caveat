@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import yaml from 'js-yaml';
+import { dumpFrontmatter } from './frontmatterCodec.js';
+import { ENTRY_LIMITS, assertUtf8Limit } from './entryConstraints.js';
 import type { Frontmatter } from './types.js';
 
 export interface BuiltEntry {
@@ -15,8 +16,9 @@ export function buildEntry(frontmatter: Frontmatter, sections: Record<string, st
     bodyParts.push(`## ${heading}\n\n${content.trim()}`);
   }
   const body = bodyParts.join('\n\n');
-  const yamlStr = yaml.dump(frontmatter, { schema: yaml.JSON_SCHEMA, lineWidth: -1 });
+  const yamlStr = dumpFrontmatter(frontmatter);
   const content = `---\n${yamlStr}---\n\n${body}${body ? '\n' : ''}`;
+  assertUtf8Limit(content, 'entry_markdown', ENTRY_LIMITS.markdown);
   return { content, body };
 }
 

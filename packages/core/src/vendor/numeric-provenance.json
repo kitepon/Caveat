@@ -1,0 +1,32 @@
+{
+  "license": "MIT",
+  "upstream_version": "4.1.1",
+  "files": [
+    {
+      "upstream": "https://github.com/nodeca/js-yaml/blob/4.1.1/lib/type/int.js",
+      "sha256": "0dac842d32923113f2a6a153a280f6120f6ccc2da9024ba01fd4d99065d29fcf",
+      "local": "yaml-4.1.1-int.ts",
+      "changes": [
+        "Type imported from current parser",
+        "ESM default export",
+        "license/provenance header; no scalar logic changes"
+      ]
+    },
+    {
+      "upstream": "https://github.com/nodeca/js-yaml/blob/4.1.1/lib/type/float.js",
+      "sha256": "2d762d35ad3e06d96f512fb5ece8f7172e2543bb19c551f64c5e4005a66bbca2",
+      "local": "yaml-4.1.1-float.ts",
+      "changes": [
+        "Type imported from current parser",
+        "ESM default export",
+        "license/provenance header; no scalar logic changes"
+      ]
+    },
+    {
+      "upstream": "https://github.com/nodeca/js-yaml/blob/4.1.1/lib/common.js",
+      "sha256": "9211491f8e0058a419a4664e36bb4ec6509655aabe6bd537eddf941fdf34e734",
+      "local": "yaml-4.1.1-common.ts",
+      "scope": "only isNegativeZero, verbatim function plus ESM export"
+    }
+  ]
+}

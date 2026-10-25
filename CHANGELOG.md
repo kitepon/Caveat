@@ -2,6 +2,19 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] — 2026-10-25
+
+### Fixed
+
+- Refuse record/update arguments over 1MiB serialized UTF-8, final Markdown over 1MiB, frontmatter over 64KiB, and expanded YAML graphs over 10,000 nodes/edges or depth128 before changing files/index/updated_at. Return typed MCP input errors without counting them as mutation failures; keep unknown and database failures observable.
+- Preserve the established 4.1.1 numeric scalar meaning through a single Caveat codec on js-yaml 4.3.2. Quote ambiguous numeric/date-shaped strings selectively; do not quote every string.
+- Preserve existing oversized/deep entries and stale index rows, expose index diagnostics and bounded raw reads, and let valid searches continue. Full indexing rescans safely instead of deleting rows before checking their source files.
+- Keep privacy checks closed when oversized/deep frontmatter cannot be inspected.
+
+### Dependencies
+
+- Adopt SDK 1.32.2 with its default transport bound and js-yaml 4.3.2 with explicit product input contracts. Keep original numeric type provenance and MIT notices in the distributed package.
+
 ## [0.21.2] — 2026-10-25
 
 ### Fixed

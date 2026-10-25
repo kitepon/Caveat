@@ -1,6 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpContext } from './context.js';
-import { observeRuntimeError, type RuntimeErrorImpact } from '@caveat/core';
+import { z } from 'zod';
+import { EntryInputConstraintError, observeRuntimeError, type RuntimeErrorImpact } from '@caveat/core';
 import { handleSearch, searchInputShape, type SearchArgs } from './tools/search.js';
 import { handleGet, getInputShape, type GetArgs } from './tools/get.js';
 import { handleRecord, recordInputShape, type RecordArgs } from './tools/record.js';
@@ -25,7 +26,7 @@ function expectedControlFlow(error: unknown) {
 function observeToolFailure<T>(handler: (args: T) => unknown | Promise<unknown>, productVersion = '0.0.0', impact: RuntimeErrorImpact = 'operation_failed') {
   return async (args: T) => {
     try { return jsonResult(await handler(args)); }
-    catch (error) { if (!expectedControlFlow(error)) observeRuntimeError('CAVEAT.MCP_TOOL_FAILED', { version: productVersion, impact }); throw error; }
+    catch (error) { if (error instanceof EntryInputConstraintError && error.beforeMutation) return { ...jsonResult(error.toJSON()), isError: true }; if (!expectedControlFlow(error)) observeRuntimeError('CAVEAT.MCP_TOOL_FAILED', { version: productVersion, impact }); throw error; }
   };
 }
 
@@ -46,8 +47,8 @@ export function registerAllTools(server: McpServer, ctx: McpContext, productVers
     {
       title: 'caveat_get',
       description:
-        'Fetch the full body (frontmatter + H2 sections + text) of a caveat by id. IMPORTANT: when the id came from caveat_search, you MUST pass the `source` field from that same result (e.g., "community/Caveat"). The default source is "own" only; omitting source for a community entry returns not-found.',
-      inputSchema: getInputShape,
+        'Fetch the full body (frontmatter + H2 sections + text) of a caveat by id. For an oversized/deep entry, returns raw_entry and diagnostics with explicit UTF-8 byte offsets; follow next_offset_bytes with offsetBytes (limitBytes 4..65536). A relative path from caveat entry-diagnostics can read an unindexed entry. IMPORTANT: when the id came from caveat_search, you MUST pass the `source` field from that same result (e.g., "community/Caveat"). The default source is "own" only; omitting source for a community entry returns not-found.',
+      inputSchema: z.object(getInputShape).refine(args => args.id !== undefined || args.path !== undefined, { message: 'Provide id or path' }),
     },
     observeToolFailure((args) => handleGet(ctx, args as GetArgs), productVersion),
   );
@@ -57,8 +58,8 @@ export function registerAllTools(server: McpServer, ctx: McpContext, productVers
     {
       title: 'caveat_record',
       description:
-        'Create a new caveat: a reusable record of a time-wasting trap (wrong driver, version mismatch, platform bug, IDE quirk, native-module issue, or repo-specific context) so future sessions can find it via caveat_search. REQUIRED BEFORE CALLING: run caveat_search first to avoid duplicates. Set visibility using this binary criterion: `public` if a third party could reproduce it; `private` if it is repo/workflow-specific or depends on intentional local design; when unclear, prefer `private`; follow an explicit user visibility choice. Qualifies: specific symptom + diagnosed cause (or `outcome: impossible` verdict) + environment fingerprint. Does NOT qualify: ordinary project-internal logic bugs, user preferences, session summaries, or ephemeral task notes; reusable repo-specific traps may be `private`. Auto-fills source_session and environment defaults; source_project is left null by design (shared knowledge must not leak per-user project names).',
-      inputSchema: recordInputShape,
+        'Arguments JSON UTF-8 is limited to 1MiB; the final Markdown to 1MiB, frontmatter to 64KiB, expanded graph to 10000 nodes/edges and depth128. Refusals are typed and do not mutate data. Create a new caveat: a reusable record of a time-wasting trap (wrong driver, version mismatch, platform bug, IDE quirk, native-module issue, or repo-specific context) so future sessions can find it via caveat_search. REQUIRED BEFORE CALLING: run caveat_search first to avoid duplicates. Set visibility using this binary criterion: `public` if a third party could reproduce it; `private` if it is repo/workflow-specific or depends on intentional local design; when unclear, prefer `private`; follow an explicit user visibility choice. Qualifies: specific symptom + diagnosed cause (or `outcome: impossible` verdict) + environment fingerprint. Does NOT qualify: ordinary project-internal logic bugs, user preferences, session summaries, or ephemeral task notes; reusable repo-specific traps may be `private`. Auto-fills source_session and environment defaults; source_project is left null by design (shared knowledge must not leak per-user project names).',
+      inputSchema: z.looseObject(recordInputShape),
     },
     observeToolFailure((args) => handleRecord(ctx, args as RecordArgs), productVersion, 'mutation_outcome_unverified'),
   );
@@ -68,8 +69,8 @@ export function registerAllTools(server: McpServer, ctx: McpContext, productVers
     {
       title: 'caveat_update',
       description:
-        'Patch an existing caveat — use when newer evidence extends or corrects one that already exists. Frontmatter shallow-merges, but array fields (tags etc.) REPLACE rather than append — to add one tag, read the current list first, then patch with the full new array. Sections match by case-insensitive H2 heading. When changing `Symptom`, preserve raw errors verbatim and add stable Japanese/English symptom keywords when known; do not force or guess translations. Immutable keys: id, created_at, source_session, source_project. Common uses: bump `last_verified` after re-confirming, add a resolution when it was `tentative`, flip `outcome` to `impossible`.',
-      inputSchema: updateInputShape,
+        'Arguments JSON UTF-8 is limited to 1MiB; final Markdown to 1MiB and frontmatter to 64KiB. Oversized final results are refused before mutation. Patch an existing caveat — use when newer evidence extends or corrects one that already exists. Frontmatter shallow-merges, but array fields (tags etc.) REPLACE rather than append — to add one tag, read the current list first, then patch with the full new array. Sections match by case-insensitive H2 heading. When changing `Symptom`, preserve raw errors verbatim and add stable Japanese/English symptom keywords when known; do not force or guess translations. Immutable keys: id, created_at, source_session, source_project. Common uses: bump `last_verified` after re-confirming, add a resolution when it was `tentative`, flip `outcome` to `impossible`.',
+      inputSchema: z.looseObject(updateInputShape),
     },
     observeToolFailure((args) => handleUpdate(ctx, args as UpdateArgs), productVersion, 'mutation_outcome_unverified'),
   );

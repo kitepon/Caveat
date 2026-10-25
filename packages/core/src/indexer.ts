@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { ENTRY_LIMITS, EntryInputConstraintError } from './entryConstraints.js';
+import { fileSha256, constraintDiagnostic, type EntryReadDiagnostic } from './entryRead.js';
 import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
@@ -9,12 +12,14 @@ export interface ScanSourceOptions {
   source: Source;
   entriesRoot: string;
   now?: () => string;
+  force?: boolean;
 }
 
 export interface ScanResult {
   added: number;
   updated: number;
   deleted: number;
+  diagnostics?: EntryReadDiagnostic[];
 }
 
 export interface EntryDocument {
@@ -33,6 +38,7 @@ export function scanSource(opts: ScanSourceOptions): ScanResult {
   db.exec('CREATE TEMP TABLE touched(rowid INTEGER PRIMARY KEY)');
   const insertTouched = db.prepare('INSERT INTO touched (rowid) VALUES (?)');
 
+  const diagnostics: EntryReadDiagnostic[] = [];
   let added = 0;
   let updated = 0;
 
@@ -42,20 +48,33 @@ export function scanSource(opts: ScanSourceOptions): ScanResult {
         const stat = statSync(filePath);
         const mtime = stat.mtime.toISOString();
         const rel = relative(entriesRoot, filePath).replace(/\\/g, '/');
+        const skip = (error: EntryInputConstraintError, hash: string) => {
+          diagnostics.push(constraintDiagnostic(db, source, rel, hash, error, now()));
+          for (const old of db.prepare('SELECT rowid FROM entries WHERE source = ? AND path = ?').all(source, rel) as Array<{rowid:number}>) insertTouched.run(old.rowid);
+        };
+        if (stat.size > ENTRY_LIMITS.markdown) {
+          skip(new EntryInputConstraintError('entry_markdown', ENTRY_LIMITS.markdown, stat.size), fileSha256(filePath));
+          continue;
+        }
         const src = readFileSync(filePath, 'utf-8');
-        const row = buildEntryUpsertRow({
+        let row: UpsertRow;
+        try { row = buildEntryUpsertRow({
           source,
           path: rel,
           content: src,
           file_mtime: mtime,
           indexed_at: now(),
-        });
+        }); } catch (error) {
+          if (!(error instanceof EntryInputConstraintError)) throw error;
+          skip(error, createHash('sha256').update(src).digest('hex'));
+          continue;
+        }
 
         const existing = db
           .prepare('SELECT rowid, file_mtime, path FROM entries WHERE source = ? AND id = ?')
           .get(source, row.id) as { rowid: number; file_mtime: string; path: string } | undefined;
 
-        if (existing && existing.file_mtime === mtime && existing.path === rel) {
+        if (!opts.force && existing && existing.file_mtime === mtime && existing.path === rel) {
           insertTouched.run(existing.rowid);
           continue;
         }
@@ -73,7 +92,7 @@ export function scanSource(opts: ScanSourceOptions): ScanResult {
       .run(source);
     const deleted = Number(del.changes);
 
-    return { added, updated, deleted };
+    return { added, updated, deleted, ...(diagnostics.length ? { diagnostics } : {}) };
   } finally {
     db.exec('DROP TABLE IF EXISTS temp.touched');
   }

@@ -1,3 +1,5 @@
+import { EntryFrontmatterFormatError } from './frontmatterCodec.js';
+import { EntryInputConstraintError } from './entryConstraints.js';
 import { parseMarkdown } from './frontmatter.js';
 
 export interface StagedFileInput {
@@ -10,8 +12,9 @@ export function findBlockedFiles(stagedContents: StagedFileInput[]): string[] {
   for (const { path, content } of stagedContents) {
     let fm;
     try {
-      fm = parseMarkdown(content).frontmatter;
-    } catch {
+      fm = parseMarkdown(content, { allowOversizedBody: true }).frontmatter;
+    } catch (error) {
+      if (error instanceof EntryInputConstraintError || error instanceof EntryFrontmatterFormatError) blocked.push(path);
       continue;
     }
     if (fm && (fm as { visibility?: string }).visibility === 'private') {

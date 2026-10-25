@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.2. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.3. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -559,6 +559,10 @@ corepack pnpm --filter @caveat/hooks test
 ```
 
 Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Entry size and read diagnostics
+
+Record/update arguments and final Markdown are limited to 1MiB of UTF-8; frontmatter to 64KiB, an expanded 10,000-node/edge graph and depth128. Oversized writes fail before file/index mutation with a typed error. Existing oversized entries remain on disk and readable; searches continue and stale index rows are retained. Run `caveat index`, then `caveat entry-diagnostics --json` to see skipped/stale source paths and limits. Use `caveat show --path misc/example.md --limit-bytes 65536` or `caveat_get` with that relative `path` to read explicit raw windows and follow their next byte offset. Ambiguous YAML numeric/date-shaped strings are selectively quoted, while legacy numeric meanings are preserved.
 
 ## License
 

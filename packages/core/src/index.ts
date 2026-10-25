@@ -41,3 +41,7 @@ export * from './hookDiagnostics.js';
 export * from './runtimeErrorReport.js';
 export * from './jevObservations.js';
 export * from './platform.js';
+
+export * from './entryConstraints.js';
+export * from './frontmatterCodec.js';
+export * from './entryRead.js';

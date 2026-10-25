@@ -1,9 +1,9 @@
 import matter from 'gray-matter';
-import yaml from 'js-yaml';
+import { loadFrontmatter, EntryFrontmatterFormatError } from './frontmatterCodec.js';
+import { ENTRY_LIMITS, assertUtf8Limit } from './entryConstraints.js';
 import type { Frontmatter } from './types.js';
 
-const yamlEngine = (input: string): object =>
-  (yaml.load(input, { schema: yaml.JSON_SCHEMA }) ?? {}) as object;
+const yamlEngine = loadFrontmatter;
 
 export interface ParsedMarkdown {
   frontmatter: Frontmatter;
@@ -11,7 +11,13 @@ export interface ParsedMarkdown {
   sections: Record<string, string>;
 }
 
-export function parseMarkdown(source: string): ParsedMarkdown {
+export function parseMarkdown(source: string, options: { allowOversizedBody?: boolean } = {}): ParsedMarkdown {
+  if (!options.allowOversizedBody) assertUtf8Limit(source, 'entry_markdown', ENTRY_LIMITS.markdown);
+  const normalized = source.charCodeAt(0) === 0xfeff ? source.slice(1) : source;
+  if (normalized.startsWith('---') && normalized[3] !== '-') {
+    const language = matter.language(normalized).name.toLowerCase();
+    if (language && language !== 'yaml' && language !== 'yml') throw new EntryFrontmatterFormatError();
+  }
   const parsed = matter(source, { engines: { yaml: yamlEngine } });
   return {
     frontmatter: parsed.data as Frontmatter,

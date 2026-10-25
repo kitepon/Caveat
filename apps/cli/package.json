@@ -1,6 +1,6 @@
 {
   "name": "caveat-cli",
-  "version": "0.21.2",
+  "version": "0.21.3",
   "description": "Long-term memory CLI for Claude Code, Codex, and Cursor (markdown + SQLite FTS5 + MCP + hooks)",
   "keywords": [
     "caveat",
@@ -16,7 +16,7 @@
   ],
   "license": "MIT",
   "author": {
-    "name": "Quo / クオ at kitepon.dev",
+    "name": "Quo / \u30af\u30aa at kitepon.dev",
     "url": "https://kitepon.dev/"
   },
   "homepage": "https://github.com/kitepon/Caveat#readme",
@@ -37,7 +37,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
   ],
   "publishConfig": {
     "access": "public"
