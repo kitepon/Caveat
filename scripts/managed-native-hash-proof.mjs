@@ -7,15 +7,17 @@ import { createInterface } from 'node:readline';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { commandInvocation } from './process-command.mjs';
 import { isWindows } from '../packages/core/dist/platform.js';
 
 const built = resolve(process.argv[2] ?? 'apps/cli/dist');
 const search = [dirname(process.execPath), ...(process.env.PATH ?? '').split(delimiter), join(homedir(), '.local/bin'), join(homedir(), 'AppData/Roaming/npm'), '/opt/homebrew/bin', '/usr/local/bin'];
-const executable = process.argv[3] ?? search.flatMap(dir => ['codex','codex.exe','codex.cmd'].map(name=>join(dir,name))).find(path=>existsSync(path));
+// npm installs both a POSIX text shim and a .cmd shim on Windows. The
+// extensionless file exists but CreateProcess cannot execute it.
+const executableNames = isWindows() ? ['codex.exe', 'codex.cmd'] : ['codex'];
+const executable = process.argv[3] ?? search.flatMap(dir => executableNames.map(name => join(dir, name))).find(path => existsSync(path));
 assert.ok(executable, 'Codex CLI is required for native hook-hash acceptance; no model or authentication is used');
-const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths } = await import(pathToFileURL(join(built, 'managed-deployment.js')));
+const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths } = await import(new URL('../packages/core/dist/managedDeployment.js', import.meta.url));
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
@@ -45,8 +47,8 @@ try {
   child.stderr.on('data', () => {});
   lines = createInterface({ input: child.stdout });
   lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
-  child.on('error', () => { for (const p of pending.values()) p.reject(Error('native_unavailable')); });
-  child.on('exit', () => { for (const p of pending.values()) p.reject(Error('native_exited')); });
+  child.on('error', error => { for (const p of pending.values()) p.reject(Error(`native_unavailable:${error.code ?? error.message}`)); });
+  child.on('exit', (code, signal) => { for (const p of pending.values()) p.reject(Error(`native_exited:code=${code}:signal=${signal ?? 'none'}`)); });
   const request = (method, params) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id,{resolve,reject}); child.stdin.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n'); });
   timer = setTimeout(() => { for (const p of pending.values()) p.reject(Error('native_timeout')); }, 30000);
   await request('initialize', { clientInfo: { name: 'caveat-isolated-entry-hash-proof', version: '1' }, capabilities: { experimentalApi: true, explicitGatewayOauth: true } });

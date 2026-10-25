@@ -45,7 +45,7 @@ export default defineConfig({
     'privateEvidence/validation': 'src/privateEvidence/validation.ts',
     'privateEvidence/origin': 'src/privateEvidence/origin.ts',
     'privateEvidence/candidate': 'src/privateEvidence/candidate.ts',
-    'managed-deployment': '../../packages/core/src/managedDeployment.ts',
+    'managed-deployment': '../../packages/core/src/managedDeploymentRuntime.ts',
   },
   splitting: false,
   format: ['esm'],

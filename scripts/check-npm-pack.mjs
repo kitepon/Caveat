@@ -48,6 +48,13 @@ try {
     if (!entries.has(file)) throw new Error(`packed tarball missing ${file}`);
   }
 
+  // The fixed runtime must remain independent of mutable installer code and
+  // the product/SQLite graph, so application releases do not alter its bytes.
+  const fixedRuntime = entries.get('package/dist/managed-deployment.js').data.toString('utf8');
+  if (/stageManagedDeployment|activateManagedDeployment|SetAccessControl|node:sqlite|better-sqlite3/.test(fixedRuntime)) {
+    throw new Error('fixed managed runtime contains mutable installer or product dependencies');
+  }
+
   const installedVersion = installAndReadVersion(tarball, manifest.version);
 
   process.stdout.write(
