@@ -49,7 +49,8 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
       'http.lowSpeedLimit=1',
       `http.lowSpeedTime=${lowSpeedTimeSeconds}`,
     ],
-    unsafe: unsafeAllowancesForInheritedEnv(env),
+    // Opt in only for the validated product helper and its HTTPS-only protocol policy.
+    unsafe: { ...unsafeAllowancesForInheritedEnv(env), ...(opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true }) },
   };
   const git = baseDir === undefined ? simpleGit(options) : simpleGit(baseDir, options);
   return git.env(env);
