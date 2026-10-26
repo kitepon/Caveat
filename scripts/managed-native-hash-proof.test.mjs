@@ -40,5 +40,5 @@ for (const rpcFailure of [false,true]) test(rpcFailure ? 'native close failure p
   if(rpcFailure){assert.equal(saved.originalFailure.message,'native_rpc_-32099');assert.ok(result.stderr.includes('AggregateError'));}else assert.equal(saved.originalFailure,null);
   assert.equal(saved.modelCalls,0);assert.equal(saved.trustWrites,0);assert.equal(saved.realUserConfigWrites,0);assert.equal(saved.guardMs,3000);
   assert.ok(saved.pid>0);assert.equal(saved.exitCode,0);assert.equal(saved.ownedKillAttempted,false);
-  assert.ok(result.stderr.includes('"nativeProofFailure"'));assert.ok(result.stderr.includes(fixtureRoot));
+  const line=result.stderr.split(/\r?\n/).find(line=>line.startsWith('{"nativeProofFailure":'));assert.ok(line);assert.equal(JSON.parse(line).nativeProofFailure.root,fixtureRoot);
 });
