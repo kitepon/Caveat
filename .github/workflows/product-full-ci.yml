@@ -83,12 +83,16 @@ jobs:
         if: steps.changes.outputs.product_change == 'false'
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "22.x"
+          node-version: "24.22.1"
           package-manager-cache: false
       - name: documentation dependencies
         if: steps.changes.outputs.product_change == 'false' && inputs.dependency-command != ''
         shell: bash
         run: ${{ inputs.dependency-command }}
+      - name: documentation toolchain
+        if: steps.changes.outputs.product_change == 'false'
+        shell: bash
+        run: node scripts/ci-toolchain.mjs hosted
       - name: documentation check
         if: steps.changes.outputs.product_change == 'false' && inputs.documentation-command != ''
         shell: bash

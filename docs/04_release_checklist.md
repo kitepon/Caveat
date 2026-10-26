@@ -391,3 +391,11 @@ Before migration, fix the real stable definitions and obtain their normal one-ti
 For managed deployment, compare the same ordinary Codex hooks on each OS through the published 0.20.3 command, the candidate command and the managed launcher in isolated profiles with `runtimeErrors: true`. Record first-in-fixture and subsequent invocations separately; do not claim an OS cold cache. `check:npm-pack` performs this comparison with the packed candidate and an isolated published baseline installation. Keep native ACL/full payload checks in stage/activate/status and verify the fixed runtime has no child-process call or package scan. Test `deployment status` lock diagnosis and explicit dead-owner `deployment unlock`, plus Windows invocation from the registered command string and alternate path spellings.
 
 Before the next managed release is published, retain an acceptance result from each target host's actual canonical home: candidate installed into an isolated prefix with normal npm umask, then read-only `deployment preflight --json` checking the selected v1 root, actual ownership/modes/native ACLs and source. All hosts must report stage/activate allowed before publication. Also exercise actual stage/activate and metadata ownership in isolated profiles using the same host account. Include the preflight results with the exact migration definitions; test-prepared homes alone do not establish the real placement's acceptance.
+
+### CI toolchain
+
+Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json` の Node 24.22.1 と pnpm 10.0.0 を使う。pnpm は root の `packageManager` とも一致させ、実行時に実版を照合する。workflow の完全版指定と共有 contract の一致は文書・release smoke の両 gate で検査する。
+
+3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
+
+影響版の出典は contract に記録する。Realm lifetime の範囲は [Lattice PR32](https://github.com/kitepon/Lattice/pull/32) と同じ [Node upstream repair](https://github.com/nodejs/node/pull/65778) を使い、24.x の修理は [24.22.0](https://nodejs.org/en/blog/release/v24.22.0) に収載されている。選定した 24.22.1 は、さらに [2026-10-21 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) の修正版である。これは記録した既知範囲の検査であり、将来の未知の欠陥や host 全体の trust を保証するものではない。

@@ -45,7 +45,9 @@ jobs:
       dependency-command: corepack pnpm install --frozen-lockfile
       documentation-command: node scripts/check-current-docs.mjs
       full-command: >-
+        node scripts/ci-toolchain.mjs version &&
         corepack pnpm build &&
+        node scripts/ci-toolchain.mjs native &&
         corepack pnpm typecheck &&
         corepack pnpm check:release-smoke &&
         corepack pnpm test:claude-fresh-session-smoke &&

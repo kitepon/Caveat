@@ -45,7 +45,7 @@ test('the local caller always supplies the product-owned documentation check', (
   const checkIndex = classifySteps.findIndex((step) => step.name === 'documentation check');
   assert.ok(nodeIndex >= 0 && nodeIndex < dependencyIndex && dependencyIndex < checkIndex,
     'docs Node and dependencies must install before docs check');
-  assert.equal(classifySteps[nodeIndex].with?.['node-version'], '22.x');
+  assert.equal(classifySteps[nodeIndex].with?.['node-version'], JSON.parse(readFileSync(new URL('../.github/ci-toolchain.json', import.meta.url), 'utf8')).node);
   assert.equal(classifySteps[nodeIndex].with?.['package-manager-cache'], false,
     'pnpm導入前のsetup-nodeはpackage managerを呼び出さない');
   assert.equal(classifySteps[dependencyIndex].run, '${{ inputs.dependency-command }}');
