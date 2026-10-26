@@ -49,3 +49,5 @@ export * from './entryRead.js';
 export { createWindowsAclSession } from './privateWindowsAclSession.js';
 
 export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
+
+export * from './managedShell.js';

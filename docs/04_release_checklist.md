@@ -399,3 +399,11 @@ Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json`
 3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
 
 影響版の出典は contract に記録する。Realm lifetime の範囲は [Lattice PR32](https://github.com/kitepon/Lattice/pull/32) と同じ [Node upstream repair](https://github.com/nodejs/node/pull/65778) を使い、24.x の修理は [24.22.0](https://nodejs.org/en/blog/release/v24.22.0) に収載されている。選定した 24.22.1 は、さらに [2026-10-21 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) の修正版である。これは記録した既知範囲の検査であり、将来の未知の欠陥や host 全体の trust を保証するものではない。
+
+### Managed shell entry
+
+`deployment shell-plan --node … --bin-dir … --json` は固定の絶対 Node 入口と managed entry に結び付く wrapper の内容・完全 SHA を返す。POSIX は `exec`、Windows は拡張子なし・cmd・ps1 の3ファイル。Windows ps1 は Windows PowerShell 5.1 と PowerShell 7 で同じ argv を渡し、native stdio を継承する。シェル自体が入力時に展開する記法は、そのシェルの規則に従う。Node を PATH から探索したり、entry への symlink を作ったりしない。cmd は固定 Node の小さい bootstrap から同じ実体の Node 子へ entry の絶対 argv を渡し、batch の文字コードによる Unicode path の破損を避ける。この三形式の生成は ASCII の Node path に限定し、それ以外は明示拒否する（entry と通常引数は Unicode を保持する）。
+
+実配置は host 管理者の作業。既存同名 formula/package・PATH 優先順位・親の権限・実行中の旧 global consumer を先に確認し、未知の衝突を上書きしない。旧 package と全依存・npm 管理ファイル・元 bin/alias の復旧物を保存し、global 除去と leaf 配置を同時に実行しない。製品の plan/capture/status は、配置や uninstall、PATH・実行 policy・共有 ACL の変更をしない。
+
+配置後の `deployment shell-manifest --node … --bin-dir … --json` は read-only で内容・owner・mode・identity、Windows の owner SID と ACL digest を照合し、所有 manifest を返す。host の受入後にだけ、管理 root の `shell/manifest.json` として private な権限で保存する。`deployment status --json` の `shell` は payload と独立した診断で、未導入、欠落、別 wrapper、所有/ACL/identity の変更、redirect、不明を示す。Homebrew/npm が後から leaf を置き換えた場合も診断し、勝手な修理や global fallback は行わない。

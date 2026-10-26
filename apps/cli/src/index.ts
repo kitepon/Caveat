@@ -33,7 +33,7 @@ import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installSh
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
-import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock } from './commands/deployment.js';
+import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock, deploymentShellPlan, deploymentShellManifest } from './commands/deployment.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -75,6 +75,13 @@ deployment.command('status').requiredOption('--json', 'verify and report the sel
   .action(() => { const result = deploymentStatus(); process.stdout.write(`${JSON.stringify(result)}\n`); if (result.status !== 'ready') process.exitCode = 1; });
 deployment.command('unlock').requiredOption('--json', 'explicitly remove an installer lock after verifying its process is absent')
   .action(() => { process.stdout.write(`${JSON.stringify(deploymentUnlock())}\n`); });
+for (const [name, handler] of [['shell-plan', deploymentShellPlan], ['shell-manifest', deploymentShellManifest]] as const) {
+  deployment.command(name).description('Read-only managed shell plan or installed ownership manifest')
+    .requiredOption('--node <absolute-path>', 'fixed registration Node entry')
+    .requiredOption('--bin-dir <absolute-path>', 'host-approved bin directory')
+    .requiredOption('--json', 'emit JSON without writing any installation')
+    .action((opts: { node: string; binDir: string }) => { process.stdout.write(JSON.stringify(handler(opts.node, opts.binDir)) + '\n'); });
+}
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
 type AutosyncOptions = { caveatHome?: string; userHome?: string; dryRun?: boolean };
 const autosyncCommand = (parent: Command, name: string) => parent.command(name)
