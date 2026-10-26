@@ -9,6 +9,7 @@ assert.ok(home && receipt && basename(dirname(home)) === 'profile' && basename(d
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
   if (request.id === undefined) return;
+  if(process.env.CAVEAT_FAKE_RPC_ERROR==='1'&&request.method==='initialize'){process.stdout.write(JSON.stringify({id:request.id,error:{code:-32099,message:'fixture-only'}})+'\n');return;}
   let result;
   if (request.method === 'initialize') result = { capabilities: {} };
   else {

@@ -23,7 +23,7 @@ const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPath
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
-let child, lines, proof, nativeStderr = '', complete = false, closed = false;
+let child, lines, proof, originalFailure, nativeStderr = '', complete = false, closed = false;
 const pending = new Map(); let sequence = 0;
 try {
   function source(version) {
@@ -73,7 +73,7 @@ try {
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
   complete = true;
   proof = {runtime:{node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite},status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0};
-} finally {
+} catch (error) { originalFailure = error; throw error; } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();
   let ownedKillAttempted = false;
@@ -93,10 +93,11 @@ try {
   }
   if (alive() || (child && !closed)) {
     const stat = lstatSync(root, { bigint: true });
-    const failure = { status:'failed', stage:'native_close', root, runtime:proof?.runtime ?? {node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite}, pid:child?.pid ?? null, exitCode:child?.exitCode ?? null, signalCode:child?.signalCode ?? null, closed, stdoutEnded:child?.stdout.readableEnded ?? null, stderrEnded:child?.stderr.readableEnded ?? null, stdinFinished:child?.stdin.writableFinished ?? null, ownedKillAttempted, guardMs:3000, waits, hookProofCompleted:complete, hookPhases:proof?.phases ?? [], identity:{dev:String(stat.dev),ino:String(stat.ino),birthtimeNs:String(stat.birthtimeNs)}, stderrBytes:Buffer.byteLength(nativeStderr), stderrSha256:createHash('sha256').update(nativeStderr).digest('hex'), modelCalls:0,trustWrites:0,realUserConfigWrites:0 };
+    const failure = { status:'failed', stage:'native_close', root, runtime:proof?.runtime ?? {node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite}, pid:child?.pid ?? null, exitCode:child?.exitCode ?? null, signalCode:child?.signalCode ?? null, closed, stdoutEnded:child?.stdout.readableEnded ?? null, stderrEnded:child?.stderr.readableEnded ?? null, stdinFinished:child?.stdin.writableFinished ?? null, ownedKillAttempted, guardMs:3000, waits, hookProofCompleted:complete, originalFailure:originalFailure ? {name:originalFailure.name,code:originalFailure.code??null,message:originalFailure.message} : null, hookPhases:proof?.phases ?? [], identity:{dev:String(stat.dev),ino:String(stat.ino),birthtimeNs:String(stat.birthtimeNs)}, stderrBytes:Buffer.byteLength(nativeStderr), stderrSha256:createHash('sha256').update(nativeStderr).digest('hex'), modelCalls:0,trustWrites:0,realUserConfigWrites:0 };
     try { writeFileSync(join(root,'failure-receipt.json'),JSON.stringify(failure,null,2)+'\n',{mode:0o600,flag:'wx'}); }
     catch (error) { failure.receiptWriteError=String(error.code??'unknown'); }
     process.stderr.write(JSON.stringify({nativeProofFailure:failure})+'\n');
+    if (originalFailure) throw new AggregateError([originalFailure,Error('owned native proof did not close; fixture retained')],'native proof and close both failed',{cause:originalFailure});
   }
   assert.ok(!alive(), 'owned native proof server did not terminate');
   assert.ok(!child || closed, 'owned native proof stdio did not close; fixture retained');
