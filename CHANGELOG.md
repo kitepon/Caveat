@@ -11,6 +11,11 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 - Preserve existing oversized/deep entries and stale index rows, expose index diagnostics and bounded raw reads, and let valid searches continue. Full indexing rescans safely instead of deleting rows before checking their source files.
 - Keep privacy checks closed when oversized/deep frontmatter cannot be inspected.
 
+### Runtime requirements
+
+- Require `node:sqlite` with FTS5 and trigram; a Node version number alone does not guarantee those capabilities. The official Linux Node 22.5.0 binary lacks FTS5 and fails with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. Keep `engines >=22` unchanged in 0.21.3; a three-OS search for the lowest capable official binary and any engine-floor decision belong to 0.22.0.
+- Deployment snapshots verify Linux Node 24.14.1/24.22.1, Windows 24.22.1 and macOS MCP 26.12.0/hooks 26.12.1; the macOS mixture does not claim completion of the Node update. CI versions are currently unrecorded for Linux/macOS/Windows; new PR59 raw proof JSON records Node version/executable/SQLite without changing product runtime, workflow or test decisions.
+
 ### Dependencies
 
 - Adopt SDK 1.32.2 with its default transport bound and js-yaml 4.3.2 with explicit product input contracts. Keep original numeric type provenance and MIT notices in the distributed package.

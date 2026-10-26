@@ -139,8 +139,13 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-Node 22.5以降とgitが必要です。 SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。利用者が試験時だけflagを足す必要はなく、明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使います。
-エラー収集用ストレージのACL処理も同じ入口です。
+FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の`engines`は`>=22`を保持しますが、その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
+
+本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
+
+CIの実runtimeはnative hash proofの最後のJSONに`runtime.node`・`runtime.execPath`・`runtime.sqlite`として記録します。現在記録されたCI版はLinux：未記録、macOS：未記録、Windows：未記録です。対応するPR59各jobのraw logで得た値だけを記載します。
+
+SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使い、エラー収集用ストレージのACL処理も同じ入口です。
 
 ```sh
 npm install -g caveat-cli
