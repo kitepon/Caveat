@@ -30,6 +30,7 @@ describe('named GitHub credential', () => {
   it('resets generic and URL-specific shared helpers and closes askpass fallback only in the child', () => {
     const settings = githubGitConfig('kitepon-rgb');
     expect(settings.slice(0, 2)).toEqual(['credential.helper=', 'credential.https://github.com.helper=']);
+    expect(settings).toEqual(expect.arrayContaining(['protocol.allow=never', 'protocol.https.allow=always', 'http.extraHeader=', 'http.https://github.com/.extraHeader=']));
     expect(settings[2]).toContain('githubCredentialHelper.js'); expect(settings[2]).toContain("'kitepon-rgb'");
     const original = { GIT_ASKPASS: 'shared-active-helper', SSH_ASKPASS: 'shared-ssh-helper' };
     expect(githubGitEnvironment('kitepon-rgb', original)).toEqual({ GIT_ASKPASS: '', SSH_ASKPASS: '' });

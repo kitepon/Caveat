@@ -175,7 +175,7 @@ export async function preflightSync(
   }
 
   const pushUrls = await effectivePushUrls(git);
-  assertNamedGithubTargets(pushUrls, opts.githubUser);
+  if (opts.githubUser != null) assertNamedGithubTargets([...pushUrls, (await git.raw(['remote', 'get-url', 'origin'])).trim()], opts.githubUser);
   const probe = await assertPrivateRemotes(pushUrls, opts);
   return { ownDir: requested, branch, pushUrls, probe };
 }
@@ -347,6 +347,7 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
   }
 
   const inspector = createGit(ownDir, { githubUser: opts.githubUser });
+  if (opts.githubUser != null) assertNamedGithubTargets([(await inspector.raw(['ls-remote', '--get-url', opts.url])).trim()], opts.githubUser);
   const refs = (await remoteOperation('inspect', () => inspector.raw(['ls-remote', '--heads', opts.url]), opts.githubUser)).trim();
   const entryCount = countMarkdownEntries(ownDir);
   if (refs && entryCount > 0) {
@@ -360,7 +361,9 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
     await git.addRemote('origin', opts.url);
     // Probe the EFFECTIVE push URL (insteadOf/pushInsteadOf applied), not the
     // raw opts.url — the rewrite can point push at a different, public host.
-    await assertPrivateRemotes(await effectivePushUrls(git), opts);
+    const pushUrls = await effectivePushUrls(git);
+    assertNamedGithubTargets(pushUrls, opts.githubUser);
+    await assertPrivateRemotes(pushUrls, opts);
 
     if (!refs) {
       scaffold(ownDir);

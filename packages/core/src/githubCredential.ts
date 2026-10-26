@@ -8,7 +8,7 @@ export function validateGithubUser(user: unknown): string {
 }
 export function githubCredentialFailureCode(error: unknown, user?: string | null): SyncErrorCode | undefined {
   const message = error instanceof Error ? error.message : String(error);
-  return accountCodes.find(code => message.includes(code)) ?? (user != null && /Authentication failed|Bad credentials|HTTP 401|returned error: 401/i.test(message) ? 'CAVEAT_GITHUB_CREDENTIAL_UNAVAILABLE' : undefined);
+  return accountCodes.find(code => message.includes(code)) ?? (user != null && /transport .* not allowed/i.test(message) ? 'CAVEAT_GITHUB_TARGET_UNSUPPORTED' : undefined) ?? (user != null && /Authentication failed|Bad credentials|HTTP 401|returned error: 401/i.test(message) ? 'CAVEAT_GITHUB_CREDENTIAL_UNAVAILABLE' : undefined);
 }
 /** Git runs credential shell snippets through sh on all three supported OSes. */
 export function githubGitConfig(user?: string | null): string[] {
@@ -18,7 +18,8 @@ export function githubGitConfig(user?: string | null): string[] {
   const helper = fileURLToPath(new URL('./githubCredentialHelper.js', import.meta.url));
   return ['credential.helper=', 'credential.https://github.com.helper=',
     `credential.https://github.com.helper=!${quote(process.execPath)} ${quote(helper)} ${quote(selected)}`,
-    `credential.https://github.com.username=${selected}`];
+    `credential.https://github.com.username=${selected}`,
+    'protocol.allow=never', 'protocol.https.allow=always', 'http.extraHeader=', 'http.https://github.com/.extraHeader='];
 }
 export function githubGitEnvironment(user?: string | null, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   if (user == null) return inherited;
