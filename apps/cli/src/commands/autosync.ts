@@ -6,7 +6,7 @@ import type { CliContext } from '../context.js';
 export async function runAutosync(ctx: CliContext): Promise<void> {
   let result;
   try {
-    result = await runPeriodicSync({ caveatHome: ctx.caveatHome, ownDir: ctx.paths.knowledgeRepo, paths: ctx.paths, logger: ctx.logger });
+    result = await runPeriodicSync({ githubUser: ctx.config.githubUser, caveatHome: ctx.caveatHome, ownDir: ctx.paths.knowledgeRepo, paths: ctx.paths, logger: ctx.logger });
   } catch {
     // A state/lock storage failure still has a machine-readable, unsuccessful
     // result. Do not claim it was persisted or print paths from an exception.

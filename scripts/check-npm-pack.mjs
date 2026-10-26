@@ -40,6 +40,7 @@ try {
   }
 
   const requiredFiles = [
+    'package/dist/githubCredentialHelper.js',
     'package/README.md',
     'package/LICENSE',
     'package/dist/index.js',

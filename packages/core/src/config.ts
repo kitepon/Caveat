@@ -2,6 +2,8 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 export interface CaveatConfig {
   knowledgeRepo: string;
+  /** Select an existing GitHub account for private sync; no credential is stored here. */
+  githubUser?: string | null;
   semverKeys: string[];
   publishTarget: string | null;
   sealedKeyId: string;
@@ -14,6 +16,7 @@ export interface CaveatConfig {
 
 export const DEFAULT_CONFIG: CaveatConfig = {
   knowledgeRepo: 'own',
+  githubUser: null,
   semverKeys: ['driver', 'cuda', 'node'],
   publishTarget: null,
   sealedKeyId: 'v1',

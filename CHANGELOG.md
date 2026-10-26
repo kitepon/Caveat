@@ -2,6 +2,11 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.4] — 2026-10-26 (candidate)
+
+- Add optional non-secret `githubUser` for private sync. Git and diagnostics select that existing GitHub account with child-scoped helpers; shared active accounts, credential files, and global Git configuration are unchanged.
+- Ignore inherited GitHub environment tokens for the selected helper and refuse missing accounts, incompatible gh, mismatched targets and expired credentials with typed errors. `gh auth token --user --no-refresh` never refreshes shared credentials. No `githubUser` keeps the existing behavior.
+
 ## [0.21.3] — 2026-10-25
 
 ### Fixed

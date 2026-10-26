@@ -44,9 +44,11 @@ export async function runSync(
     const confirm = dependencies.confirm ?? askOnce;
     const initValue = opts.init;
     if (initValue !== undefined && initValue !== false) {
+      if (ctx.config.githubUser != null && !opts.repo && typeof initValue !== 'string') throw new SyncError('CAVEAT_GITHUB_TARGET_UNSUPPORTED', 'githubUser requires an explicit private sync URL; automatic repository creation uses a separate account policy');
       const url = opts.repo ?? (typeof initValue === 'string' ? initValue : await defaultPrivateRepoUrl(opts, { ghRunner, isTty, confirm }));
       const result = await initOwnSync({
         ownDir: ctx.paths.knowledgeRepo,
+            githubUser: ctx.config.githubUser,
         url,
         caveatHome: ctx.caveatHome,
         paths: ctx.paths,
@@ -62,6 +64,7 @@ export async function runSync(
     }
     const result = await syncOwn({
       ownDir: ctx.paths.knowledgeRepo,
+            githubUser: ctx.config.githubUser,
       caveatHome: ctx.caveatHome,
       paths: ctx.paths,
       logger: ctx.logger,

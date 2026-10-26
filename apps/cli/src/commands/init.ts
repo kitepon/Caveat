@@ -13,6 +13,7 @@ import {
   prewarmSealedKeys,
   reindexAllSources,
   syncOwn,
+  SyncError,
   writeUserConfigPatch,
   writeDigestMarker,
 } from '@caveat/core';
@@ -152,6 +153,7 @@ export async function runInit(
           const remote = gitOutput(['-C', ctx.paths.knowledgeRepo, 'remote', 'get-url', 'origin']);
           const result = await syncOwn({
             ownDir: ctx.paths.knowledgeRepo,
+            githubUser: ctx.config.githubUser,
             caveatHome: ctx.caveatHome,
             paths: ctx.paths,
             logger: ctx.logger,
@@ -160,6 +162,7 @@ export async function runInit(
           const rebased = result.pulled ? ', rebased onto remote' : '';
           ctx.logger.info(`synced existing private remote: ${result.branch} (${result.changedFiles} local change(s)${rebased})`);
         } else {
+          if (ctx.config.githubUser != null && typeof opts.sync !== 'string') throw new SyncError('CAVEAT_GITHUB_TARGET_UNSUPPORTED', 'githubUser requires an explicit private sync URL; automatic repository creation uses a separate account policy');
           const url = typeof opts.sync === 'string'
             ? opts.sync
             : defaultGitHubRepoUrl({
@@ -173,6 +176,7 @@ export async function runInit(
               });
           const result = await initOwnSync({
             ownDir: ctx.paths.knowledgeRepo,
+            githubUser: ctx.config.githubUser,
             url,
             caveatHome: ctx.caveatHome,
             paths: ctx.paths,

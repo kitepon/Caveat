@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,19 @@ function readyGrok(fixture: ReturnType<typeof isolated>) {
 }
 
 describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
+  it.each([
+    ['bad\nuser', 'CAVEAT_GITHUB_USER_INVALID'],
+    ['fixture-target', 'CAVEAT_GITHUB_TARGET_UNSUPPORTED'],
+  ])('preserves configured account refusals in diagnostics without contacting GitHub', (githubUser, reason) => {
+    const fixture = isolated();
+    try {
+      readyFactory(fixture);
+      writeFileSync(join(fixture.home, '.caveatrc.json'), JSON.stringify({ githubUser }));
+      const output = json(run(['factory-diagnostics', '--json'], fixture.env));
+      expect(output.sync).toEqual({ status: 'unverified', reason_code: reason });
+    } finally { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  });
+
   it('Grok MCPを任意の必須connectorとして判定し、無効化と偽の実行先を拒否する', () => {
     const fixture = isolated(); readyFactory(fixture);
     const missing = run(['factory-diagnostics', '--json', '--require-connector', 'grok'], fixture.env);

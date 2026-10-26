@@ -151,6 +151,14 @@ export function classifyOwnSyncOutcome(
     case 'REMOTE_PUBLIC':
     case 'SYNC_CONFLICT':
     case 'REBASE_IN_PROGRESS':
+    case 'CAVEAT_GITHUB_USER_INVALID':
+    case 'CAVEAT_GITHUB_USER_UNAVAILABLE':
+    case 'CAVEAT_GITHUB_USERNAME_MISMATCH':
+    case 'CAVEAT_GITHUB_TARGET_UNSUPPORTED':
+    case 'CAVEAT_GITHUB_CREDENTIAL_UNAVAILABLE':
+    case 'CAVEAT_GITHUB_CLI_UNAVAILABLE':
+    case 'CAVEAT_GITHUB_CLI_UNSUPPORTED':
+    case 'CAVEAT_GITHUB_CREDENTIAL_EXPIRED':
       return 'fail';
     case 'REMOTE_VISIBILITY_INDETERMINATE':
       return lastProbe?.kind === 'indeterminate' && lastProbe.reason === PROBE_REQUEST_FAILED_REASON
@@ -221,6 +229,7 @@ export function autoSyncNotification(outcome: AutoSyncOutcome): { signature: str
 }
 
 export interface RunAutoSyncOptions {
+  githubUser?: string | null;
   caveatHome: string;
   ownDir: string;
   paths: Pick<ResolvedPaths, 'dbPath' | 'entriesDir' | 'communityDir'>;
@@ -290,6 +299,7 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
       try {
         const result = await syncOwn({
           ownDir: opts.ownDir,
+          githubUser: opts.githubUser,
           caveatHome: opts.caveatHome,
           paths: opts.paths,
           logger: opts.logger,

@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.3. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.4 candidate. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -575,3 +575,5 @@ Factory private evidence v1 is an isolated, default-OFF contract candidate. This
 ### Optional managed deployment
 
 For side-by-side releases with a stable MCP/hook entry, use `caveat deployment stage --json`, then `caveat deployment activate <release-id> --json`. Run the returned fixed launcher with the existing Node for `init`. Later updates and rollbacks select an already verified release through the same command; registration strings stay unchanged. `caveat deployment status --json` verifies the selected payload. The initial migration needs one normal Codex hook review. Deployment does not grant trust or change Node/PATH; see [the managed deployment contract](docs/01_plan.md#managed-deployment-and-stable-hook-identity).
+
+For private GitHub sync, set the optional non-secret `"githubUser": "your-account"` in `~/.caveatrc.json` to select an already authenticated account. Caveat passes an account-specific helper only to its Git/diagnostic children and calls `gh auth token --user ... --no-refresh`. It does not switch shared accounts or refresh credentials. Missing accounts, incompatible gh and expired credentials fail explicitly; re-authentication belongs to the owner. Without this field the previous behavior is retained. A configured account requires an explicit private HTTPS GitHub URL when initializing a new sync repository.

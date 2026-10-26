@@ -380,6 +380,7 @@ async function runAutoSyncWorker(): Promise<void> {
     await runAutoSync({
       caveatHome: ctx.caveatHome,
       ownDir: ctx.paths.knowledgeRepo,
+            githubUser: ctx.config.githubUser,
       paths: ctx.paths,
       logger: silentLogger,
     });

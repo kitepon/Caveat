@@ -20,6 +20,7 @@ SQLite search requires a working FTS5 virtual table with the trigram tokenizer, 
   `runtimeErrors: true`でlocal runtime error収集を明示的に有効化できる（既定false）。
   `runtimeErrorReportCredentialFile`へcredentialの絶対パスを書いた時だけ、未受領の記録を
   そのcredentialが指すcollectorへ署名付きで送る（既定null。パッケージに宛先は無い）。
+- 任意の非secret設定`githubUser`はprivate同期のGitHub accountを名指しする。Gitとfactory診断の子だけにhelperを渡し、共有active/global Gitを変えない。ghは安定入口から`auth token --user --no-refresh`を呼び、環境token4種/他helper/askpassへfallbackしない。user不在・非対応CLI・期限切れはCAVEAT_GITHUB_*型付き拒否。設定無しは従来どおり。
 - `CAVEAT_HOME`でCaveatのdata rootを明示変更できる。
 - entryの主キーはsourceとidの組。sourceは`own`または`community/<handle>`。
 - schemaとmigrationは`packages/core/src/schema.sql`と`packages/core/src/migrations/`が所有する。

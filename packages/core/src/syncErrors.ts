@@ -1,0 +1,29 @@
+export type SyncErrorCode =
+  | 'NOT_A_REPO'
+  | 'EXTERNAL_TOPLEVEL'
+  | 'DETACHED_HEAD'
+  | 'NO_REMOTE'
+  | 'REMOTE_PUBLIC'
+  | 'REMOTE_VISIBILITY_INDETERMINATE'
+  | 'SYNC_CONFLICT'
+  | 'REBASE_IN_PROGRESS'
+  | 'OWN_REPO_EXISTS'
+  | 'BOTH_HAVE_ENTRIES'
+  | 'WORKTREE_DIRTY'
+  | 'SYNC_BUSY'
+  | 'CAVEAT_GITHUB_USER_INVALID'
+  | 'CAVEAT_GITHUB_USER_UNAVAILABLE'
+  | 'CAVEAT_GITHUB_USERNAME_MISMATCH'
+  | 'CAVEAT_GITHUB_TARGET_UNSUPPORTED'
+  | 'CAVEAT_GITHUB_CREDENTIAL_UNAVAILABLE'
+  | 'CAVEAT_GITHUB_CLI_UNAVAILABLE'
+  | 'CAVEAT_GITHUB_CLI_UNSUPPORTED'
+  | 'CAVEAT_GITHUB_CREDENTIAL_EXPIRED';
+
+export class SyncError extends Error {
+  constructor(public readonly code: SyncErrorCode, message: string) {
+    super(message);
+    this.name = 'SyncError';
+  }
+}
+
