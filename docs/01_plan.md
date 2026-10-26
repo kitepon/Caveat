@@ -517,3 +517,9 @@ managed rootが確実に不在の場合だけ、通常npm導入の既存案内�
 caveat_syncはstrict空入力で、自分のMCP contextのown repoとconfig.githubUserだけを既syncOwnへ渡す。community pull、remote作成、任意URL/user/command、認証変更は行わない。私有知識を既remoteへpushするためopenWorldHint:trueとし、readOnlyHintを付けずclientの承認方針を保つ。
 
 Git/reindex lockは既存と共用し重複はSYNC_BUSY。clientのtimeout/cancelは進行中syncを中断しない。完了/失敗の固定summaryはcaveatHome/sync/mcp-sync.jsonへ残し、deployment statusのownSyncで読める。runningは成功を意味せず、server強制終了などの未完了も成功へ補完しない。結果とエラーに資格・remote URL・Git標準出力を返さない。
+
+## Git子の安全境界（0.21.8）
+
+simple-git4.0.2/argv-parser2.0.1へ固定し、検出したunsafe categoryの自動許可をしない。EDITOR/VISUAL/GIT_EDITOR/GIT_SEQUENCE_EDITOR/PAGER/GIT_PAGERと不要なtraceは非対話子から外し、親envは変えない。未検証GIT_CONFIG_*、SSH命令、askpass、その他のunsafe category/未知Git環境は値を出さないSyncError CAVEAT_GIT_ENV_UNSAFEで拒否する。署名したnamed helperとHTTPS protocolだけを製品が作る一つのGit instanceでopt-inする。
+
+4系のallowEnvironmentは、製品が検証・構成した子envを渡す仕組みでありunsafe flagを許す機能ではない。author/committer metadataと既TLS入力、製品固定の非対話/HTTP低速上限だけを既定入力として扱う。named時のGIT_ALLOW_PROTOCOL=httpsは製品生成値のみ。利用者のcore.askPassがある場合は値を読まず名前でCAVEAT_GITHUB_CONFIG_UNSUPPORTEDとし、空resetのためにallowUnsafeAskPassを追加しない。inline include/includeIf/trailer/略記とその他upstream guardは無効にしない。

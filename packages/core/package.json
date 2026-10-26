@@ -22,12 +22,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@simple-git/argv-parser": "^1.1.0",
+    "@simple-git/argv-parser": "2.0.1",
     "fast-xml-parser": "5.11.2",
     "gray-matter": "^4.0.3",
     "js-yaml": "4.3.2",
     "semver": "^7.8.1",
-    "simple-git": "^3.36.0",
+    "simple-git": "4.0.2",
     "zod": "4.6.7"
   },
   "devDependencies": {

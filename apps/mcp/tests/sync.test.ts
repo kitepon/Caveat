@@ -14,7 +14,7 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 it('keeps a slow push alive after MCP client timeout, rejects overlap and persists the late result',async()=>{
  const root=mkdtempSync(join(tmpdir(),'caveat-mcp-sync-')),home=join(root,'home'),own=join(home,'.caveat','own'),caveatHome=join(home,'.caveat'),remote=join(root,'remote.git');
  mkdirSync(own,{recursive:true});
- const env={...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,GIT_CONFIG_GLOBAL:join(home,'no-global'),GIT_CONFIG_NOSYSTEM:'1',GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'};
+ const env={...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'};
  for(const[k,v]of Object.entries(env))vi.stubEnv(k,v);
  const git=(cwd:string,args:string[])=>{const r=spawnSync('git',['-C',cwd,...args],{env,encoding:'utf8',windowsHide:true,timeout:10000});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
  git(root,['init','--bare',remote]);git(own,['init','-b','main']);writeFileSync(join(own,'README.md'),'initial\n');git(own,['add','.']);git(own,['commit','-m','initial']);git(own,['remote','add','origin',remote]);git(own,['push','-u','origin','main']);

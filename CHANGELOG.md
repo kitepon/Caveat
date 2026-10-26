@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.8] — 2026-10-26 (candidate)
+
+- Fix CVE-2026-102826/102827/102828/102829 by pinning simple-git 4.0.2 and @simple-git/argv-parser 2.0.1, including conditional includes, abbreviated options, trailer commands and VISUAL editor detection.
+- Remove inferred unsafe allowances. Strip interactive editors/pagers from non-interactive Git children; refuse unreviewed command/config environment overrides with CAVEAT_GIT_ENV_UNSAFE. Only Caveat's validated named-account helper and HTTPS protocol receive scoped opt-ins.
+- Retain existing own-sync and MCP functionality from unpublished 0.21.7. Configured askpass is refused for named credentials rather than enabling an additional unsafe category.
+
 ## [0.21.7] — 2026-10-26 (candidate)
 
 - Managed installations guide AI clients to Caveat MCP tools, never to an unverified PATH global. Existing read/update/record tools replace show and manual edit/index instructions; unmanaged guidance is unchanged.

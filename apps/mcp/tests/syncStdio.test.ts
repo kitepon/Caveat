@@ -4,7 +4,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 import {mkdtempSync,mkdirSync,rmSync,existsSync,readFileSync} from 'node:fs';import{join,resolve}from'node:path';import{tmpdir}from'node:os';import{spawnSync}from'node:child_process';
 it('exposes the compiled own-sync tool over stdio and reads its refused result through deployment status',async()=>{
  const root=mkdtempSync(join(tmpdir(),'caveat-sync-stdio-')),home=join(root,'home'),caveatHome=join(home,'.caveat'),own=join(caveatHome,'own');mkdirSync(own,{recursive:true});
- const env={...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,GIT_CONFIG_GLOBAL:join(root,'no-global'),GIT_CONFIG_NOSYSTEM:'1',CAVEAT_AUTO_SYNC:'off',XDG_STATE_HOME:join(root,'state'),LOCALAPPDATA:join(root,'state')}as Record<string,string>;
+ const env={...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,CAVEAT_AUTO_SYNC:'off',XDG_STATE_HOME:join(root,'state'),LOCALAPPDATA:join(root,'state')}as Record<string,string>;
  const git=spawnSync('git',['-C',own,'init','-b','main'],{encoding:'utf8',env,windowsHide:true,timeout:10000});expect(git.status,git.stderr).toBe(0);
  const cli=resolve('../cli/dist/caveat.js');const transport=new StdioClientTransport({command:process.execPath,args:[cli,'mcp-server'],env,stderr:'pipe'});const client=new Client({name:'sync-stdio-fixture',version:'1'});
  let stderr='';transport.stderr?.on('data',chunk=>stderr+=chunk.toString());
