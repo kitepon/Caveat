@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock } from '@caveat/core';
+import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, managedShellStatus, managedShellPlan, captureManagedShellManifest } from '@caveat/core';
 
 function installerPackageRoot() {
   let path = dirname(fileURLToPath(import.meta.url));
@@ -24,11 +24,15 @@ export function deploymentStage(packageRoot?: string) {
 export function deploymentActivate(release: string, recoverInvalidPointer = false) { return activateManagedDeployment(release, { recoverInvalidPointer }); }
 export function deploymentStatus() {
   const lock = managedInstallerLockStatus();
+  const shell = managedShellStatus();
   try {
     const active = verifyManagedDeployment();
-    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock };
+    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell };
   } catch (error) {
-    return { status: 'unavailable' as const, payloadVerified: false, lock, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
+    return { status: 'unavailable' as const, payloadVerified: false, lock, shell, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
   }
 }
 export function deploymentUnlock() { return recoverManagedInstallerLock(); }
+
+export function deploymentShellPlan(node: string, binDir: string) { return managedShellPlan(node, binDir); }
+export function deploymentShellManifest(node: string, binDir: string) { return captureManagedShellManifest(deploymentShellPlan(node, binDir)); }
