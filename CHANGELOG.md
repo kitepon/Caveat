@@ -2,6 +2,10 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.6] — 2026-10-26 (candidate)
+
+- Candidate version for the adopted managed shell entry and ownership diagnostics.
+
 ## [0.21.5] — 2026-10-26 (candidate)
 
 - Explicitly permit Caveat's validated, command-scoped named-account helper in simple-git. In 0.21.4, simple-git's credential-helper guard stopped sync before the selected helper could run. Unconfigured accounts retain their existing policy.
