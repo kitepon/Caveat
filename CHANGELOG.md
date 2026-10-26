@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.7] — 2026-10-26 (candidate)
+
+- Managed installations guide AI clients to Caveat MCP tools, never to an unverified PATH global. Existing read/update/record tools replace show and manual edit/index instructions; unmanaged guidance is unchanged.
+- Add `caveat_sync` for the context's existing private remote and configured GitHub account. Keep Git/reindex locks and finish an in-flight transaction after client timeout; expose its bounded, non-secret result in deployment status.
+- Include the managed shell entry and ownership diagnostics from the unpublished 0.21.6 candidate. The v0.21.6 source tag remains reserved and unpublished.
+
 ## [0.21.6] — 2026-10-26 (candidate)
 
 - Candidate version for the adopted managed shell entry and ownership diagnostics.

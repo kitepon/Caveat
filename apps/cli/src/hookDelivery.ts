@@ -1,3 +1,4 @@
+import { usesManagedGuidance } from '@caveat/core';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -50,6 +51,7 @@ export function prepareSessionDelivery(
   caveatHome: string, sessionId: string, contexts: string[],
   additionallyDeliveredIds: string[] = [],
 ): PreparedDelivery {
+  const managed = usesManagedGuidance();
   const state = readState(caveatHome, sessionId);
   const seenIds = new Set([...state.ids, ...additionallyDeliveredIds]);
   const seenSignals = new Set(state.signals);
@@ -59,7 +61,9 @@ export function prepareSessionDelivery(
   const signalLabels: string[] = [];
   const others: string[] = [];
   for (const context of contexts) {
-    const text = context.trim();
+    const text = managed && context.startsWith('autosync:')
+      ? context.trim().replaceAll('run `caveat sync`', 'call the Caveat MCP tool caveat_sync with {}; if unavailable, stop without a PATH command')
+      : context.trim();
     if (!text) continue;
     const lines = text.split('\n');
     const isStop = text.startsWith(STOP_REMINDER_PREFIX);
@@ -90,6 +94,7 @@ export function prepareSessionDelivery(
   const texts = [...others];
   if (signalLabels.length > 0) texts.push(`[caveat] 新しい苦戦シグナル: ${signalLabels.join('、')}。必要ならCaveatで知見を確認してください。`);
   if (hitLines.length > 0) texts.push(`[caveat] 新しく該当した罠:\n${hitLines.map((line) => `- ${line}`).join('\n')}\n詳細はCaveatで取得し、適用条件を確認してください。`);
+  if (managed && (signalLabels.length > 0 || hitLines.length > 0)) texts.push('Use the registered Caveat MCP tools: caveat_get with id + source for details, caveat_update for corrections/last_verified, caveat_record for a new trap after searching for duplicates. Those write tools update the index. Community entries are read-only; use the tool visibility policy. If unavailable, stop; do not use a PATH command or another context.');
   return {
     texts,
     delivered: () => {

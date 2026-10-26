@@ -52,13 +52,15 @@ commands. Codex receives an adapter output derived from the same entry.
 
 Reminderの検索結果と発火判定はhost間で共有するが、次の操作を示す文面は共有しない。
 
+以下は非managed npm導入の案内。managed導入では各hostの登録済みMCP get/update/record/syncを使い、host固有prefixを複製せず、未接続時は停止する。
+
 - Claudeは`mcp__caveat__caveat_get`で詳細を取得し、
   `mcp__caveat__caveat_update` / `mcp__caveat__caveat_record`で更新・記録する。
 - Codex / Cursorは`caveat show <id> --source <source>`で詳細とpathを取得する。既存own entryは
   そのpathのMarkdownを更新し、新規entryはCaveatのown knowledge repoへMarkdownで作成して、
   `caveat index`を実行する。community entryは購読物なのでlocalで直接編集しない。
 
-`caveat init`はCodex / Grok / CursorにもMCPを登録する。native hookの既存のCLI・Markdown案内は
+`caveat init`はCodex / Grok / CursorにもMCPを登録する。非managed導入ではnative hookの既存CLI・Markdown案内を
 維持する。MCPの呼出し名はhostごとに異なるため、Claude固有のprefixを他hostへ複製しない。
 登録形式の差は`apps/cli/src/mcpInstall.ts`が所有する。Codex / GrokはTOML、Claude / CursorはJSONへ
 NodeとCaveatの実行パスを登録し、既存の環境変数・timeout・無効化指定・他の登録を保持する。

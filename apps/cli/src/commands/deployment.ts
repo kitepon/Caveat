@@ -1,3 +1,5 @@
+import { findCaveatHome, readMcpSyncState } from '@caveat/core';
+import { homedir } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,11 +27,12 @@ export function deploymentActivate(release: string, recoverInvalidPointer = fals
 export function deploymentStatus() {
   const lock = managedInstallerLockStatus();
   const shell = managedShellStatus();
+  const ownSync = readMcpSyncState(findCaveatHome(homedir()));
   try {
     const active = verifyManagedDeployment();
-    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell };
+    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell, ownSync };
   } catch (error) {
-    return { status: 'unavailable' as const, payloadVerified: false, lock, shell, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
+    return { status: 'unavailable' as const, payloadVerified: false, lock, shell, ownSync, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
   }
 }
 export function deploymentUnlock() { return recoverManagedInstallerLock(); }

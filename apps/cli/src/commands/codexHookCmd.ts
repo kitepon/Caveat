@@ -1,3 +1,4 @@
+import { usesManagedGuidance } from '@caveat/core';
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -296,7 +297,7 @@ async function processCodexWorkerJob(
   try {
     result = buildAndPublishPendingReminder(ctx.caveatHome, job.sessionId, buildPendingSemanticKey({
       agent: 'codex', surface: 'tool_error', refs: hits,
-    }), () => toolErrorReminderText(hits, 'native-cli'));
+    }), () => toolErrorReminderText(hits, 'native-cli', usesManagedGuidance()));
   } catch {
     process.stderr.write('[caveat:codex-hook] pending reminder build or publish failed\n');
     return;
@@ -397,7 +398,7 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
     if (ctx && !ctx.config.jevEnabled) {
       const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
       const hits = searchCaveatsSafely(CODEX_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
-      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
+      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli', usesManagedGuidance()));
     }
     if (ctx) {
       try {
@@ -456,7 +457,7 @@ export async function runCodexHook(name: CodexHookName, arg?: string): Promise<v
       failureText,
       surface: 'stop' as const,
     })));
-    if (sessionId) queueStopForSession(CODEX_HOST, sessionId, signals, related, () => stopReminderText(signals, related, 'native-cli'));
+    if (sessionId) queueStopForSession(CODEX_HOST, sessionId, signals, related, () => stopReminderText(signals, related, 'native-cli', usesManagedGuidance()));
     process.exit(0);
   }
 

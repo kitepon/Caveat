@@ -51,7 +51,7 @@ runtime と Codex 用 formatter を使います。この経路はCaveat CLIを�
 Cursorはnativeの`beforeSubmitPrompt` / `postToolUse` / `postToolUseFailure` / `stop`
 を使い、既存のCursor hookを残したまま同じ検索・pending reminder契約を適用します。
 
-reminderが案内する次の操作はhostごとに分かれます。ClaudeはCaveat MCP toolsを使います。
+非managedのnpm導入では、reminderが案内する次の操作はhostごとに分かれます。ClaudeはCaveat MCP toolsを使います。
 Codex / Cursorは`caveat show <id> --source <source>`で詳細を確認し、own knowledge repoの
 Markdownを更新または新規作成して`caveat index`を実行します。community entryは購読物なので
 localでは編集しません。
@@ -72,7 +72,10 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.6候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.7候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+
+managed導入のAI案内は、PATHのcommandではなく登録済みの `caveat_get`・`caveat_update`・`caveat_record`・`caveat_sync` を使います。`caveat_sync` は既定remoteへ私有知識をpushし、clientの確認方針を維持します。client timeoutでも進行中のsyncは中断せず、遅れて完了した結果は deployment status の ownSync に残します。runningは成功ではありません。MCP toolが無い場合はglobal CLIや別contextへ戻さず停止します。
+
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>

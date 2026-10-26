@@ -1,3 +1,4 @@
+import { usesManagedGuidance } from '@caveat/core';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -126,7 +127,7 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
       failureText: prompt,
       surface: 'user_prompt',
     });
-    if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli'));
+    if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'native-cli', usesManagedGuidance()));
     await deliver();
     process.exit(0);
   }
@@ -141,7 +142,7 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
         failureText: errText,
         surface: 'tool_error',
       });
-      if (hits.length > 0) contexts.push(toolErrorReminderText(hits, 'native-cli'));
+      if (hits.length > 0) contexts.push(toolErrorReminderText(hits, 'native-cli', usesManagedGuidance()));
     }
     await deliver();
     process.exit(0);
@@ -180,7 +181,7 @@ export async function runCursorHook(name: CursorHookName, arg?: string): Promise
       failureText,
       surface: 'stop' as const,
     })));
-    queueStopForSession(CURSOR_HOST, sessionId, signals, related, () => stopReminderText(signals, related, 'native-cli'));
+    queueStopForSession(CURSOR_HOST, sessionId, signals, related, () => stopReminderText(signals, related, 'native-cli', usesManagedGuidance()));
     process.exit(0);
   }
 

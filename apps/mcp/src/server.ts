@@ -1,3 +1,4 @@
+import { waitForMcpSyncs } from './tools/sync.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildMcpContext, type McpContextOverrides } from './context.js';
@@ -16,7 +17,12 @@ export async function startMcpStdioServer(
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  const shutdown = (): void => {
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    try { await server.close(); } catch { /* Finish the transaction even if the client already left. */ }
+    await waitForMcpSyncs();
     try {
       ctx.db.close();
     } catch {
