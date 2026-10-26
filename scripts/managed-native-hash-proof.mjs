@@ -42,7 +42,8 @@ try {
     // commandWindows is deliberately absent; the exact same fixture command is listed in each phase.
     hooks[name] = [{ hooks: [{ type: 'command', command: `${quote(process.execPath)} ${quote(paths.launcher)} codex-hook ${event}`, timeout: 5, async: false }] }];
   }
-  writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\n', { mode: 0o600 });
+  // This profile only lists local hooks; marketplace discovery is unrelated work.
+  writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\nplugins = false\nremote_plugin = false\n', { mode: 0o600 });
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
   const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
   child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });

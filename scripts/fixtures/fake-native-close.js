@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
 const home = process.env.CODEX_HOME, receipt = process.env.CAVEAT_FAKE_CLOSE_RECEIPT;
 assert.ok(home && receipt && basename(dirname(home)) === 'profile' && basename(dirname(dirname(home))).startsWith('caveat-native-entry-'));
+assert.equal(readFileSync(join(home,'config.toml'),'utf8'),'[features]\nhooks = true\nplugins = false\nremote_plugin = false\n');
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
   if (request.id === undefined) return;
