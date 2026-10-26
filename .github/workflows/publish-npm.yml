@@ -1,25 +1,33 @@
 name: Publish npm
 
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
     inputs:
       tag:
         description: 公開する既存の注釈付きタグ（例 v0.19.6）
         required: true
         type: string
+      candidate-run-id:
+        description: 受入済み Pack release candidate の run ID
+        required: true
+        type: string
+      archive-sha256:
+        description: オーナー許可の対象にした archive の完全SHA256
+        required: true
+        type: string
 
 permissions:
   contents: read
+  actions: read
   id-token: write
 
 concurrency:
-  group: npm-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: npm-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -37,7 +45,7 @@ jobs:
       - name: Verify tagged release commit
         shell: bash
         env:
-          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -52,21 +60,27 @@ jobs:
           version=$(node -p "require('./apps/cli/package.json').version")
           test "$RELEASE_TAG" = "v$version"
           node scripts/verify-release-commit.mjs
-          printf 'RELEASE_VERSION=%s\n' "$version" >> "$GITHUB_ENV"
-      - name: Install pinned npm and workspace dependencies
+      - name: Download and verify the accepted archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate-run-id }}
+          ACCEPTED_ARCHIVE_SHA256: ${{ inputs.archive-sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CANDIDATE_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+          [[ "$ACCEPTED_ARCHIVE_SHA256" =~ ^[a-f0-9]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN_ID" > "$RUNNER_TEMP/candidate-run.json"
+          export CANDIDATE_RUN_ATTEMPT="$(node -p "require('$RUNNER_TEMP/candidate-run.json').run_attempt")"
+          node scripts/release-artifact.mjs check-run "$RUNNER_TEMP/candidate-run.json"
+          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name caveat-release-pack --dir "$RUNNER_TEMP/candidate"
+          archive=$(node scripts/release-artifact.mjs verify "$RUNNER_TEMP/candidate" "$RUNNER_TEMP/candidate-run.json")
+          printf 'RELEASE_ARCHIVE=%s\n' "$archive" >> "$GITHUB_ENV"
+      - name: Install pinned publishing npm
         shell: bash
         run: |
           npm install -g npm@11.19.1
-          corepack pnpm install --frozen-lockfile
-      - name: Build and verify publish payload
+      - name: Publish the accepted archive with npm OIDC
         shell: bash
         run: |
-          corepack pnpm -r build
-          corepack pnpm check:docs
-          corepack pnpm check:npm-pack
-      - name: Publish packed CLI with npm OIDC
-        shell: bash
-        run: |
-          cd apps/cli
-          corepack pnpm pack --pack-destination "$RUNNER_TEMP"
-          npm publish "$RUNNER_TEMP/caveat-cli-$RELEASE_VERSION.tgz" --access public
+          npm publish "$RELEASE_ARCHIVE" --access public

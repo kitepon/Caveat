@@ -13,9 +13,10 @@ Grokの必須判定は`caveat factory-diagnostics --json --require-connector gro
 別のGrokモデルやCursorのComposerで代用しない。
 既存の環境変数・timeout・無効化指定・別サーバーが保持され、不正な既存設定は変更されず失敗すること。
 
-公開版の実機導入は永続PTYから実行する。作業中の端末はローカルで、別端末はSSHで接続する。
-公式`npm install -g caveat-cli@latest`、
-`caveat init --sync --yes`、同じ初期化の再実行、製品診断の順で行う。WindowsはPowerShell 7を使う。
+実機導入は端末の所有と具体許可に従い、WindowsはPowerShell 7を使う。
+managed-v1で配布するhostは、受入済みの固定entryを保持し、検証したpackageを
+`deployment stage` / `deployment activate`で選択する。通常更新でglobal npmや`init`を再適用しない。
+未管理hostの初回導入だけ、公式npm導入、`caveat init --sync --yes`、初期化の再実行と製品診断を行う。
 実機の共有AI設定は先にバックアップし、他製品のinstallerと同時に変更しない。
 既存private remoteのcheckout、更新後の登録先更新、公開ミラーと明示hook拒否の保持も確認する。
 新規private remoteを作成する試験には認証済みの`gh`を使う。認証待ち・未実施は成功と区別する。
@@ -91,35 +92,59 @@ complete, do not push a new release tag expecting publication to succeed.
 ## Publish
 
 Commit and push `main`, then wait for that commit's CI. The CLI's
-`prepublishOnly` gate requires a clean release commit that is already an
-ancestor of `origin/main`; the workflow explicitly runs the same gate before
-packing because publishing a tarball need not run `prepublishOnly`. Once CI is
-green, verify the publish payload, then create and push the annotated tag. The
-tag push starts `.github/workflows/publish-npm.yml`, which builds and checks the
-pnpm tarball and publishes it with npm OIDC:
+`prepublishOnly` gate still requires a clean release commit already landed on
+`origin/main`. Release artifacts are made once by `pack-release.yml` on main,
+then retained as the immutable `caveat-release-pack` Actions artifact for 30 days.
+Its `release-artifact.json` records the source/tree, version, run/attempt, tool
+versions and exact tgz SHA256. Read the run summary and download that artifact
+for final acceptance and any authorized host preflight. Local repacks are not
+the acceptance artifact: pnpm 10 rewrites workspace dependencies asynchronously,
+so JSON key order can change even with the same source and tools.
 
 ```bash
-git status --short --branch
-git push
-gh run list --commit "$(git rev-parse HEAD)" --limit 5
-(cd apps/cli && corepack pnpm publish --dry-run)
-git tag -a "v$VERSION" -m "v$VERSION"
+gh workflow run pack-release.yml --ref main
+gh run list --workflow pack-release.yml --limit 5
+# Set RELEASE_RUN to the successful candidate run selected for acceptance.
+release_candidate=$(mktemp -d)
+gh run download "$RELEASE_RUN" --repo kitepon/Caveat --name caveat-release-pack --dir "$release_candidate"
+RELEASE_SOURCE=$(node -p 'require(process.argv[1]).source' "$release_candidate/release-artifact.json")
+VERSION=$(node -p 'require(process.argv[1]).version' "$release_candidate/release-artifact.json")
+RELEASE_SHA=$(node -p 'require(process.argv[1]).sha256' "$release_candidate/release-artifact.json")
+```
+
+After that exact source/archive is accepted and publication is explicitly
+authorized, create the annotated tag at the recorded source. Tag pushes do not
+publish. Dispatch the existing trusted-publisher filename with the accepted
+run ID and complete archive SHA256:
+
+```bash
+git tag -a "v$VERSION" "$RELEASE_SOURCE" -m "v$VERSION"
 git push origin "v$VERSION"
+gh workflow run publish-npm.yml --ref main \
+  -f tag="v$VERSION" -f candidate-run-id="$RELEASE_RUN" -f archive-sha256="$RELEASE_SHA"
 gh run list --workflow publish-npm.yml --limit 5
 ```
 
-Workflowを追加する前にpush済みのタグは自動実行されない。信頼先登録後、
-既存タグは手動で1回実行し、完了とnpm登録版を確認する:
+The publisher checks the annotated tag/version/main ancestry and clean tree,
+then checks the candidate run's repository, source, main branch, workflow,
+event, successful completion and attempt before downloading it. It rejects
+unexpected files, changed artifact metadata and any archive digest mismatch.
+It publishes that same tgz with pinned npm 11.19.1 and existing OIDC; it never
+installs workspace dependencies, builds or repacks. A failed or expired
+candidate is not replaced under the accepted digest: prepare and accept a new
+run/archive before publishing. An old tag without this artifact provenance is
+not a reason to rebuild silently in the publishing job.
 
-```bash
-gh workflow run publish-npm.yml -f tag="v$VERSION"
-gh run list --workflow publish-npm.yml --limit 5
-npm view "caveat-cli@$VERSION" version
-```
+After publication, download the registry tarball, verify its npm integrity and
+SHA256 against `RELEASE_SHA`, and fresh-install that archive. Compare every
+packed file with the installed package. Publication is not acceptance when the
+bytes differ; retain both archives and stop distribution for a concrete decision.
+The published 0.21.5 metadata-order exception was an explicit one-time adoption,
+not a general semantic-equality fallback.
 
-固定pnpm 10は先頭の`--dir`や`--no-git-checks`をnpmへ渡すため、npm 12では
-余分な引数・未知の設定として失敗する。Workflowはpnpm packで得たtarballを
-固定npm 11で公開し、タグの注釈・版一致・main祖先・clean treeを事前確認する。
+Artifact upload and download behavior follows the official
+[upload-artifact action](https://github.com/actions/upload-artifact) and
+[gh run download](https://cli.github.com/manual/gh_run_download) contracts.
 
 ## Published Package Smoke
 
