@@ -1,0 +1,49 @@
+name: Pack release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
+      - name: Build and check landed candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-release-commit.mjs
+          npm install -g npm@11.19.1
+          corepack pnpm install --frozen-lockfile
+          corepack pnpm -r build
+          corepack pnpm check:docs
+          corepack pnpm check:npm-pack
+      - name: Create the acceptance archive once
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/candidate"
+          (cd apps/cli && corepack pnpm pack --pack-destination "$RUNNER_TEMP/candidate")
+          export RELEASE_NPM_VERSION="$(npm --version)"
+          export RELEASE_PNPM_VERSION="$(corepack pnpm --version)"
+          node scripts/release-artifact.mjs record "$RUNNER_TEMP/candidate" | tee "$RUNNER_TEMP/release-proof.json"
+          cat "$RUNNER_TEMP/release-proof.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: caveat-release-pack
+          path: ${{ runner.temp }}/candidate/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
