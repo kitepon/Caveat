@@ -2,9 +2,10 @@
 // Explicit acceptance harness: isolated fixture profile and read-only Codex RPC.
 // No thread/model calls, hook execution, trust writes, or real-user config edits.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, lstatSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
@@ -22,7 +23,7 @@ const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPath
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
-let child, lines, proof, nativeStderr = '', complete = false, closed = false;
+let child, lines, proof, originalFailure, nativeStderr = '', complete = false, closed = false;
 const pending = new Map(); let sequence = 0;
 try {
   function source(version) {
@@ -41,7 +42,8 @@ try {
     // commandWindows is deliberately absent; the exact same fixture command is listed in each phase.
     hooks[name] = [{ hooks: [{ type: 'command', command: `${quote(process.execPath)} ${quote(paths.launcher)} codex-hook ${event}`, timeout: 5, async: false }] }];
   }
-  writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\n', { mode: 0o600 });
+  // This profile only lists local hooks; marketplace discovery is unrelated work.
+  writeFileSync(join(codexHome, 'config.toml'), '[features]\nhooks = true\nplugins = false\nremote_plugin = false\n', { mode: 0o600 });
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
   const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
   child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });
@@ -72,20 +74,31 @@ try {
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
   complete = true;
   proof = {runtime:{node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite},status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0};
-} finally {
+} catch (error) { originalFailure = error; throw error; } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();
+  let ownedKillAttempted = false;
+  const waits = [];
   const alive = () => child && child.exitCode === null && child.signalCode === null;
-  const waitClose = async () => { if (child && !closed) await new Promise(resolve => {
+  const waitClose = async () => { const started = performance.now(); if (child && !closed) await new Promise(resolve => {
     const timeout = setTimeout(resolve, 3000); child.once('close', () => { clearTimeout(timeout); resolve(); });
-  }); };
+  }); waits.push({ elapsedMs: Math.round(performance.now() - started), closed }); };
   // EOF normally closes the private server and its npm shim. Do not orphan a
   // Windows PowerShell/.cmd descendant by killing only the wrapper first.
   await waitClose();
   if (alive()) {
+    ownedKillAttempted = true;
     if (isWindows()) spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});
     else process.kill(-child.pid, 'SIGTERM');
     await waitClose();
+  }
+  if (alive() || (child && !closed)) {
+    const stat = lstatSync(root, { bigint: true });
+    const failure = { status:'failed', stage:'native_close', root, runtime:proof?.runtime ?? {node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite}, pid:child?.pid ?? null, exitCode:child?.exitCode ?? null, signalCode:child?.signalCode ?? null, closed, stdoutEnded:child?.stdout.readableEnded ?? null, stderrEnded:child?.stderr.readableEnded ?? null, stdinFinished:child?.stdin.writableFinished ?? null, ownedKillAttempted, guardMs:3000, waits, hookProofCompleted:complete, originalFailure:originalFailure ? {name:originalFailure.name,code:originalFailure.code??null,message:originalFailure.message} : null, hookPhases:proof?.phases ?? [], identity:{dev:String(stat.dev),ino:String(stat.ino),birthtimeNs:String(stat.birthtimeNs)}, stderrBytes:Buffer.byteLength(nativeStderr), stderrSha256:createHash('sha256').update(nativeStderr).digest('hex'), modelCalls:0,trustWrites:0,realUserConfigWrites:0 };
+    try { writeFileSync(join(root,'failure-receipt.json'),JSON.stringify(failure,null,2)+'\n',{mode:0o600,flag:'wx'}); }
+    catch (error) { failure.receiptWriteError=String(error.code??'unknown'); }
+    process.stderr.write(JSON.stringify({nativeProofFailure:failure})+'\n');
+    if (originalFailure) throw new AggregateError([originalFailure,Error('owned native proof did not close; fixture retained')],'native proof and close both failed',{cause:originalFailure});
   }
   assert.ok(!alive(), 'owned native proof server did not terminate');
   assert.ok(!child || closed, 'owned native proof stdio did not close; fixture retained');

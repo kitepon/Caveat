@@ -6,9 +6,11 @@ import { createInterface } from 'node:readline';
 import { spawn } from 'node:child_process';
 const home = process.env.CODEX_HOME, receipt = process.env.CAVEAT_FAKE_CLOSE_RECEIPT;
 assert.ok(home && receipt && basename(dirname(home)) === 'profile' && basename(dirname(dirname(home))).startsWith('caveat-native-entry-'));
+assert.equal(readFileSync(join(home,'config.toml'),'utf8'),'[features]\nhooks = true\nplugins = false\nremote_plugin = false\n');
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
   if (request.id === undefined) return;
+  if(process.env.CAVEAT_FAKE_RPC_ERROR==='1'&&request.method==='initialize'){process.stdout.write(JSON.stringify({id:request.id,error:{code:-32099,message:'fixture-only'}})+'\n');return;}
   let result;
   if (request.method === 'initialize') result = { capabilities: {} };
   else {
@@ -22,7 +24,8 @@ createInterface({ input: process.stdin }).on('line', line => {
 });
 process.stdin.once('end', () => {
   // The wrapper exits first; its descendant retains the fixture cwd and pipes.
-  const code = `const fs=require('node:fs');setTimeout(()=>fs.writeFileSync(process.argv[1],JSON.stringify({profilePresentUntilClose:fs.existsSync(process.argv[2]),root:process.argv[3]})),400);`;
-  const descendant = spawn(process.execPath, ['-e', code, receipt, join(home, 'hooks.json'), dirname(dirname(home))], { cwd: dirname(home), stdio: ['ignore', 'inherit', 'inherit'], detached: true, windowsHide: true });
+  const delay=Number(process.env.CAVEAT_FAKE_CLOSE_DELAY_MS??400);assert.ok(Number.isSafeInteger(delay)&&delay>=0&&delay<=10000);
+  const code = `const fs=require('node:fs');setTimeout(()=>fs.writeFileSync(process.argv[1],JSON.stringify({profilePresentUntilClose:fs.existsSync(process.argv[2]),root:process.argv[3]})),Number(process.argv[4]));`;
+  const descendant = spawn(process.execPath, ['-e', code, receipt, join(home, 'hooks.json'), dirname(dirname(home)),String(delay)], { cwd: dirname(home), stdio: ['ignore', 'inherit', 'inherit'], detached: true, windowsHide: true });
   descendant.once('spawn', () => { descendant.unref(); process.exit(0); });
 });
