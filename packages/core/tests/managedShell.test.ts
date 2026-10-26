@@ -25,7 +25,8 @@ function fixture() {
   const built = fileURLToPath(new URL('../../../apps/cli/dist/', import.meta.url));
   for (const [src,dst] of [['stable-entry.mjs','stable-entry.mjs'],['managed-deployment.js','managed-deployment.js']]) writeFileSync(join(source, 'dist', dst), readFileSync(join(built, src)));
   const staged = stageManagedDeployment(source, options);activateManagedDeployment(staged.release, options);
-  const paths = managedDeploymentPaths(userHome), binDir = join(root, 'bin space 日本');mkdirSync(binDir, { mode: 0o700 });
+  const paths = managedDeploymentPaths(userHome);if(windows)runWindowsAcl(paths.root,true,true);
+  const binDir = join(root, 'bin space 日本');mkdirSync(binDir, { mode: 0o700 });
   const plan = managedShellPlan(process.execPath, binDir, options);
   const protectedFiles = [paths.launcher, paths.runtime, paths.pointer];
   for (let n=0;n<11;n++) {const file=join(userHome,'protected-'+n);writeFileSync(file,'unchanged-'+n,{mode:0o600});protectedFiles.push(file);}
@@ -37,7 +38,7 @@ function fixture() {
 
 it('shell plan rejects relative nodes and shell-interpreted Windows path literals', () => {
   for (const node of ['node','../node','/node\ncommand']) expect(()=>renderManagedShellWrappers(node,'/entry',false)).toThrow();
-  for (const node of ['node.exe','C:\\%NODE%\\node.exe','C:\\x&y\\node.exe','C:\\x"y\\node.exe']) expect(()=>renderManagedShellWrappers(node,'C:\\entry.mjs',true)).toThrow();
+  for (const node of ['C:\\日本\\node.exe','node.exe','C:\\%NODE%\\node.exe','C:\\x&y\\node.exe','C:\\x"y\\node.exe']) expect(()=>renderManagedShellWrappers(node,'C:\\entry.mjs',true)).toThrow();
   const f=fixture();expect(()=>managedShellPlan(process.execPath,'relative',f.options)).toThrow('absolute_bin_required');expect(managedShellStatus(f.options).status).toBe('not-installed');f.assertProtected();
 },60000);
 it('owned shell manifest is ready without rewriting protected registrations, entry, pointer or trust', () => {
@@ -77,7 +78,10 @@ function invoke(file: string, args: string[], cwd: string, input?: Buffer) {
     return spawnSync(process.env.ComSpec??'cmd.exe',['/d','/s','/c','"'+[file,...args].map(quote).join(' ')+'"'],{...options,windowsVerbatimArguments:true});
   }
   const bash=['C:/Program Files/Git/bin/bash.exe','C:/Program Files/Git/usr/bin/bash.exe'].find(existsSync);expect(bash,'Git Bash required for the extensionless Windows shim').toBeTruthy();
-  return spawnSync(bash!,[file.replaceAll('\\','/'),...args],options);
+  // MSYS has a different native argv parser; use a real POSIX caller so it cannot pre-mangle apostrophes.
+  const quote=(v:string)=>"'"+v.replaceAll("'","'\\''")+"'";
+  const caller=join(cwd,'fixture-posix-caller.sh');writeFileSync(caller,'#!/bin/sh\nexec '+[file.replaceAll('\\','/'),...args].map(quote).join(' ')+'\n');
+  return spawnSync(bash!,[caller.replaceAll('\\','/')],options);
 }
 it('real wrapper processes preserve argv, working directory, environment and exit status', () => {
   const f=fixture();f.install();const args=['','space value','quote"value','single\'quote','trailing\\','日本語','--leading','semi;colon','5%'];

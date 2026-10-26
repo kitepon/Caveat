@@ -402,7 +402,7 @@ Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json`
 
 ### Managed shell entry
 
-`deployment shell-plan --node … --bin-dir … --json` は固定の絶対 Node 入口と managed entry に結び付く wrapper の内容・完全 SHA を返す。POSIX は `exec`、Windows は拡張子なし・cmd・ps1 の3ファイル。Windows ps1 は Windows PowerShell 5.1 と PowerShell 7 で同じ argv を渡し、native stdio を継承する。シェル自体が入力時に展開する記法は、そのシェルの規則に従う。Node を PATH から探索したり、entry への symlink を作ったりしない。
+`deployment shell-plan --node … --bin-dir … --json` は固定の絶対 Node 入口と managed entry に結び付く wrapper の内容・完全 SHA を返す。POSIX は `exec`、Windows は拡張子なし・cmd・ps1 の3ファイル。Windows ps1 は Windows PowerShell 5.1 と PowerShell 7 で同じ argv を渡し、native stdio を継承する。シェル自体が入力時に展開する記法は、そのシェルの規則に従う。Node を PATH から探索したり、entry への symlink を作ったりしない。cmd は固定 Node の小さい bootstrap から同じ実体の Node 子へ entry の絶対 argv を渡し、batch の文字コードによる Unicode path の破損を避ける。この三形式の生成は ASCII の Node path に限定し、それ以外は明示拒否する（entry と通常引数は Unicode を保持する）。
 
 実配置は host 管理者の作業。既存同名 formula/package・PATH 優先順位・親の権限・実行中の旧 global consumer を先に確認し、未知の衝突を上書きしない。旧 package と全依存・npm 管理ファイル・元 bin/alias の復旧物を保存し、global 除去と leaf 配置を同時に実行しない。製品の plan/capture/status は、配置や uninstall、PATH・実行 policy・共有 ACL の変更をしない。
 

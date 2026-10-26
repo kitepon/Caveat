@@ -22,7 +22,11 @@ export function renderManagedShellWrappers(node: string, entry: string, windows 
   const posix = windows ? [node, entry].map(value => value.replaceAll('\\', '/')) : [node, entry];
   const files = [{ name: 'caveat', content: '#!/bin/sh\nexec ' + posix.map(quote).join(' ') + ' "$@"\n' }];
   if (windows) {
-    files.push({ name: 'caveat.cmd', content: '@echo off\r\n"' + node + '" "' + entry + '" %*\r\nexit /b %errorlevel%\r\n' });
+    // shortcut: cmd bootstrap needs an ASCII Node path; reject other paths until a native Unicode launcher is adopted.
+    if (/[^\x20-\x7e]/.test(node)) fail('unsupported_windows_node_path');
+    // ASCII batch bytes cannot corrupt a Unicode entry path; the fixed Node child receives its absolute argv.
+    const bootstrap = "const c=require('node:child_process').spawnSync(process.execPath,[Buffer.from('" + Buffer.from(entry).toString('base64') + "','base64').toString('utf8'),...process.argv.slice(1)],{stdio:'inherit'});if(c.error){console.error(c.error.message);process.exit(1)}process.exit(c.status===null?1:c.status)";
+    files.push({ name: 'caveat.cmd', content: '@echo off\r\n"' + node + '" -e "' + bootstrap + '" -- %*\r\nexit /b %errorlevel%\r\n' });
     // ProcessStartInfo inherits native stdio; a PowerShell pipeline would decode bytes.
     // Quote for CreateProcess also on Windows PowerShell 5.1 (no ArgumentList).
     const psQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'";
@@ -98,11 +102,12 @@ export function captureManagedShellManifest(plan: ManagedShellPlan): ManagedShel
     const expected = generated[index]!;
     if (file.name !== expected.name || file.path !== join(plan.binDir, expected.name) || file.sha256 !== expected.sha256 || file.content !== expected.content) fail('invalid_plan');
   }
+  const snapshots = plan.files.map(file => readRegular(file.path, 64 * 1024));
   const native = windows ? nativeIdentities(plan.files.map(file => file.path)) : [];
   const files = plan.files.map((file, index) => {
     const expected = generated[index]!;
     if (file.name !== expected.name || file.path !== join(plan.binDir, expected.name) || file.sha256 !== expected.sha256 || file.content !== expected.content) fail('invalid_plan');
-    const actual = readRegular(file.path, 64 * 1024);
+    const actual = snapshots[index]!;
     if (sha(actual.bytes) !== expected.sha256) fail('wrapper_bytes_changed');
     if (windows ? !native[index]!.ownerIsCurrent : actual.identity.uid !== process.getuid?.() || (actual.identity.mode & 0o022) !== 0 || (actual.identity.mode & 0o111) === 0) fail('wrapper_owner_or_mode');
     return { name: file.name, path: file.path, sha256: file.sha256, identity: actual.identity, native: native[index] ?? null };
