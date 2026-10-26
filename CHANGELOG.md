@@ -13,7 +13,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ### Runtime requirements
 
-- Require `node:sqlite` with FTS5 and trigram; a Node version number alone does not guarantee those capabilities. The official Linux Node 22.5.0 binary lacks FTS5 and fails with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. Keep `engines >=22` unchanged in 0.21.3; a three-OS search for the lowest capable official binary and any engine-floor decision belong to 0.22.0.
+- Require `node:sqlite` with FTS5 and trigram; a Node version number alone does not guarantee those capabilities. The official Linux Node 22.5.0 binary lacks FTS5 and fails with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. Keep the existing workspace `engines >=22` and published CLI `engines >=22.5` unchanged in 0.21.3; a three-OS search for the lowest capable official binary and any engine-floor decision belong to 0.22.0.
 - Deployment snapshots verify Linux Node 24.14.1/24.22.1, Windows 24.22.1 and macOS MCP 26.12.0/hooks 26.12.1; the macOS mixture does not claim completion of the Node update. PR59 run 40253098781 records CI Node 24.20.0 on Linux, 26.12.1 on macOS and 24.22.1 on Windows in raw proof JSON (version/executable/SQLite), without changing product runtime, workflow or test decisions.
 
 ### Dependencies

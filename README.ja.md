@@ -139,7 +139,7 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の`engines`は`>=22`を保持しますが、その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
+FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の既存`engines`宣言はworkspaceの`>=22`、公開CLIの`>=22.5`をそれぞれ保持します。その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
 
 本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
 
