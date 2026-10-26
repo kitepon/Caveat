@@ -39,10 +39,6 @@ if(process.argv[3]==='get')try{process.stdout.write(namedGithubCredential(readFi
       });
       expect(git(['init', '-q']).status).toBe(0);
       for (const key of ['credential.helper', 'credential.https://github.com.helper']) expect(git(['config', key, '!gh auth git-credential']).status).toBe(0);
-      if (ambient === undefined) {
-        const installed = spawnSync('gh', ['--version'], { env, encoding: 'utf8', timeout: 5000, windowsHide: true });
-        console.log('[caveat:github-fixture-runtime] ' + JSON.stringify({ ghVersion: installed.status === 0 ? installed.stdout.split(/\r?\n/)[0] : 'unavailable', credentialBackend: 'synthetic', authOperations: 0 }));
-      }
       const request = 'protocol=https\nhost=github.com\npath=fixture-owner/fixture-repository.git\n\n';
       const fill = (user: string) => git([...githubGitConfig(user).map(value => value.replace(coreHelper.replace(/\\/g, '/'), wrapper.replace(/\\/g, '/'))).flatMap(value => ['-c', value]), 'credential', 'fill'], request, user);
       const found = fill('fixture-target');
