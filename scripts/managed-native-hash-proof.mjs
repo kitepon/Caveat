@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
 import { commandInvocation } from './process-command.mjs';
@@ -21,7 +22,7 @@ const { stageManagedDeployment, activateManagedDeployment, managedDeploymentPath
 const root = mkdtempSync(join(tmpdir(), 'caveat-native-entry-'));
 const userHome = join(root, 'profile'); mkdirSync(userHome, { mode: 0o700 });
 const codexHome = join(userHome, '.codex'); mkdirSync(codexHome, { mode: 0o700 });
-let child, lines, nativeStderr = '', complete = false;
+let child, lines, proof, nativeStderr = '', complete = false, closed = false;
 const pending = new Map(); let sequence = 0;
 try {
   function source(version) {
@@ -44,6 +45,7 @@ try {
   writeFileSync(join(codexHome, 'hooks.json'), JSON.stringify({ hooks }), { mode: 0o600 });
   const invocation=commandInvocation(executable.endsWith('.js') ? process.execPath : executable,[...(executable.endsWith('.js') ? [executable] : []),'app-server']);
   child = spawn(invocation.command, invocation.args, { env: { ...process.env, CODEX_HOME: codexHome }, cwd: userHome, stdio: ['pipe','pipe','pipe'], windowsHide: true, detached: !isWindows() });
+  child.once('close', () => { closed = true; });
   child.stderr.on('data', bytes => { nativeStderr = (nativeStderr + bytes.toString()).slice(-4000); });
   lines = createInterface({ input: child.stdout });
   lines.on('line', line => { try { const x = JSON.parse(line), p = pending.get(x.id); if (!p) return; pending.delete(x.id); clearTimeout(p.timer); x.error ? p.reject(Error(`native_rpc_${x.error.code}`)) : p.resolve(x.result); } catch {} });
@@ -69,13 +71,13 @@ try {
   }
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
   complete = true;
-  console.log(JSON.stringify({runtime:{node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite},status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
+  proof = {runtime:{node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite},status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0};
 } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();
   const alive = () => child && child.exitCode === null && child.signalCode === null;
-  const waitClose = async () => { if (alive()) await new Promise(resolve => {
-    const timeout = setTimeout(resolve, 3000); child.once('exit', () => { clearTimeout(timeout); resolve(); });
+  const waitClose = async () => { if (child && !closed) await new Promise(resolve => {
+    const timeout = setTimeout(resolve, 3000); child.once('close', () => { clearTimeout(timeout); resolve(); });
   }); };
   // EOF normally closes the private server and its npm shim. Do not orphan a
   // Windows PowerShell/.cmd descendant by killing only the wrapper first.
@@ -86,6 +88,8 @@ try {
     await waitClose();
   }
   assert.ok(!alive(), 'owned native proof server did not terminate');
+  assert.ok(!child || closed, 'owned native proof stdio did not close; fixture retained');
   // Only the owned fixture tree is removed; no real Codex data is read or copied.
-  rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});
+  await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});
 }
+console.log(JSON.stringify(proof,null,2));
