@@ -23,6 +23,6 @@ createInterface({ input: process.stdin }).on('line', line => {
 process.stdin.once('end', () => {
   // The wrapper exits first; its descendant retains the fixture cwd and pipes.
   const code = `const fs=require('node:fs');setTimeout(()=>fs.writeFileSync(process.argv[1],JSON.stringify({profilePresentUntilClose:fs.existsSync(process.argv[2]),root:process.argv[3]})),400);`;
-  const descendant = spawn(process.execPath, ['-e', code, receipt, join(home, 'hooks.json'), dirname(dirname(home))], { cwd: dirname(home), stdio: ['ignore', 'inherit', 'inherit'] });
+  const descendant = spawn(process.execPath, ['-e', code, receipt, join(home, 'hooks.json'), dirname(dirname(home))], { cwd: dirname(home), stdio: ['ignore', 'inherit', 'inherit'], detached: true, windowsHide: true });
   descendant.once('spawn', () => { descendant.unref(); process.exit(0); });
 });
