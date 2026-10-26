@@ -18,12 +18,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          node-version: "24"
+          node-version: "24.22.1"
           package-manager-cache: false
       - name: Build and check landed candidate
         shell: bash
         run: |
           set -euo pipefail
+          node scripts/ci-toolchain.mjs hosted
           node scripts/verify-release-commit.mjs
           npm install -g npm@11.19.1
           corepack pnpm install --frozen-lockfile

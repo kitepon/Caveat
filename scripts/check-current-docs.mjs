@@ -5,6 +5,9 @@ import { dirname, extname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertPackedMarkdownClosed, documentTargets, npmPackReport } from './docs-contract.mjs';
 
+const toolchainTests = spawnCommandSync(process.execPath, ['--test', fileURLToPath(new URL('./ci-toolchain.test.mjs', import.meta.url))], { stdio: 'inherit' });
+if (toolchainTests.status !== 0) process.exit(toolchainTests.status ?? 1);
+
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const overviewPath = resolve(repo, 'docs/00_overview.md');
 const overview = readFileSync(overviewPath, 'utf8');
