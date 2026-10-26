@@ -143,7 +143,7 @@ FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要で
 
 本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
 
-CIの実runtimeはnative hash proofの最後のJSONに`runtime.node`・`runtime.execPath`・`runtime.sqlite`として記録します。現在記録されたCI版はLinux：未記録、macOS：未記録、Windows：未記録です。対応するPR59各jobのraw logで得た値だけを記載します。
+CIの実runtimeはnative hash proofの最後のJSONに`runtime.node`・`runtime.execPath`・`runtime.sqlite`として記録します。PR59のrun 40253098781で確認したCI版はLinux：24.20.0、macOS：26.12.1、Windows：24.22.1です。対応するPR59各jobのraw logで得た値だけを記載します。
 
 SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使い、エラー収集用ストレージのACL処理も同じ入口です。
 
