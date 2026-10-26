@@ -43,7 +43,7 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
     // Git unwind its own helper first; it is not a general process-tree or
     // total elapsed-time guarantee.
     config: [
-      ...githubGitConfig(opts?.githubUser),
+      ...githubGitConfig(opts?.githubUser, baseDir, env),
       // Windowsの長いentryパスを扱う。ユーザーのGit設定は変更しない。
       ...(isWindows() ? ['core.longpaths=true'] : []),
       'http.lowSpeedLimit=1',
@@ -67,3 +67,4 @@ function unsafeAllowancesForInheritedEnv(env: NodeJS.ProcessEnv): Partial<NonNul
   }
   return unsafe;
 }
+

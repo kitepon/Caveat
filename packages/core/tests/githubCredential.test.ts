@@ -31,9 +31,10 @@ describe('named GitHub credential', () => {
     const settings = githubGitConfig('kitepon-rgb');
     expect(settings.slice(0, 2)).toEqual(['credential.helper=', 'credential.https://github.com.helper=']);
     expect(settings).toEqual(expect.arrayContaining(['protocol.allow=never', 'protocol.https.allow=always', 'http.extraHeader=', 'http.https://github.com/.extraHeader=']));
-    expect(settings[2]).toContain('githubCredentialHelper.js'); expect(settings[2]).toContain("'kitepon-rgb'");
+    const helper = settings.find(value => value.startsWith('credential.https://github.com.helper=!'));
+    expect(helper).toContain('githubCredentialHelper.js'); expect(helper).toContain("'kitepon-rgb'");
     const original = { GIT_ASKPASS: 'shared-active-helper', SSH_ASKPASS: 'shared-ssh-helper' };
-    expect(githubGitEnvironment('kitepon-rgb', original)).toEqual({ GIT_ASKPASS: '', SSH_ASKPASS: '' });
+    expect(githubGitEnvironment('kitepon-rgb', original)).toEqual({ GIT_ASKPASS: '', SSH_ASKPASS: '', GIT_ALLOW_PROTOCOL: 'https' });
     expect(original.GIT_ASKPASS).toBe('shared-active-helper');
   });
   it.each(['', 'bad\nuser', '-bad', 'bad;', 'a'.repeat(40)])('rejects malformed account %j before invoking gh', user => {

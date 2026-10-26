@@ -75,7 +75,7 @@ function codexHooks(codexHome: string, nodePath: string, cliScriptPath: string) 
 }
 function sync(own: string, githubUser?: string | null) {
   let config: string[];
-  try { config = githubGitConfig(githubUser); } catch (error) { return unverified(githubCredentialFailureCode(error, githubUser) ?? 'upstream_unavailable'); }
+  try { config = githubGitConfig(githubUser, own); } catch (error) { return unverified(githubCredentialFailureCode(error, githubUser) ?? 'upstream_unavailable'); }
   const git = (args: string[], options: Partial<ExecFileSyncOptionsWithStringEncoding> = {}) => execFileSync('git',
     ['-C', own, ...config.flatMap(value => ['-c', value]), ...args],
     { ...options, encoding: 'utf8', env: githubGitEnvironment(githubUser, { ...process.env, ...options.env }) });

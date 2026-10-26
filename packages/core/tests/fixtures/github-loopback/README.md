@@ -1,0 +1,1 @@
+This certificate and public test key identify only the loopback HTTPS fixture. They are synthetic test material and are never deployed or used for credentials. The fixture proxy accepts github.com:443 but always connects to its own local HTTPS server; it never forwards traffic to GitHub.
