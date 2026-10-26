@@ -27,13 +27,13 @@ function readStagedContent(path) {
 }
 
 function printBlockMessage(blocked) {
-  process.stderr.write('\n[caveat:pre-commit] commit blocked — private entries must not be committed:\n');
+  process.stderr.write('\n[caveat:pre-commit] commit blocked — private or uninspectable frontmatter must not be committed:\n');
   for (const path of blocked) {
     process.stderr.write(`  - ${path}\n`);
   }
   process.stderr.write(
     '\nFix one of:\n' +
-      '  1. Change `visibility: public` in the frontmatter, OR\n' +
+      '  1. Make frontmatter inspectable and set `visibility: public`, OR\n' +
       '  2. Rename the file to *.private.md (gitignored), OR\n' +
       '  3. Unstage: git reset HEAD <path>\n',
   );

@@ -98,7 +98,7 @@ function decodeBase64Key(value: unknown): Buffer {
   return key;
 }
 
-function readCache(path: string, expected: { keyserverUrl: string; keyId: string }): Buffer | null {
+function readCache(path: string, expected: { keyserverUrl: string; keyId: string }, removeInvalid = true): Buffer | null {
   if (!existsSync(path)) return null;
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
@@ -112,7 +112,7 @@ function readCache(path: string, expected: { keyserverUrl: string; keyId: string
     }
     return decodeBase64Key((parsed as { key?: unknown }).key);
   } catch {
-    rmSync(path, { force: true });
+    if (removeInvalid) rmSync(path, { force: true });
     return null;
   }
 }
@@ -193,4 +193,15 @@ export function createKeyserverKeyProvider(opts: {
       writeCache(path, { keyserverUrl: normalizedUrl, keyId, key: key.toString('base64') });
     },
   };
+}
+
+/** Reads an existing content-key cache only. No fetch, cache repair or write. */
+export function createCachedContentKeyProvider(opts: { caveatHome: string }): ContentKeyProvider {
+  const resolve = (keyId: string, keyserverUrl: string): Buffer => {
+    const normalizedUrl = normalizeKeyserverUrl(keyserverUrl); parseKeyserverKeyId(keyId);
+    const key = readCache(cacheFilePath(opts.caveatHome, normalizedUrl, keyId), { keyserverUrl: normalizedUrl, keyId }, false);
+    if (!key) throw new SealedKeyError('KEY_UNAVAILABLE', 'existing cached content key is unavailable');
+    return key;
+  };
+  return { resolveContentKey: resolve, async ensureKeyAvailable(keyId, keyserverUrl) { resolve(keyId, keyserverUrl); } };
 }

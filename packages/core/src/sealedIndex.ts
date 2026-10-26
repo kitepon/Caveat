@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
+import { ENTRY_LIMITS, EntryInputConstraintError } from './entryConstraints.js';
+import { constraintDiagnostic, type EntryReadDiagnostic } from './entryRead.js';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { readSealedHeader, unsealBundle } from './sealedBundle.js';
 import type { ContentKeyProvider } from './sealedKeys.js';
-import { buildEntryUpsertRow, upsertEntry, type ScanResult } from './indexer.js';
+import { buildEntryUpsertRow, upsertEntry, type UpsertRow, type ScanResult } from './indexer.js';
 import type { ResolvedPaths } from './paths.js';
 import type { Source } from './types.js';
 
@@ -61,6 +64,7 @@ export function scanSealedSource(opts: {
   opts.db.exec('CREATE TEMP TABLE touched(rowid INTEGER PRIMARY KEY)');
   const insertTouched = opts.db.prepare('INSERT INTO touched (rowid) VALUES (?)');
 
+  const diagnostics: EntryReadDiagnostic[] = [];
   let added = 0;
   let updated = 0;
   try {
@@ -68,13 +72,21 @@ export function scanSealedSource(opts: {
       if (!file.relPath.endsWith('.md')) continue;
       // Plaintext from sealed community bundles remains in process memory only;
       // the durable boundary is SQLite index rows, never decrypted markdown files.
-      const row = buildEntryUpsertRow({
+      let row: UpsertRow;
+      try {
+        if (file.content.length > ENTRY_LIMITS.markdown) throw new EntryInputConstraintError('entry_markdown', ENTRY_LIMITS.markdown, file.content.length);
+        row = buildEntryUpsertRow({
         source: opts.source,
         path: file.relPath,
         content: file.content.toString('utf-8'),
         file_mtime: bundleMtime,
         indexed_at: now(),
-      });
+      }); } catch (error) {
+        if (!(error instanceof EntryInputConstraintError)) throw error;
+        diagnostics.push(constraintDiagnostic(opts.db, opts.source, file.relPath, createHash('sha256').update(file.content).digest('hex'), error, now()));
+        for (const old of opts.db.prepare('SELECT rowid FROM entries WHERE source = ? AND path = ?').all(opts.source, file.relPath) as Array<{rowid:number}>) insertTouched.run(old.rowid);
+        continue;
+      }
       const existing = opts.db
         .prepare('SELECT rowid FROM entries WHERE source = ? AND id = ?')
         .get(opts.source, row.id) as { rowid: number } | undefined;
@@ -87,7 +99,7 @@ export function scanSealedSource(opts: {
     const del = opts.db
       .prepare('DELETE FROM entries WHERE source = ? AND rowid NOT IN (SELECT rowid FROM touched)')
       .run(opts.source);
-    return { added, updated, deleted: Number(del.changes) };
+    return { added, updated, deleted: Number(del.changes), ...(diagnostics.length ? { diagnostics } : {}) };
   } finally {
     opts.db.exec('DROP TABLE IF EXISTS temp.touched');
   }

@@ -1,3 +1,4 @@
+import { readEntryIndexDiagnostics, EntryInputConstraintError } from '@caveat/core';
 import { Command } from 'commander';
 import type { Confidence, Source } from '@caveat/core';
 import { buildContext } from './context.js';
@@ -230,14 +231,19 @@ program
     runStale(ctx, { days: opts.days, visibility: vis, limit: opts.limit });
   });
 
+program.command('entry-diagnostics').requiredOption('--json', 'show skipped/stale entries from the last index scan').action(() => { const ctx = buildContext(stdoutLogger); process.stdout.write(JSON.stringify(readEntryIndexDiagnostics(ctx.caveatHome)) + '\n'); });
+
 program
   .command('show')
   .description('Show full caveat by id')
-  .argument('<id>', 'entry id')
+  .argument('[id]', 'entry id (or use --path from diagnostics)')
   .option('--source <source>', 'own or community/<handle>', 'own')
-  .action((id: string, opts: { source: string }) => {
+  .option('--path <path>', 'relative path from entry diagnostics')
+  .option('--offset-bytes <n>', 'raw read byte offset', Number)
+  .option('--limit-bytes <n>', 'raw read window (4..65536)', Number)
+  .action((id: string | undefined, opts: { source: string; path?: string; offsetBytes?: number; limitBytes?: number }) => {
     const ctx = buildContext(stdoutLogger);
-    runShow(ctx, { id, source: opts.source as Source });
+    runShow(ctx, { ...opts, id, source: opts.source as Source });
   });
 
 program
@@ -532,7 +538,7 @@ community
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {
-  const msg = err instanceof Error ? err.message : String(err);
+  const msg = err instanceof EntryInputConstraintError ? JSON.stringify(err.toJSON()) : err instanceof Error ? err.message : String(err);
   process.stderr.write(`[caveat:error] ${msg}\n`);
   process.exit(1);
 });

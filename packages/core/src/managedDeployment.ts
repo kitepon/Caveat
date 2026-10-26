@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, accessSync, constants, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, chmodSync, lstatSync, readdirSync, openSync, closeSync, fsyncSync } from 'node:fs';
 import { join, resolve, relative, isAbsolute, dirname, sep } from 'node:path';
 import { isWindows } from './platform.js';
+import { assertSqliteSearchCapability } from './runtimeCapabilities.js';
 import { legacyEntryHashes, legacyManagedRoot } from './managedDeploymentLegacy.js';
 import { runWindowsAcl, runWindowsAclPrivateTree, runWindowsAclVerifyPrivateTree, runWindowsManagedRootAcl, runWindowsManagedSourceAcl } from './privateWindowsAcl.js';
 import { managedDeploymentPaths, readManagedDeployment, managedDeploymentInternal } from './managedDeploymentRuntime.js';
@@ -216,16 +217,18 @@ function inspectEntryProtocol(paths: ReturnType<typeof managedDeploymentPaths>, 
 }
 /** Actual-user acceptance: read-only source, existing ancestors and protocol. */
 export function preflightManagedDeployment(packageRoot: string, options: ManagedDeploymentOptions = {}) {
+  const runtime = assertSqliteSearchCapability();
   const source = readStageSource(packageRoot, options), paths = inspectProspectiveRoot(options);
   const legacyEntry = inspectEntryProtocol(paths, options, source.assets);
   if (existsSync(paths.lock)) fail('installer_busy');
   if (existsSync(paths.pointer)) verifyManagedDeployment(options);
-  return { status: 'ready' as const, readOnly: true, version: source.pkg.version as string, root: paths.root, launcher: paths.launcher,
+  return { status: 'ready' as const, readOnly: true, runtime, version: source.pkg.version as string, root: paths.root, launcher: paths.launcher,
     sourceFilesVerified: source.sourceFiles.length, sourceMode: options.windows ?? isWindows() ? null : (lstatSync(source.source).mode & 0o777).toString(8), sourceDigest: sha(JSON.stringify(source.sourceFiles)),
     rootExists: existsSync(paths.root), ancestors: paths.observations, nativeAclVerified: (options.windows ?? isWindows()) && !options.aclRunner && !options.aclSourceRunner, legacyEntry, stageAllowed: true, activateAllowed: true };
 }
 /** Stage the caller-verified npm package; this does not edit registrations or trust. */
 export function stageManagedDeployment(packageRoot: string, options: ManagedDeploymentOptions = {}) {
+  assertSqliteSearchCapability();
   const { source, sourceFiles, pkg, assets } = readStageSource(packageRoot, options);
   const manifest: Manifest = { schema: 1, version: pkg.version, files: sourceFiles };
   const manifestBytes = JSON.stringify(manifest) + '\n';
@@ -270,6 +273,7 @@ export function stageManagedDeployment(packageRoot: string, options: ManagedDepl
 }
 /** Single same-directory rename commits a complete pointer on POSIX and Windows. */
 export function activateManagedDeployment(release: string, options: ManagedDeploymentOptions = {}) {
+  assertSqliteSearchCapability();
   return withInstallerLock(options, paths => {
     if (!releasePattern.test(release)) fail('invalid_release');
     const manifestPath = join(paths.releases, release, 'manifest.json'); ownerStat(manifestPath, false, options);

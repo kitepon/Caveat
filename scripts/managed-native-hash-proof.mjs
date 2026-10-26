@@ -69,7 +69,7 @@ try {
   }
   assert.deepEqual(phases[1].rows,phases[0].rows); assert.deepEqual(phases[2].rows,phases[0].rows);
   complete = true;
-  console.log(JSON.stringify({status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
+  console.log(JSON.stringify({runtime:{node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite},status:'ok',fixtureProfile:true,phases,hookDefinitionsUnchanged:true,methods:['initialize','hooks/list'],trustWrites:0,modelCalls:0,realUserConfigWrites:0},null,2));
 } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();

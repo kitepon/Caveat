@@ -12,6 +12,8 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 
 ## 真実の源と状態
 
+SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. This candidate does not change the numerical minimum Node version; adopting its supported-runtime wording remains a product review decision.
+
 - 正本はmarkdown-in-git。SQLite FTS5 indexは常に再構築できる派生物。
 - 自分の知識は既定で`~/.caveat/own/`、indexは`~/.caveat/index/caveat.db`。
 - ユーザー設定の正本は`~/.caveatrc.json`だけ。`knowledgeRepo`で知識repoの場所を変更でき、
@@ -21,6 +23,18 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 - `CAVEAT_HOME`でCaveatのdata rootを明示変更できる。
 - entryの主キーはsourceとidの組。sourceは`own`または`community/<handle>`。
 - schemaとmigrationは`packages/core/src/schema.sql`と`packages/core/src/migrations/`が所有する。
+
+## Entryの入出力契約
+
+record/updateのargumentsはJSON表現のUTF-8で1MiB、合成後Markdownは1MiB、raw frontmatterは64KiB、展開したgraphは10,000 node/edgeと深さ128を上限とする。transportの10MiB上限はSDK既定を維持し、製品の上限を無制限化しない。超過はfile/index/updated_at/onEntryWrittenの前に型付き`CAVEAT.ENTRY_INPUT_CONSTRAINT`として拒否し、MCPでは`isError:true`、field/limit/actual/measure/actual_kind/guidanceを返す。byte境界はexact、parserやgraphの打切り・alias展開をdump前に止める十分条件はlower_boundと明示する。この副作用前の型付き拒否だけをMCP_TOOL_FAILEDから除外し、未知/DB例外は従来の重大度で記録する。
+
+YAML以外のnamed frontmatter engineはgray-matterの呼出前に拒否する。YAML load/dumpは単一のCaveat schemaで行い、js-yaml4.3.2 parserに従来4.1.1のint/float scalar解決だけをMIT出典/SHA付きで組む。既存の非引用1_000はnumberとして保持し、同schemaでnumeric/yes/date-shaped stringだけを引用する。forceQuotesは使わない。parser maxDepth128と展開graphのdepth128は異なる尺度で、flow深さ110は受入、parser guardに到達した深さはtyped診断となる。循環や多重aliasはdump/JSON化前に有界検査する。
+
+上限は書込requestと最終生成物へ掛け、既存の超過fileを削除しない。indexは超過entryをskipし、既存rowはstaleとして保全する。`caveat entry-diagnostics --json`は最後のsource別scanで除外したsource/path/id、制約、数値、file SHA、観測時刻、stale/skippedを表示する。新規scanが失敗したsourceの過去診断を成功へ置換しない。`index --full`も検査前に全rowを削除せず全fileをrescanする。既存本文をpatchして上限内へ減らせる場合は保存できる。frontmatterが安全に復元できない場合だけ更新をtyped拒否し、raw整理へ案内する。
+
+`caveat_get`はid/sourceの従来応答を維持し、unindexed entryは診断のpathを指定して読める。超過/過深の場合は`raw_entry`、diagnosticsと明示offset/length/total/next_offsetのUTF-8 window（4..65536B）を返す。不正UTF-8はbase64と明示する。CLIは`caveat show [id] --path <relative.md> --source <source> --offset-bytes <n> --limit-bytes <n>`を使える。無言で切り詰めた全文や空frontmatterにしない。封緘communityの通常id取得は既存indexを使い、stale診断を添える。明示pathのraw取得は既存content keyでメモリ内復号し、復号Markdownをdiskへ書かず新しい認証を始めない。
+
+公開前に実4hostのown/community corpusをread-onlyで検査し、旧/新の意味差・超過・読取不可・採取中変更が0件であることをhash/件数/型差だけで確認する。本文やsecretを監査原本へ持ち出さず、非0件は製品判断へ戻す。設計probeやCI fixtureを実corpusへ代用しない。
 
 ## 配布境界
 
@@ -485,3 +499,11 @@ Compatibility lives in `managedDeploymentLegacy.ts`, separately from the new pla
 ### Migration and acceptance
 
 The first migration from version-specific commands requires review/trust of the exact new three Codex definitions per host through Codex's normal flow. The installer never writes trusted_hash, grants another product trust or bypasses review. Static installed diagnostics do not establish native trust or conversation acceptance. Keep shared Node, PATH, credentials and native schedules unchanged unless separately authorized.
+
+### Windows hookの保護保存transport（未公開source）
+
+Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。
+
+## MCP runtimeの読込み境界（次版source）
+
+通常hook/検索等はMCP SDKのmodule評価を必要としない。MCP server実装はpack必須asset `dist/mcp-server.js` に分離し、`mcp-server` command境界で読み込む。読込みとserver起動の失敗は従来の `CAVEAT.MCP_SERVER_FAILED` を記録して元例外を返す。MCPの検証/transport/ツール契約を省略せず、通常stdio経路で受け入れる。固定managed entry/runtimeのbytesを変更しない。

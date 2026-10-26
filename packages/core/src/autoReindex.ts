@@ -184,7 +184,8 @@ export function releaseReindexLock(lock: ReindexLock): void {
 
 export function reindexAllSources(opts: {
   db: DatabaseSync;
-  paths: Pick<ResolvedPaths, 'entriesDir' | 'communityDir'>;
+  paths: Pick<ResolvedPaths, 'entriesDir' | 'communityDir'> & Partial<Pick<ResolvedPaths, 'caveatHome'>>;
+  force?: boolean;
   logger: Logger;
   keyProvider?: ContentKeyProvider;
 }): ReindexResult {
@@ -193,7 +194,7 @@ export function reindexAllSources(opts: {
   if (existsSync(paths.entriesDir)) {
     try {
       perSource.own = withSourceSavepoint(db, () =>
-        scanSource({ db, source: 'own', entriesRoot: paths.entriesDir }),
+        scanSource({ db, source: 'own', entriesRoot: paths.entriesDir, force: opts.force }),
       );
     } catch (err) {
       logger.warn(`own: reindex failed; preserving existing rows: ${errorMessage(err)}`);
@@ -227,7 +228,7 @@ export function reindexAllSources(opts: {
       if (!existsSync(root)) continue;
       try {
         perSource[source] = withSourceSavepoint(db, () =>
-          scanSource({ db, source, entriesRoot: root }),
+          scanSource({ db, source, entriesRoot: root, force: opts.force }),
         );
       } catch (err) {
         logger.warn(`${source}: reindex failed; preserving existing rows: ${errorMessage(err)}`);
@@ -240,6 +241,15 @@ export function reindexAllSources(opts: {
     db.prepare('DELETE FROM entries WHERE source = ?').run(source);
   }
 
+  if (paths.caveatHome) {
+    const file = join(paths.caveatHome, 'index', 'entry-input-diagnostics.json');
+    const previous = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) as { diagnostics?: import('./entryRead.js').EntryReadDiagnostic[] } : {};
+    const diagnostics = [...(previous.diagnostics ?? []).filter(d => !Object.hasOwn(perSource, d.source) && (d.source === 'own' || presentCommunitySources.has(d.source))), ...Object.values(perSource).flatMap(r => r.diagnostics ?? [])];
+    mkdirSync(dirname(file), { recursive: true });
+    const temporary = `${file}.${process.pid}.tmp`;
+    writeFileSync(temporary, JSON.stringify({ scope: 'latest successful per-source index scans; stale rows are preserved', observed_at: new Date().toISOString(), diagnostics }) + '\n', { mode: 0o600 });
+    renameSync(temporary, file);
+  }
   return { perSource, fileCount: computeEntriesDigest(paths).fileCount };
 }
 

@@ -1,5 +1,6 @@
 export * from './types.js';
 export * from './db.js';
+export * from './runtimeCapabilities.js';
 export * from './frontmatter.js';
 export * from './env.js';
 export * from './indexer.js';
@@ -41,3 +42,8 @@ export * from './hookDiagnostics.js';
 export * from './runtimeErrorReport.js';
 export * from './jevObservations.js';
 export * from './platform.js';
+
+export * from './entryConstraints.js';
+export * from './frontmatterCodec.js';
+export * from './entryRead.js';
+export { createWindowsAclSession } from './privateWindowsAclSession.js';

@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents (Claude Code, Codex, Cursor, and
 
 ## プロジェクトの状態
 
-**v0.21.2**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
+**v0.21.3**。Claude Code、Codex、Cursorのnative integrationとGrokを含むMCP登録を持つ。runtime error収集は
 既存の`~/.caveatrc.json`で明示的に有効化し、製品文書とrelease gateはCaveat自身が所有する。
 
 **`docs/00_overview.md` が文書の入口、`docs/01_plan.md` が現行の製品契約**。
@@ -114,7 +114,7 @@ Project-local `.claude/settings.json` は端末固有の permission allowlist �
 - **`apps/cli` は `tsup` を `bundle: true` + `noExternal: ['@caveat/*']` + onSuccess で `node:` プレフィクスを復元**（`NODE_BUILTINS` を全走査して `from "fs"` → `from "node:fs"` など regex 置換）。CJS 依存（gray-matter）のため banner で `createRequire` shim を注入。`schema.sql` + `migrations/` も onSuccess で `dist/` にコピー。
 - **vitest 4 + vite 7 必須**。vitest 2 + vite 5 は `node:sqlite` の import を解決できない（`node:` プレフィクスを剥がす）。
 - **FTS5 trigram は 3 文字以上のクエリが必要**。日本語 2 文字（例: `仕様`）はヒットしない。ドキュメント化済の仕様なので、クエリの事前バリデーションは足さない。
-- **gray-matter の YAML エンジン**は `jsyaml.JSON_SCHEMA` に固定。`!!js/function` 等の unsafe タグはパース時に throw する想定（`tests/frontmatter.test.ts` で検証済）。
+- **gray-matter の YAML エンジン**はCaveat所有のJSON-schema互換codec（旧4.1.1のnumeric解釈と有界graph/byte/depth）に固定。`!!js/function` 等の unsafe タグはパース時に throw する想定（`tests/frontmatter.test.ts` で検証済）。
 
 ## OS依存・ホスト依存の分離規約（2026-08-23 リファクタ）
 

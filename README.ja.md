@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.2。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.3。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 個人および小規模チームが主な想定で、中央DBとinstall時の自動購読はありません。
 
 <details>
@@ -139,8 +139,13 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-Node 22.5以降とgitが必要です。 SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。利用者が試験時だけflagを足す必要はなく、明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使います。
-エラー収集用ストレージのACL処理も同じ入口です。
+FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の既存`engines`宣言はworkspaceの`>=22`、公開CLIの`>=22.5`をそれぞれ保持します。その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
+
+本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
+
+CIの実runtimeはnative hash proofの最後のJSONに`runtime.node`・`runtime.execPath`・`runtime.sqlite`として記録します。PR59のrun 40253098781で確認したCI版はLinux：24.20.0、macOS：26.12.1、Windows：24.22.1です。対応するPR59各jobのraw logで得た値だけを記載します。
+
+SQLiteが起動flag待ちのruntimeでは、配布launcherが一度だけ必要flag付きで起動し直します。明示した有効化・無効化は保持します。WindowsではPowerShell 7（`pwsh.exe`）を使い、エラー収集用ストレージのACL処理も同じ入口です。
 
 ```sh
 npm install -g caveat-cli
@@ -347,6 +352,10 @@ registry 確認まで完了させます。
 iterative 開発時は `apps/cli/` 内で `npm link` するとグローバル shim がローカルビルドを追従します。
 
 詳細は英語版 [README.md](README.md) と [CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。
+
+## Entryの上限と読取診断
+
+record/updateの引数JSONと最終MarkdownはUTF-8で各1MiB、frontmatterは64KiB、展開graphは10,000 node/edge・深さ128までです。超過書込みはfile/index変更前に型付きで拒否します。既存の超過entryはdiskに残り、検索と明示raw読取を継続できます。`caveat index`後の`caveat entry-diagnostics --json`でskip/staleのsource/pathと制約を確認し、`caveat show --path misc/example.md --limit-bytes 65536`または`caveat_get`のpath指定でraw windowと次のbyte位置を読みます。YAMLの既存数値解釈を保ち、数値/日付形など曖昧なstringだけを引用します。
 
 ## ライセンス
 

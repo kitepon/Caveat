@@ -49,7 +49,7 @@ export function updateEntry(id: string, patch: UpdatePatch, opts: UpdateOptions)
   const relPath = row.path;
   const filePath = join(opts.entriesRoot, relPath);
   const raw = readFileSync(filePath, 'utf-8');
-  const parsed = parseMarkdown(raw);
+  const parsed = parseMarkdown(raw, { allowOversizedBody: true });
 
   if (patch.frontmatter) {
     for (const key of Object.keys(patch.frontmatter) as Array<keyof Frontmatter>) {

@@ -2,11 +2,11 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   computeEntriesDigest,
+  assertSqliteSearchCapability,
   createKeyserverKeyProvider,
   openDb,
   prewarmSealedKeys,
   observeRuntimeError,
-  rebuildAll,
   reindexAllSources,
   writeDigestMarker,
 } from '@caveat/core';
@@ -18,6 +18,10 @@ export interface IndexOptions {
 }
 
 export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<void> {
+  try { assertSqliteSearchCapability(); } catch (error) {
+    observeRuntimeError('CAVEAT.DATABASE_OPEN_FAILED', { version: CAVEAT_VERSION, impact: 'feature_unavailable' });
+    throw error;
+  }
   const dbDir = dirname(ctx.paths.dbPath);
   if (!existsSync(dbDir)) mkdirSync(dbDir, { recursive: true });
   const keyProvider = createKeyserverKeyProvider({ caveatHome: ctx.caveatHome });
@@ -35,11 +39,10 @@ export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<voi
   }
   try {
     if (opts.full) {
-      ctx.logger.info('full rebuild: DELETE FROM entries');
-      rebuildAll(db);
+      ctx.logger.info('full rescan: preserve entries rejected by the input contract');
     }
 
-    const result = reindexAllSources({ db, paths: ctx.paths, logger: ctx.logger, keyProvider });
+    const result = reindexAllSources({ db, paths: ctx.paths, logger: ctx.logger, keyProvider, force: opts.full });
     for (const [source, scan] of Object.entries(result.perSource)) {
       if (source === 'own') {
         ctx.logger.info(`own: +${scan.added} ~${scan.updated} -${scan.deleted}`);
@@ -47,6 +50,7 @@ export async function runIndex(ctx: CliContext, opts: IndexOptions): Promise<voi
         ctx.logger.info(`${source}: +${scan.added} ~${scan.updated} -${scan.deleted}`);
       }
     }
+    for (const scan of Object.values(result.perSource)) for (const diagnostic of scan.diagnostics ?? []) ctx.logger.warn(JSON.stringify(diagnostic));
     writeDigestMarker(ctx.caveatHome, computeEntriesDigest(ctx.paths));
   } catch (error) {
     observeRuntimeError('CAVEAT.INDEX_FAILED', { version: CAVEAT_VERSION, impact: 'feature_unavailable' });

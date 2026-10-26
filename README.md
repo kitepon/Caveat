@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.2. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.3. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -193,7 +193,9 @@ rag/                  Research asset ledger; currently only INDEX.md
 
 ## Requirements
 
-- **Node 22.5+** (for `node:sqlite`). Verified on Node 24.14 with bundled SQLite 3.51.2. The shipped `caveat` launcher enables SQLite once when the runtime still requires its startup flag; callers do not add a test-only flag. Explicit SQLite enable/disable options are preserved.
+- **A Node build whose `node:sqlite` includes FTS5 and the trigram tokenizer.** The version number alone does not establish support. The official Linux Node 22.5.0 binary lacks FTS5 and is rejected with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. The shipped launcher enables SQLite once when required; explicit enable/disable options are preserved. Existing `engines` declarations remain unchanged in 0.21.3: the workspace declares `>=22`, and the published CLI declares `>=22.5`. Neither declaration guarantees that every such build has these SQLite capabilities.
+- Verified deployment snapshots: Linux main-server Node 24.14.1; Linux rabbit and Windows Node 24.22.1; macOS MCP Node 26.12.0 and hook Node 26.12.1 (a recorded mixed deployment, not a completed Node update). These are observed versions, not the lowest supported versions on each OS.
+- The three CI runtimes are recorded by the final native-hash proof JSON (`runtime.node`, `runtime.execPath`, `runtime.sqlite`). Verified CI versions from PR59 run 40253098781: Linux 24.20.0; macOS 26.12.1; Windows 24.22.1. Only values from the corresponding PR59 job raw logs are used here.
 - WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
 - **pnpm 10** via corepack (pinned in root `package.json`'s `packageManager`).
 - **git** for community import (`simple-git` shells out to the system git).
@@ -559,6 +561,10 @@ corepack pnpm --filter @caveat/hooks test
 ```
 
 Contributing: see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Entry size and read diagnostics
+
+Record/update arguments and final Markdown are limited to 1MiB of UTF-8; frontmatter to 64KiB, an expanded 10,000-node/edge graph and depth128. Oversized writes fail before file/index mutation with a typed error. Existing oversized entries remain on disk and readable; searches continue and stale index rows are retained. Run `caveat index`, then `caveat entry-diagnostics --json` to see skipped/stale source paths and limits. Use `caveat show --path misc/example.md --limit-bytes 65536` or `caveat_get` with that relative `path` to read explicit raw windows and follow their next byte offset. Ambiguous YAML numeric/date-shaped strings are selectively quoted, while legacy numeric meanings are preserved.
 
 ## License
 

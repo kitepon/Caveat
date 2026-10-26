@@ -1,3 +1,4 @@
+import { assertEntryArguments } from '@caveat/core';
 import { z } from 'zod';
 import { updateEntry, type Source } from '@caveat/core';
 import type { McpContext } from '../context.js';
@@ -50,6 +51,7 @@ export type UpdateArgs = {
 };
 
 export function handleUpdate(ctx: McpContext, args: UpdateArgs) {
+  assertEntryArguments(args);
   const source = (args.source ?? 'own') as Source;
   if (source !== 'own') {
     throw new Error('community エントリは購読物です; 編集は上流で行ってください');

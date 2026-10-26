@@ -1,3 +1,4 @@
+import { assertEntryArguments } from '@caveat/core';
 import { z } from 'zod';
 import { recordEntry } from '@caveat/core';
 import type { McpContext } from '../context.js';
@@ -48,6 +49,7 @@ export type RecordArgs = {
 };
 
 export function handleRecord(ctx: McpContext, args: RecordArgs) {
+  assertEntryArguments(args);
   const result = recordEntry(args, {
     db: ctx.db,
     entriesRoot: ctx.paths.entriesDir,

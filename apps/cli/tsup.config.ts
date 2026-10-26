@@ -42,10 +42,12 @@ function restoreNodePrefix(content: string): string {
 export default defineConfig({
   entry: {
     index: 'src/index.ts',
+    'mcp-server': 'src/mcp-server.ts',
     'privateEvidence/validation': 'src/privateEvidence/validation.ts',
     'privateEvidence/origin': 'src/privateEvidence/origin.ts',
     'privateEvidence/candidate': 'src/privateEvidence/candidate.ts',
     'managed-deployment': '../../packages/core/src/managedDeploymentRuntime.ts',
+    privateWindowsAclWorker: '../../packages/core/src/privateWindowsAclWorker.ts',
   },
   splitting: false,
   format: ['esm'],
