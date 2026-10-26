@@ -11,26 +11,9 @@ import { createKeyserverKeyProvider } from './sealedKeys.js';
 import { normalizePathCase } from './platform.js';
 import { prewarmSealedKeys } from './sealedIndex.js';
 
-export type SyncErrorCode =
-  | 'NOT_A_REPO'
-  | 'EXTERNAL_TOPLEVEL'
-  | 'DETACHED_HEAD'
-  | 'NO_REMOTE'
-  | 'REMOTE_PUBLIC'
-  | 'REMOTE_VISIBILITY_INDETERMINATE'
-  | 'SYNC_CONFLICT'
-  | 'REBASE_IN_PROGRESS'
-  | 'OWN_REPO_EXISTS'
-  | 'BOTH_HAVE_ENTRIES'
-  | 'WORKTREE_DIRTY'
-  | 'SYNC_BUSY';
-
-export class SyncError extends Error {
-  constructor(public readonly code: SyncErrorCode, message: string) {
-    super(message);
-    this.name = 'SyncError';
-  }
-}
+import { SyncError } from './syncErrors.js';
+import { githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
+export { SyncError, type SyncErrorCode } from './syncErrors.js';
 
 /** A failed remote command is an observation, not proof of an app defect. */
 export class SyncRemoteError extends Error {
@@ -47,8 +30,8 @@ export class SyncRecoveryError extends Error {
   }
 }
 
-async function remoteOperation<T>(phase: SyncRemoteError['phase'], run: () => Promise<T>): Promise<T> {
-  try { return await run(); } catch (cause) { throw new SyncRemoteError(phase, cause); }
+async function remoteOperation<T>(phase: SyncRemoteError['phase'], run: () => Promise<T>, githubUser?: string | null): Promise<T> {
+  try { return await run(); } catch (cause) { const code = githubCredentialFailureCode(cause, githubUser); if (code) throw new SyncError(code, code); throw new SyncRemoteError(phase, cause); }
 }
 
 async function activeRebase(git: SimpleGit, ownDir: string): Promise<boolean> {
@@ -62,6 +45,7 @@ async function activeRebase(git: SimpleGit, ownDir: string): Promise<boolean> {
 export type ProbeImpl = (probeUrl: string | undefined) => Promise<RemoteAccess>;
 
 export interface PreflightSyncOptions {
+  githubUser?: string | null;
   trustRemotePrivate?: boolean;
   probeImpl?: ProbeImpl;
   gitTimeoutMs?: number;
@@ -162,7 +146,7 @@ export async function preflightSync(
   ownDir: string,
   opts: PreflightSyncOptions = {},
 ): Promise<SyncPreflight> {
-  const git = createGit(ownDir, { timeoutMs: opts.gitTimeoutMs });
+  const git = createGit(ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   if (!(await git.checkIsRepo())) {
     throw new SyncError('NOT_A_REPO', 'own knowledge directory is not a git repository; run `caveat sync --init` first');
   }
@@ -191,6 +175,7 @@ export async function preflightSync(
   }
 
   const pushUrls = await effectivePushUrls(git);
+  assertNamedGithubTargets(pushUrls, opts.githubUser);
   const probe = await assertPrivateRemotes(pushUrls, opts);
   return { ownDir: requested, branch, pushUrls, probe };
 }
@@ -218,7 +203,7 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   if (!indexLock) throw new SyncError('SYNC_BUSY', 'reindex is already running; retry later');
   let repoLock: FileLock | null = null;
   try {
-    const git = createGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs });
+    const git = createGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
     if (await git.checkIsRepo()) {
       const common = realpathSync.native(resolve(opts.ownDir, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
       repoLock = acquireFileLock(join(common, '.caveat-sync-lock'));
@@ -236,7 +221,7 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
 
 async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   const preflight = await preflightSync(opts.ownDir, opts);
-  const git = createGit(preflight.ownDir, { timeoutMs: opts.gitTimeoutMs });
+  const git = createGit(preflight.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   const status = await git.status();
   if (opts.dirtyPolicy === 'refuse' && !status.isClean()) {
     throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained uncommitted changes; retry after editing');
@@ -259,7 +244,7 @@ async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
     committed = true;
   }
 
-  const remoteBranch = (await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', 'origin', preflight.branch]))).trim();
+  const remoteBranch = (await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', 'origin', preflight.branch]), opts.githubUser)).trim();
   let pulled = false;
   if (remoteBranch) {
     try {
@@ -270,7 +255,7 @@ async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
       // a conflict, or claim recovery succeeded if an active rebase remains.
       let rebasing: boolean;
       try { rebasing = await activeRebase(git, preflight.ownDir); } catch (cause) { throw new SyncRecoveryError(cause); }
-      if (!rebasing) throw new SyncRemoteError('pull', err);
+      if (!rebasing) { const code = githubCredentialFailureCode(err, opts.githubUser); if (code) throw new SyncError(code, code); throw new SyncRemoteError('pull', err); }
       try {
         await git.raw(['rebase', '--abort']);
         if (await activeRebase(git, preflight.ownDir)) throw Error('rebase still active');
@@ -284,7 +269,7 @@ async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
     throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained edits made during reception');
   }
   await reindexAndMark(opts);
-  await remoteOperation('push', () => git.push('origin', preflight.branch, ['-u']));
+  await remoteOperation('push', () => git.push('origin', preflight.branch, ['-u']), opts.githubUser);
   return {
     ...preflight,
     committed,
@@ -340,34 +325,35 @@ function removeCanonicalScaffoldBeforeCheckout(ownDir: string): void {
   }
 }
 
-async function defaultRemoteBranch(git: SimpleGit, url: string): Promise<string> {
-  const symref = await remoteOperation('inspect', () => git.raw(['ls-remote', '--symref', url, 'HEAD']));
+async function defaultRemoteBranch(git: SimpleGit, url: string, githubUser?: string | null): Promise<string> {
+  const symref = await remoteOperation('inspect', () => git.raw(['ls-remote', '--symref', url, 'HEAD']), githubUser);
   const match = /^ref: refs\/heads\/([^\s]+)\s+HEAD$/m.exec(symref);
   if (match) return match[1]!;
-  const heads = await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', url]));
+  const heads = await remoteOperation('inspect', () => git.raw(['ls-remote', '--heads', url]), githubUser);
   const first = /refs\/heads\/([^\s]+)\s*$/m.exec(heads);
   if (!first) throw new Error(`remote has refs but no branch heads: ${url}`);
   return first[1]!;
 }
 
 export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSyncResult> {
+  assertNamedGithubTargets([opts.url], opts.githubUser);
   const ownDir = resolve(opts.ownDir);
   // A fresh install has no own dir yet — create it before any git inspection
   // (simple-git refuses to start in a directory that does not exist).
   mkdirSync(ownDir, { recursive: true });
-  const existing = createGit(ownDir);
+  const existing = createGit(ownDir, { githubUser: opts.githubUser });
   if (await existing.checkIsRepo()) {
     throw new SyncError('OWN_REPO_EXISTS', `own knowledge directory is already a git repository: ${ownDir}`);
   }
 
-  const inspector = createGit(ownDir);
-  const refs = (await remoteOperation('inspect', () => inspector.raw(['ls-remote', '--heads', opts.url]))).trim();
+  const inspector = createGit(ownDir, { githubUser: opts.githubUser });
+  const refs = (await remoteOperation('inspect', () => inspector.raw(['ls-remote', '--heads', opts.url]), opts.githubUser)).trim();
   const entryCount = countMarkdownEntries(ownDir);
   if (refs && entryCount > 0) {
     throw new SyncError('BOTH_HAVE_ENTRIES', 'local and remote both contain entries; resolve the ownership conflict before initializing sync');
   }
 
-  const git = createGit(ownDir);
+  const git = createGit(ownDir, { githubUser: opts.githubUser });
   const createdGitDir = join(ownDir, '.git');
   await git.init();
   try {
@@ -381,13 +367,13 @@ export async function initOwnSync(opts: InitOwnSyncOptions): Promise<InitOwnSync
       await git.add('-A');
       await git.commit(`caveat sync: initial import (${entryCount} entries)`);
       const branch = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-      await remoteOperation('push', () => git.push('origin', branch, ['-u']));
+      await remoteOperation('push', () => git.push('origin', branch, ['-u']), opts.githubUser);
       await reindexAndMark(opts);
       return { ownDir, branch, remoteWasEmpty: true };
     }
 
-    const branch = await defaultRemoteBranch(git, opts.url);
-    await remoteOperation('fetch', () => git.fetch('origin', branch));
+    const branch = await defaultRemoteBranch(git, opts.url, opts.githubUser);
+    await remoteOperation('fetch', () => git.fetch('origin', branch), opts.githubUser);
     // `caveat init --sync` scaffolds this exact file before it discovers an
     // existing remote. Remove only the product-generated byte-for-byte copy so
     // checkout can restore the remote's tracked scaffold without overwriting

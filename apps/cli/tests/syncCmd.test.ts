@@ -8,13 +8,14 @@ const core = vi.hoisted(() => ({
 
 vi.mock('@caveat/core', async (original) => ({ ...await original<typeof import('@caveat/core')>(), ...core }));
 
-import { SyncError, SyncRemoteError, SyncRecoveryError } from '@caveat/core';
+import { DEFAULT_CONFIG, SyncError, SyncRemoteError, SyncRecoveryError } from '@caveat/core';
 import { runSync } from '../src/commands/sync.js';
 import type { CliContext } from '../src/context.js';
 
 const messages: string[] = [];
 const ctx = {
   caveatHome: '/tmp/caveat-home',
+  config: { ...DEFAULT_CONFIG },
   paths: { knowledgeRepo: '/tmp/caveat-home/own' },
   logger: {
     info: (message: string) => messages.push(`info:${message}`),
@@ -27,11 +28,26 @@ afterEach(() => {
   core.syncOwn.mockReset();
   core.initOwnSync.mockReset();
   core.observeRuntimeError.mockReset();
+  ctx.config.githubUser = null;
   messages.length = 0;
   process.exitCode = undefined;
 });
 
 describe('caveat sync command', () => {
+  it('passes the named account to sync without modifying the user config', async () => {
+    ctx.config.githubUser = 'kitepon-rgb';
+    core.syncOwn.mockResolvedValue({ dryRun: true, changedFiles: 0, pushUrls: [], probe: { kind: 'private' } });
+    await runSync(ctx, { dryRun: true, trustRemotePrivate: false, yes: false });
+    expect(core.syncOwn).toHaveBeenCalledWith(expect.objectContaining({ githubUser: 'kitepon-rgb' }));
+    expect(ctx.config.githubUser).toBe('kitepon-rgb');
+  });
+  it('does not create a repository under the shared active account for a named user', async () => {
+    ctx.config.githubUser = 'kitepon-rgb'; const ghRunner = vi.fn();
+    await runSync(ctx, { init: true, dryRun: false, trustRemotePrivate: false, yes: true }, { ghRunner });
+    expect(ghRunner).not.toHaveBeenCalled(); expect(core.initOwnSync).not.toHaveBeenCalled();
+    expect(messages.some(message => message.includes('explicit private sync URL'))).toBe(true);
+  });
+
   it('keeps cancellation visible without creating a repair report', async () => {
     await runSync(ctx, { init: true, dryRun: false, trustRemotePrivate: false, yes: false }, {
       ghRunner: (args) => args[0] === 'repo' && args[1] === 'view'
