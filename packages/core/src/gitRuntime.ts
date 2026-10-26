@@ -43,13 +43,14 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
     // Git unwind its own helper first; it is not a general process-tree or
     // total elapsed-time guarantee.
     config: [
-      ...githubGitConfig(opts?.githubUser),
+      ...githubGitConfig(opts?.githubUser, baseDir, env),
       // Windowsの長いentryパスを扱う。ユーザーのGit設定は変更しない。
       ...(isWindows() ? ['core.longpaths=true'] : []),
       'http.lowSpeedLimit=1',
       `http.lowSpeedTime=${lowSpeedTimeSeconds}`,
     ],
-    unsafe: unsafeAllowancesForInheritedEnv(env),
+    // Opt in only for the validated product helper and its HTTPS-only protocol policy.
+    unsafe: { ...unsafeAllowancesForInheritedEnv(env), ...(opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true }) },
   };
   const git = baseDir === undefined ? simpleGit(options) : simpleGit(baseDir, options);
   return git.env(env);

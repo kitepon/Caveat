@@ -1,11 +1,12 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { validateGithubUser, githubCredentialFailureCode } from './githubCredential.js';
 import { SyncError } from './syncErrors.js';
 
 type GhRunner = (args: string[], env: NodeJS.ProcessEnv) => Pick<SpawnSyncReturns<string>, 'status' | 'stdout' | 'stderr' | 'error'>;
-const runGh: GhRunner = (args, env) => spawnSync(process.platform === 'darwin' && existsSync('/opt/homebrew/bin/gh') ? '/opt/homebrew/bin/gh' : 'gh', args,
+const ghExecutable = process.platform === 'darwin' ? '/opt/homebrew/bin/gh' : process.platform === 'win32' ? 'C:\\Program Files\\GitHub CLI\\gh.exe' : '/usr/bin/gh';
+const runGh: GhRunner = (args, env) => spawnSync(ghExecutable, args,
   { env, encoding: 'utf8', timeout: 10_000, maxBuffer: 65_536, windowsHide: true });
 
 /** Only Git's credential pipe receives the selected value; never persist/log it. */
@@ -16,7 +17,7 @@ export function namedGithubCredential(input: string, requestedUser: unknown, inh
   if (fields.get('protocol') !== 'https' || fields.get('host') !== 'github.com') throw new SyncError('CAVEAT_GITHUB_TARGET_UNSUPPORTED', 'CAVEAT_GITHUB_TARGET_UNSUPPORTED');
   if (fields.has('username') && fields.get('username') !== user) throw new SyncError('CAVEAT_GITHUB_USERNAME_MISMATCH', 'CAVEAT_GITHUB_USERNAME_MISMATCH');
   const env = { ...inherited };
-  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN']) delete env[key];
+  for (const key of ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_ENTERPRISE_TOKEN', 'GITHUB_ENTERPRISE_TOKEN', 'GH_DEBUG']) delete env[key];
   const result = run(['auth', 'token', '--hostname', 'github.com', '--user', user, '--no-refresh'], env);
   if (result.error) throw new SyncError('CAVEAT_GITHUB_CLI_UNAVAILABLE', 'CAVEAT_GITHUB_CLI_UNAVAILABLE');
   if (/unknown flag.*--(?:user|no-refresh)|unknown command/i.test(result.stderr)) throw new SyncError('CAVEAT_GITHUB_CLI_UNSUPPORTED', 'CAVEAT_GITHUB_CLI_UNSUPPORTED');

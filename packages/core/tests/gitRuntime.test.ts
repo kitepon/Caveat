@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -131,3 +131,12 @@ async function waitForNoSockets(activeSocketCount: () => number, timeoutMs: numb
     await new Promise<void>((resolve) => setTimeout(resolve, 50));
   }
 }
+
+
+it('permits the product-owned named helper through real simple-git without persisting it', async () => {
+  const root = makeTmpDir();
+  const git = createGit(root, { githubUser: 'fixture-target' });
+  await git.init();
+  await expect(git.raw(['config', '--get', 'credential.https://github.com.username'])).resolves.toBe('fixture-target\n');
+  expect(readFileSync(join(root, '.git', 'config'), 'utf8')).not.toMatch(/fixture-target|credential/);
+});

@@ -2,7 +2,13 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.21.4] — 2026-10-26 (candidate)
+## [0.21.5] — 2026-10-26 (candidate)
+
+- Explicitly permit Caveat's validated, command-scoped named-account helper in simple-git. In 0.21.4, simple-git's credential-helper guard stopped sync before the selected helper could run. Unconfigured accounts retain their existing policy.
+- Read configuration names only and neutralize inherited helper/protocol/header values for the selected Git instance. Remove inherited Git config/protocol/trace overrides, validate usernames before opting in, and use fixed platform gh entries.
+- Exercise actual init, manual, background and periodic sync through simple-git and Git to a synthetic credential helper. Confirm the published 0.21.4 source fails these regressions and never persist the selected helper in user configuration.
+
+## [0.21.4] — 2026-10-26
 
 - Add optional non-secret `githubUser` for private sync. Git and diagnostics select that existing GitHub account with child-scoped helpers; shared active accounts, credential files, and global Git configuration are unchanged.
 - Ignore inherited GitHub environment tokens for the selected helper and refuse missing accounts, incompatible gh, mismatched targets and expired credentials with typed errors. `gh auth token --user --no-refresh` never refreshes shared credentials. No `githubUser` keeps the existing behavior.
