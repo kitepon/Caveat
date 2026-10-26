@@ -2,9 +2,10 @@
 // Explicit acceptance harness: isolated fixture profile and read-only Codex RPC.
 // No thread/model calls, hook execution, trust writes, or real-user config edits.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, lstatSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join, resolve, dirname, delimiter } from 'node:path';
@@ -75,17 +76,27 @@ try {
 } finally {
   if (!complete && nativeStderr) process.stderr.write(`[native proof stderr] ${nativeStderr}\n`);
   for (const p of pending.values()) clearTimeout(p.timer); pending.clear(); lines?.close(); child?.stdin.end();
+  let ownedKillAttempted = false;
+  const waits = [];
   const alive = () => child && child.exitCode === null && child.signalCode === null;
-  const waitClose = async () => { if (child && !closed) await new Promise(resolve => {
+  const waitClose = async () => { const started = performance.now(); if (child && !closed) await new Promise(resolve => {
     const timeout = setTimeout(resolve, 3000); child.once('close', () => { clearTimeout(timeout); resolve(); });
-  }); };
+  }); waits.push({ elapsedMs: Math.round(performance.now() - started), closed }); };
   // EOF normally closes the private server and its npm shim. Do not orphan a
   // Windows PowerShell/.cmd descendant by killing only the wrapper first.
   await waitClose();
   if (alive()) {
+    ownedKillAttempted = true;
     if (isWindows()) spawnSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:5000});
     else process.kill(-child.pid, 'SIGTERM');
     await waitClose();
+  }
+  if (alive() || (child && !closed)) {
+    const stat = lstatSync(root, { bigint: true });
+    const failure = { status:'failed', stage:'native_close', root, runtime:proof?.runtime ?? {node:process.version,execPath:process.execPath,sqlite:process.versions.sqlite}, pid:child?.pid ?? null, exitCode:child?.exitCode ?? null, signalCode:child?.signalCode ?? null, closed, stdoutEnded:child?.stdout.readableEnded ?? null, stderrEnded:child?.stderr.readableEnded ?? null, stdinFinished:child?.stdin.writableFinished ?? null, ownedKillAttempted, guardMs:3000, waits, hookProofCompleted:complete, hookPhases:proof?.phases ?? [], identity:{dev:String(stat.dev),ino:String(stat.ino),birthtimeNs:String(stat.birthtimeNs)}, stderrBytes:Buffer.byteLength(nativeStderr), stderrSha256:createHash('sha256').update(nativeStderr).digest('hex'), modelCalls:0,trustWrites:0,realUserConfigWrites:0 };
+    try { writeFileSync(join(root,'failure-receipt.json'),JSON.stringify(failure,null,2)+'\n',{mode:0o600,flag:'wx'}); }
+    catch (error) { failure.receiptWriteError=String(error.code??'unknown'); }
+    process.stderr.write(JSON.stringify({nativeProofFailure:failure})+'\n');
   }
   assert.ok(!alive(), 'owned native proof server did not terminate');
   assert.ok(!child || closed, 'owned native proof stdio did not close; fixture retained');
