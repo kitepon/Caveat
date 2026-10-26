@@ -21,7 +21,7 @@ export function githubGitConfig(user?: string | null, baseDir?: string, inherite
     ...namedConfigurationResets(baseDir, githubGitEnvironment(selected, inherited)),
     `credential.https://github.com.helper=!${quote(process.execPath)} ${quote(helper)} ${quote(selected)}`,
     `credential.https://github.com.username=${selected}`,
-    'core.askPass=', 'credential.interactive=false', 'protocol.allow=never', 'protocol.https.allow=always', 'http.extraHeader=', 'http.https://github.com/.extraHeader='];
+    'credential.interactive=false', 'protocol.allow=never', 'protocol.https.allow=always', 'http.extraHeader=', 'http.https://github.com/.extraHeader='];
 }
 export function githubGitEnvironment(user?: string | null, inherited: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   if (user == null) return inherited;
@@ -47,7 +47,7 @@ export function assertNamedGithubTargets(urls: string[], user?: string | null): 
 
 // Read names only; no user-provided helper/protocol value enters the opted-in instance.
 function namedConfigurationResets(baseDir: string | undefined, env: NodeJS.ProcessEnv): string[] {
-  const result = spawnSync('git', [...(baseDir ? ['-C', baseDir] : []), 'config', '--name-only', '--get-regexp', '^(credential(\\..*)?\\.helper|protocol(\\..*)?\\.allow|http(\\..*)?\\.extraheader)$'],
+  const result = spawnSync('git', [...(baseDir ? ['-C', baseDir] : []), 'config', '--name-only', '--get-regexp', '^(core\\.askpass|credential(\\..*)?\\.helper|protocol(\\..*)?\\.allow|http(\\..*)?\\.extraheader)$'],
     { env, encoding: 'utf8', timeout: 10_000, maxBuffer: 65_536, windowsHide: true });
   if (result.error || (result.status !== 0 && result.status !== 1)) throw new SyncError('CAVEAT_GITHUB_CONFIG_UNSUPPORTED', 'CAVEAT_GITHUB_CONFIG_UNSUPPORTED');
   return [...new Set(result.stdout.trim().split(/\r?\n/).filter(Boolean))].map(key => {

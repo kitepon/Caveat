@@ -152,6 +152,7 @@ export function classifyOwnSyncOutcome(
     case 'REMOTE_PUBLIC':
     case 'SYNC_CONFLICT':
     case 'REBASE_IN_PROGRESS':
+    case 'CAVEAT_GIT_ENV_UNSAFE':
     case 'CAVEAT_GITHUB_CONFIG_UNSUPPORTED':
     case 'CAVEAT_GITHUB_USER_INVALID':
     case 'CAVEAT_GITHUB_USER_UNAVAILABLE':

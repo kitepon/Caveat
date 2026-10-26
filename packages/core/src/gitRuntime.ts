@@ -1,7 +1,8 @@
 import { parseEnv } from '@simple-git/argv-parser';
 import { simpleGit, type SimpleGit, type SimpleGitOptions } from 'simple-git';
-import { githubGitConfig, githubGitEnvironment } from './githubCredential.js';
+import { githubGitConfig, githubGitEnvironment, validateGithubUser } from './githubCredential.js';
 import { isWindows } from './platform.js';
+import { SyncError } from './syncErrors.js';
 
 // simple-git timeout.block is an inactivity timeout: the git process is killed
 // only after stdout/stderr have been silent for this long. It is not a total
@@ -26,7 +27,7 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
   // the helper orphaned on Node 22/Windows for a connected but silent server.
   const lowSpeedTimeSeconds = Math.floor((timeoutMs - HTTP_HELPER_PREEMPT_MARGIN_MS) / 1_000);
   const env = {
-    ...githubGitEnvironment(opts?.githubUser),
+    ...nonInteractiveGitEnvironment(opts?.githubUser),
     GIT_TERMINAL_PROMPT: '0',
     GCM_INTERACTIVE: 'Never',
     // Git's GIT_HTTP_LOW_SPEED_* environment variables override the matching
@@ -50,20 +51,31 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
       `http.lowSpeedTime=${lowSpeedTimeSeconds}`,
     ],
     // Opt in only for the validated product helper and its HTTPS-only protocol policy.
-    unsafe: { ...unsafeAllowancesForInheritedEnv(env), ...(opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true }) },
+    allowEnvironment: Object.keys(env).filter(key => /^GIT_/i.test(key)),
+    unsafe: opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true },
   };
   const git = baseDir === undefined ? simpleGit(options) : simpleGit(baseDir, options);
   return git.env(env);
 }
 
-function unsafeAllowancesForInheritedEnv(env: NodeJS.ProcessEnv): Partial<NonNullable<SimpleGitOptions['unsafe']>> {
-  const unsafe: Partial<NonNullable<SimpleGitOptions['unsafe']>> = {};
-  // Derive allowances from the same parser used by simple-git's
-  // blockUnsafeOperationsPlugin when it spawns git. This keeps presence checks,
-  // environment-key normalization, and GIT_CONFIG_KEY_n category detection in
-  // sync with simple-git as @simple-git/argv-parser changes.
-  for (const vulnerability of parseEnv(env).vulnerabilities) {
-    unsafe[vulnerability.category] = true;
-  }
-  return unsafe;
+const supportedGitEnvironment = new Set([
+  'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_AUTHOR_DATE',
+  'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE',
+  'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH', 'GIT_SSL_NO_VERIFY',
+  'GIT_TERMINAL_PROMPT', 'GIT_HTTP_LOW_SPEED_LIMIT', 'GIT_HTTP_LOW_SPEED_TIME',
+]);
+
+/** Validate before naming/scrubbing: inherited command/config opt-ins are never inferred. */
+function nonInteractiveGitEnvironment(user?: string | null): NodeJS.ProcessEnv {
+  if (user != null) validateGithubUser(user);
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^(EDITOR|VISUAL|GIT_EDITOR|GIT_SEQUENCE_EDITOR|PAGER|GIT_PAGER|GIT_CURL_VERBOSE|GH_DEBUG)$/i.test(key) || /^GIT_TRACE/i.test(key)) delete env[key];
+  const categories = new Set(parseEnv(env).vulnerabilities.map(v => v.category as string));
+  const unsupported = Object.keys(env).filter(key => /^GIT_/i.test(key) && !supportedGitEnvironment.has(key.toUpperCase()));
+  if (unsupported.length) categories.add('unreviewedGitEnvironment');
+  if (categories.size) throw new SyncError('CAVEAT_GIT_ENV_UNSAFE', `CAVEAT_GIT_ENV_UNSAFE (${[...categories].sort().join(', ')}); remove unreviewed Git environment overrides`);
+  const child = { ...githubGitEnvironment(user, env) };
+  // Named credentials disable askpass in Git config; do not opt in to an editor/helper environment.
+  delete child.GIT_ASKPASS; delete child.SSH_ASKPASS;
+  return child;
 }

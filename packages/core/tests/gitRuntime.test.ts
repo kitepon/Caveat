@@ -112,16 +112,16 @@ describe('createGit runtime policy', { timeout: GIT_RUNTIME_TEST_TIMEOUT_MS }, (
     expect(() => createGit(makeTmpDir(), { timeoutMs: 5_999 })).toThrow('at least 6000');
   });
 
-  it('allows inherited pager environment variables even when their value is empty', async () => {
+  it('removes inherited pager variables without changing the parent', async () => {
     vi.stubEnv('PAGER', '');
 
     await expect(createGit(makeTmpDir()).init()).resolves.toBeDefined();
   });
 
-  it('allows inherited ssh command environment variables', async () => {
+  it('refuses inherited ssh command variables without an automatic opt-in', async () => {
     vi.stubEnv('GIT_SSH_COMMAND', 'ssh');
 
-    await expect(createGit(makeTmpDir()).init()).resolves.toBeDefined();
+    await expect((async () => createGit(makeTmpDir()).init())()).rejects.toMatchObject({ code: 'CAVEAT_GIT_ENV_UNSAFE' });
   });
 });
 

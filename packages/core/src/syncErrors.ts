@@ -1,4 +1,5 @@
 export type SyncErrorCode =
+  | 'CAVEAT_GIT_ENV_UNSAFE'
   | 'NOT_A_REPO'
   | 'EXTERNAL_TOPLEVEL'
   | 'DETACHED_HEAD'

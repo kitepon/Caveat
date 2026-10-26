@@ -78,7 +78,9 @@ for(const mode of ['count','parameters','files','protocol','trace'])it(`rejects 
  else if(mode==='trace'){vi.stubEnv('GIT_TRACE',f.forbidden);vi.stubEnv('GIT_TRACE_CURL',f.forbidden);vi.stubEnv('GIT_CURL_VERBOSE','1');vi.stubEnv('GH_DEBUG','api');}
  else if(mode==='protocol'){vi.stubEnv('GIT_ALLOW_PROTOCOL','file');vi.stubEnv('GIT_PROTOCOL_FROM_USER','1');}
  else{const conf=path.join(f.root,'injected.config');fs.writeFileSync(conf,'[credential]\n helper = !exit 83\n[protocol "https"]\n allow = never\n');for(const k of ['GIT_CONFIG','GIT_CONFIG_GLOBAL','GIT_CONFIG_SYSTEM'])vi.stubEnv(k,conf);}
- await runSync(f.ctx,{});selected(f);
+ await runSync(f.ctx,{});
+ if(mode==='trace')selected(f);
+ else{expect(log.error.mock.calls.flat().join(' ')).toContain('CAVEAT_GIT_ENV_UNSAFE');expect(fs.existsSync(f.marker)).toBe(false);expect(fs.existsSync(f.forbidden)).toBe(false);}
 }),30000);
 for(const user of ['','bad user','bad\tuser',`bad'quote`,'bad"quote','bad;user','bad\nuser','-bad','bad-','bad--user','fixture-target\n','fixture-target\r','fixture-target\r\n'])it(`rejects invalid named user ${JSON.stringify(user)} before an opted-in Git instance`,()=>{
  expect(()=>createGit(os.tmpdir(),{githubUser:user})).toThrow('CAVEAT_GITHUB_USER_INVALID');
@@ -106,3 +108,9 @@ it('routes the real MCP own sync through simple-git, Git and the named fake cred
     expect(readMcpSyncState(f.caveatHome)).toMatchObject({status:'failed',code:'CAVEAT_GITHUB_USER_UNAVAILABLE'});
   } finally {await mcp.close();}
 }),20000);
+
+it('refuses configured askpass instead of broadening named helper opt-ins',()=>fixture(async f=>{
+ initialize(f);f.git(['config','core.askPass','fixture-never-invoked']);const before=fs.readFileSync(path.join(f.own,'.git/config'));
+ expect(()=>createGit(f.own,{githubUser:'fixture-target'})).toThrow('CAVEAT_GITHUB_CONFIG_UNSUPPORTED');
+ expect(fs.existsSync(f.marker)).toBe(false);expect(fs.existsSync(f.forbidden)).toBe(false);expect(fs.readFileSync(path.join(f.own,'.git/config'))).toEqual(before);
+}));
