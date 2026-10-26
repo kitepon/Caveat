@@ -89,3 +89,20 @@ it('refuses an unrecognized user helper key before enabling the named instance',
  expect(()=>createGit(f.own,{githubUser:'fixture-target'})).toThrow('CAVEAT_GITHUB_CONFIG_UNSUPPORTED');
  expect(fs.existsSync(f.marker)).toBe(false);expect(fs.existsSync(f.forbidden)).toBe(false);
 }),30000);
+
+it('routes the real MCP own sync through simple-git, Git and the named fake credential helper',()=>fixture(async f=>{
+  initialize(f);
+  const {syncClient}=await import('../../../apps/mcp/tests/fixtures/syncClient.js');
+  const mcp=await syncClient({userHome:f.home,caveatHome:f.caveatHome,logger:log});
+  try {
+    const tools=await mcp.client.listTools();const tool=tools.tools.find(t=>t.name==='caveat_sync');
+    expect(tool?.annotations).toMatchObject({openWorldHint:true});expect(tool?.annotations?.readOnlyHint).not.toBe(true);
+    const refused=await mcp.client.callTool({name:'caveat_sync',arguments:{repo:'https://forbidden.invalid'}});
+    expect(refused.isError).toBe(true);expect(fs.existsSync(f.marker)).toBe(false);
+    const result=await mcp.client.callTool({name:'caveat_sync',arguments:{}});
+    expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('CAVEAT_GITHUB_USER_UNAVAILABLE');
+    expect(JSON.stringify(result)).not.toContain('fixture-repository');selected(f);
+    const {readMcpSyncState}=await import('../src/mcpSyncState.js');
+    expect(readMcpSyncState(f.caveatHome)).toMatchObject({status:'failed',code:'CAVEAT_GITHUB_USER_UNAVAILABLE'});
+  } finally {await mcp.close();}
+}),20000);

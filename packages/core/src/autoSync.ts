@@ -1,3 +1,4 @@
+import { usesManagedGuidance } from './managedGuidance.js';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -199,19 +200,20 @@ export interface AutoSyncOutcome {
   };
 }
 
-export function autoSyncNotification(outcome: AutoSyncOutcome): { signature: string; text: string | null } {
+export function autoSyncNotification(outcome: AutoSyncOutcome, managed = false): { signature: string; text: string | null } {
   const lines: string[] = [];
   if (outcome.own.pulled === true) {
     lines.push('autosync: pulled updates from your private remote');
   }
+  const retry = managed ? 'call the Caveat MCP tool caveat_sync with {}. If unavailable, stop; do not use a PATH command or another context' : 'run `caveat sync`';
   const backoffHours = Math.round(AUTO_SYNC_DEGRADED_RETRY_MS / (60 * 60 * 1000));
   if (outcome.own.degraded === true) {
     // One wording for the whole degraded stretch, whether this cycle retried
     // and failed or sat inside the backoff. Otherwise the two states alternate
     // and every backoff window announces itself twice.
-    lines.push(`autosync: own sync keeps failing; auto-retry is backed off to every ${backoffHours}h. run \`caveat sync\` to resolve now.`);
+    lines.push(`autosync: own sync keeps failing; auto-retry is backed off to every ${backoffHours}h. ${retry} to resolve now.`);
   } else if (outcome.own.disposition === 'fail') {
-    lines.push(`autosync: own sync failed (${outcome.own.code ?? 'UNKNOWN'}). run \`caveat sync\` to resolve.`);
+    lines.push(`autosync: own sync failed (${outcome.own.code ?? 'UNKNOWN'}). ${retry} to resolve.`);
   }
   const failedHandles = outcome.community
     .filter((result) => result.status === 'failed')
@@ -230,6 +232,7 @@ export function autoSyncNotification(outcome: AutoSyncOutcome): { signature: str
 }
 
 export interface RunAutoSyncOptions {
+  userHome?: string;
   githubUser?: string | null;
   caveatHome: string;
   ownDir: string;
@@ -353,7 +356,7 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
     await reindexAndMark(opts);
 
     const outcome: AutoSyncOutcome = { community, own };
-    const { signature, text } = autoSyncNotification(outcome);
+    const { signature, text } = autoSyncNotification(outcome, usesManagedGuidance(opts.userHome));
     // A changed message always speaks. A *degraded* sync also re-speaks on an
     // interval: signature dedup alone announced the breakage once and then went
     // quiet forever while nothing propagated.

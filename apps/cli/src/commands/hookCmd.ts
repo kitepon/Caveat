@@ -1,3 +1,4 @@
+import { usesManagedGuidance } from '@caveat/core';
 import { spawn } from 'node:child_process';
 import {
   chmodSync,
@@ -205,7 +206,7 @@ async function runWorker(workFile: string): Promise<void> {
   try {
     result = buildAndPublishPendingReminder(ctx.caveatHome, job.sessionId, buildPendingSemanticKey({
       agent: 'claude', surface: 'tool_error', refs: hits,
-    }), () => toolErrorReminderText(hits));
+    }), () => toolErrorReminderText(hits, 'claude-mcp', usesManagedGuidance()));
   } catch {
     process.stderr.write('[caveat:hook] pending reminder build or publish failed\n');
     process.exit(0);
@@ -378,6 +379,7 @@ async function runAutoSyncWorker(): Promise<void> {
   if (!ctx) return;
   try {
     await runAutoSync({
+      userHome: ctx.userHome,
       caveatHome: ctx.caveatHome,
       ownDir: ctx.paths.knowledgeRepo,
             githubUser: ctx.config.githubUser,
@@ -431,7 +433,7 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
     if (ctx && !ctx.config.jevEnabled) {
       const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
       const hits = searchCaveatsSafely(CLAUDE_HOST, { topicText: prompt, failureText: prompt, surface: 'user_prompt' });
-      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits));
+      if (hits.length > 0) contexts.push(userPromptSubmitReminderText(hits, 'claude-mcp', usesManagedGuidance()));
     }
     if (ctx) {
       try {
@@ -513,7 +515,7 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
       failureText,
       surface: 'stop' as const,
     })));
-    queueStopForSession(CLAUDE_HOST, sessionId, signals, related, () => stopReminderText(signals, related));
+    queueStopForSession(CLAUDE_HOST, sessionId, signals, related, () => stopReminderText(signals, related, 'claude-mcp', usesManagedGuidance()));
     process.exit(0);
   }
 

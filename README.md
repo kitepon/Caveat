@@ -54,7 +54,7 @@ Cursor uses its native `beforeSubmitPrompt`, `postToolUse`,
 `postToolUseFailure`, and `stop` events. Caveat formats the same retrieval and
 pending-reminder results for Cursor without replacing unrelated Cursor hooks.
 
-The next action in a reminder follows the active host. Claude uses the Caveat
+For unmanaged npm installations, the next action in a reminder follows the active host. Claude uses the Caveat
 MCP tools. Codex and Cursor inspect an entry with
 `caveat show <id> --source <source>`, update or create Markdown in the own
 knowledge repo, and run `caveat index`. Community entries are subscriptions and
@@ -76,9 +76,11 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.6 candidate. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.7 candidate. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
+
+Managed AI guidance uses the registered `caveat_get`, `caveat_update`, `caveat_record`, and `caveat_sync` tools instead of a PATH command. `caveat_sync` pushes private knowledge to its configured remote; the client retains its permission checks. Client timeout does not cancel an active sync. Inspect `deployment status` → `ownSync` for its late result; a running receipt is not success. If the MCP tool is unavailable, stop rather than using a global CLI or another context.
 
 With Jev enabled, Caveat stores each completed three-turn judgment, search terms,
 candidate scores, and delivery outcome locally under `<caveatHome>/jev-observations/`.
@@ -140,7 +142,7 @@ flowchart LR
 - **`markdown-in-git` is the source of truth.** SQLite (FTS5 trigram) is a rebuildable derived index, gitignored.
 - **Two sharing boundaries, enforced by the tool.** Your `~/.caveat/own/` is yours. `caveat sync` mirrors it (public + private) to a **private** remote for your machines/org — refusing any anonymously-readable remote. `caveat publish` mirrors **only public** entries to a **public** repo. Subscribers add a repo with `caveat community add <github-url-or-username>`; updates flow via `caveat community pull`. No central server; no automatic merge of strangers' entries — trust stays social.
 - **`visibility: public | private`** is a distribution ceiling. Private repos may contain both tiers; `caveat publish` filters and seals the public boundary.
-- **Agent integrations.** Claude Code gets an MCP server exposing 6 tools (`caveat_search` / `caveat_get` / `caveat_record` / `caveat_update` / `caveat_list_recent` / `caveat_pull`) plus hooks. Codex and Cursor get native hooks through their product-owned installers. All surfaces reuse the same retrieval gates — no hardcoded keyword lists:
+- **Agent integrations.** Claude Code gets an MCP server exposing 7 tools (`caveat_search` / `caveat_get` / `caveat_record` / `caveat_update` / `caveat_list_recent` / `caveat_pull` / `caveat_sync`) plus hooks. Codex and Cursor get native hooks through their product-owned installers. All surfaces reuse the same retrieval gates — no hardcoded keyword lists:
   - **UserPromptSubmit** (事前発火): when you submit a prompt, tokenize it (path-stripping + self-identity + pure-hiragana glue removal + CJK group dedup), FTS the DB, and surface entries that pass **three structural gates** — (1) ≥ 2 distinct group matches (co-occurrence), (2) ≥ 1 match in the entry's `## Symptom` section (failure-state evidence), (3) ≥ 1 corpus-rarest prompt token in `topical_text` (title + tags + environment values, topic evidence). Bare proper-noun mentions like `RTX 5090 CUDA で何かやってる` stay silent; only specific failure-state vocabulary plus a curated topic anchor (`cudaGetDeviceCount`, `SQLITE_READONLY`, …) fires the gate. No hardcoded word lists.
   - **PostToolUse** (+ Claude **PostToolUseFailure**) (実行中発火): when a tool returns `is_error: true` or Claude Code emits a failed-tool `error` payload, Claude spawns a detached worker so the foreground hook returns in ~20ms. Codex performs a bounded foreground lookup because current Codex payloads and transcript timing make detached workers unreliable there. In both cases, the reminder lands on the next hook tick. The next hook tick emits only knowledge not yet delivered in that session.
   - **Stop** (事後発火): parse the session transcript for objective struggle signals (tool failures, repeated file edits, web searches, bash retries). If any are present, queue a compact reminder for the next context-capable hook tick and nudge through that host's available action surface: Caveat MCP for Claude, or the Caveat CLI and own Markdown for Codex/Cursor. When Jev is enabled, three completed turns replace the Stop signal gate for struggle detection.
@@ -173,7 +175,7 @@ apps/cli/             caveat-cli (published to npm) — bundled CLI with subcomm
                         cursor-hook install|uninstall|diagnostics|... /
                         factory-diagnostics [--require-connector cursor|grok] /
                         jev enable|disable|status
-apps/mcp/             @caveat/mcp — stdio MCP server exposing 6 tools via
+apps/mcp/             @caveat/mcp — stdio MCP server exposing 7 tools via
                       @modelcontextprotocol/sdk. Imported by caveat-cli as `mcp-server`
 apps/web/             @caveat/web — Hono SSR read-only share portal (/, /g/:id, /community) +
                       custom markdown-it wikilinks plugin for [[slug]] → /g/slug rendering

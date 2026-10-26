@@ -75,7 +75,8 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
   登録失敗と読戻し失敗は非0終了する。GrokにはMCPを提供し、独自hookは追加しない。
 - host固有adapterは同じ検索・pending・同期coreを再利用し、別hostのfieldやstdout契約を改名しない。
 - 検索結果は共有しても操作案内はhostごとに分ける。ClaudeはMCP、Codex / Cursorは
-  Caveat CLIとown Markdownを使い、別hostにしかない入口を案内しない。
+  Caveat CLIとown Markdownを使い、別hostにしかない入口を案内しない。managed導入は例外で、
+  全AI hostへ既登録MCPのget/update/record/syncを案内する。MCPが使えなければ停止し、bare CLIへ戻さない。
 - 機械可読な製品集約診断のschemaは`caveat.native_factory_diagnostics.v1`。既定overallは既存の
   Claude / Codex readinessを維持し、Cursorを必須とするhostは
   `caveat factory-diagnostics --json --require-connector cursor`を使う。Caveatが
@@ -508,3 +509,11 @@ Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL c
 ## MCP runtimeの読込み境界（次版source）
 
 通常hook/検索等はMCP SDKのmodule評価を必要としない。MCP server実装はpack必須asset `dist/mcp-server.js` に分離し、`mcp-server` command境界で読み込む。読込みとserver起動の失敗は従来の `CAVEAT.MCP_SERVER_FAILED` を記録して元例外を返す。MCPの検証/transport/ツール契約を省略せず、通常stdio経路で受け入れる。固定managed entry/runtimeのbytesを変更しない。
+
+## managed導入のAI操作案内（0.21.7）
+
+managed rootが確実に不在の場合だけ、通常npm導入の既存案内を維持する。存在・破損・読取不明ならPATHのcaveatを案内しない。詳細はcaveat_getにid+source、更新/新規はcaveat_update/caveat_recordを使い、raw編集後のindex手順は出さない。
+
+caveat_syncはstrict空入力で、自分のMCP contextのown repoとconfig.githubUserだけを既syncOwnへ渡す。community pull、remote作成、任意URL/user/command、認証変更は行わない。私有知識を既remoteへpushするためopenWorldHint:trueとし、readOnlyHintを付けずclientの承認方針を保つ。
+
+Git/reindex lockは既存と共用し重複はSYNC_BUSY。clientのtimeout/cancelは進行中syncを中断しない。完了/失敗の固定summaryはcaveatHome/sync/mcp-sync.jsonへ残し、deployment statusのownSyncで読める。runningは成功を意味せず、server強制終了などの未完了も成功へ補完しない。結果とエラーに資格・remote URL・Git標準出力を返さない。

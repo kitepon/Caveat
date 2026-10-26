@@ -459,24 +459,26 @@ function reminderSymptomLine(symptomExcerpt: string): string | null {
 
 export type ReminderActionSurface = 'claude-mcp' | 'native-cli';
 
-function detailGuidance(surface: ReminderActionSurface): string {
+function detailGuidance(surface: ReminderActionSurface, managed: boolean): string {
   if (surface === 'native-cli') {
     return '詳細は `caveat show <id> --source <source>` で取得し、documented な対処と environment が一致するか確認してから適用してください。無関係と判断したら無視して続行で OK。';
   }
-  return 'mcp__caveat__caveat_get で詳細を確認し、documented な対処があれば適用してください。無関係と判断したら無視して続行で OK。';
+  return `${managed ? '' : 'mcp__caveat__'}caveat_get で詳細を確認し、documented な対処があれば適用してください。無関係と判断したら無視して続行で OK。`;
 }
 
-function promptDetailGuidance(surface: ReminderActionSurface): string {
+function promptDetailGuidance(surface: ReminderActionSurface, managed: boolean): string {
   if (surface === 'native-cli') {
     return '詳細は `caveat show <id> --source <source>` で取得。environment が一致するか確認してから適用判断してください。無関係と判断したら無視して続行で OK。';
   }
-  return '詳細は mcp__caveat__caveat_get に id + source を渡して取得。environment が一致するか確認してから適用判断してください。無関係と判断したら無視して続行で OK。';
+  return `詳細は ${managed ? '' : 'mcp__caveat__'}caveat_get に id + source を渡して取得。environment が一致するか確認してから適用判断してください。無関係と判断したら無視して続行で OK。`;
 }
 
 export function toolErrorReminderText(
   hits: SearchResult[],
   actionSurface: ReminderActionSurface = 'claude-mcp',
+  managed = false,
 ): string {
+  if (managed) actionSurface = 'claude-mcp';
   const lines: string[] = [];
   lines.push(
     `[caveat] 直前のエラーに一致する可能性のある既知の罠が ${hits.length} 件あります:`,
@@ -488,14 +490,17 @@ export function toolErrorReminderText(
     if (symptomLine) lines.push(symptomLine);
   });
   lines.push('');
-  lines.push(detailGuidance(actionSurface));
+  lines.push(detailGuidance(actionSurface, managed));
+  if (managed) lines.push('Use the Caveat MCP tools only: caveat_get with id + source for details; caveat_update or caveat_record updates the index too. If the tool is unavailable, stop; do not use a PATH command or another context.');
   return lines.join('\n');
 }
 
 export function userPromptSubmitReminderText(
   hits: SearchResult[],
   actionSurface: ReminderActionSurface = 'claude-mcp',
+  managed = false,
 ): string {
+  if (managed) actionSurface = 'claude-mcp';
   const lines: string[] = [];
   lines.push(
     `[caveat] このプロンプトに関連する可能性のある既知の罠が ${hits.length} 件あります:`,
@@ -507,7 +512,8 @@ export function userPromptSubmitReminderText(
     if (symptomLine) lines.push(symptomLine);
   });
   lines.push('');
-  lines.push(promptDetailGuidance(actionSurface));
+  lines.push(promptDetailGuidance(actionSurface, managed));
+  if (managed) lines.push('Use the Caveat MCP tools only: caveat_get with id + source for details; caveat_update or caveat_record updates the index too. If the tool is unavailable, stop; do not use a PATH command or another context.');
   return lines.join('\n');
 }
 
@@ -526,7 +532,9 @@ export function stopReminderText(
   signals: SessionSignals,
   related: SearchResult[],
   actionSurface: ReminderActionSurface = 'claude-mcp',
+  managed = false,
 ): string {
+  if (managed) actionSurface = 'claude-mcp';
   const lines: string[] = [];
   lines.push('[caveat] このセッションで外部仕様の罠に当たった可能性を示すシグナル:');
 
@@ -569,22 +577,23 @@ export function stopReminderText(
   if (related.length > 0) {
     lines.push(actionSurface === 'native-cli'
       ? `セッション内容と共起する既存罠 ${related.length} 件（詳細は \`caveat show <id> --source <source>\` で確認）:`
-      : `セッション内容と共起する既存罠 ${related.length} 件（関連があれば mcp__caveat__caveat_update で last_verified を更新 or 追記）:`);
+      : `セッション内容と共起する既存罠 ${related.length} 件（関連があれば ${managed ? '' : 'mcp__caveat__'}caveat_update で last_verified を更新 or 追記）:`);
     related.forEach((h, i) => {
       lines.push(reminderHitLine(h, i));
     });
     lines.push('');
     lines.push(actionSurface === 'native-cli'
       ? '関連する own エントリは `caveat show <id> --source own` が示す path の Markdownで last_verified や本文を更新し、`caveat index` を実行してください。community エントリは購読物なので直接編集しません。上記と異なる新規の罠は Caveat の own knowledge repo へ Markdown で記録し、`caveat index` を実行してください。outcome: impossible（現状の制約では不可能と判定した結論）も記録対象。'
-      : '上記と異なる新規の罠を踏んでいたら mcp__caveat__caveat_record で登録してください。outcome: impossible（現状の制約では不可能と判定した結論）も記録対象。');
+      : `上記と異なる新規の罠を踏んでいたら ${managed ? '' : 'mcp__caveat__'}caveat_record で登録してください。outcome: impossible（現状の制約では不可能と判定した結論）も記録対象。`);
   } else {
     lines.push(actionSurface === 'native-cli'
       ? '既存罠に該当なし。外部仕様の罠に苦戦していたなら Caveat の own knowledge repo へ Markdown で記録し、`caveat index` を実行してください。outcome: impossible も記録対象。'
-      : '既存罠に該当なし。外部仕様の罠に苦戦していたなら mcp__caveat__caveat_record で登録してください。outcome: impossible も記録対象。');
+      : `既存罠に該当なし。外部仕様の罠に苦戦していたなら ${managed ? '' : 'mcp__caveat__'}caveat_record で登録してください。outcome: impossible も記録対象。`);
   }
   lines.push(actionSurface === 'native-cli'
     ? '記録時は visibility を二項基準で選ぶ（public = 第三者再現可能 / private = repo 固有）。迷ったら private。'
     : '記録時は tool 説明の二項基準で visibility を選ぶ（public = 第三者再現可能 / private = repo 固有）。迷ったら private。');
 
+  if (managed) lines.push('Use the Caveat MCP tools only: caveat_get with id + source for details; caveat_update or caveat_record updates the index too. If the tool is unavailable, stop; do not use a PATH command or another context.');
   return lines.join('\n');
 }

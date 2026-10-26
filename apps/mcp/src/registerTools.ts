@@ -1,3 +1,4 @@
+import { handleSync } from './tools/sync.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { McpContext } from './context.js';
 import { z } from 'zod';
@@ -84,6 +85,20 @@ export function registerAllTools(server: McpServer, ctx: McpContext, productVers
       inputSchema: listRecentInputShape,
     },
     observeToolFailure((args) => handleListRecent(ctx, args as ListRecentArgs), productVersion),
+  );
+
+  server.registerTool(
+    'caveat_sync',
+    {
+      title: 'caveat_sync',
+      description: 'Sync this client context own private knowledge repository: inspect, commit, pull --rebase, push and reindex through the configured githubUser policy. May send private knowledge to its existing remote. Does not initialize a repository or change authentication. On SYNC_BUSY retry later. Client timeout/cancellation does not cancel an in-progress sync: inspect deployment status ownSync before retrying; no fallback to a PATH CLI or another context.',
+      inputSchema: z.strictObject({}),
+      annotations: { openWorldHint: true },
+    },
+    async () => {
+      const result = await handleSync(ctx, productVersion);
+      return { ...jsonResult(result), ...(result.status === 'failed' ? { isError: true } : {}) };
+    },
   );
 
   server.registerTool(
