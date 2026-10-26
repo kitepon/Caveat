@@ -1,0 +1,28 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
+import { createInterface } from 'node:readline';
+import { spawn } from 'node:child_process';
+const home = process.env.CODEX_HOME, receipt = process.env.CAVEAT_FAKE_CLOSE_RECEIPT;
+assert.ok(home && receipt && basename(dirname(home)) === 'profile' && basename(dirname(dirname(home))).startsWith('caveat-native-entry-'));
+createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  if (request.id === undefined) return;
+  let result;
+  if (request.method === 'initialize') result = { capabilities: {} };
+  else {
+    assert.equal(request.method, 'hooks/list');
+    const config = JSON.parse(readFileSync(join(home, 'hooks.json')));
+    result = { data: [{ hooks: Object.entries(config.hooks).flatMap(([event, groups]) => groups.flatMap(group => group.hooks.map(hook => ({
+      key: event, eventName: event, command: hook.command, currentHash: createHash('sha256').update(hook.command).digest('hex'), trustStatus: 'untrusted', enabled: true,
+    })))) }] };
+  }
+  process.stdout.write(JSON.stringify({ id: request.id, result }) + '\n');
+});
+process.stdin.once('end', () => {
+  // The wrapper exits first; its descendant retains the fixture cwd and pipes.
+  const code = `const fs=require('node:fs');setTimeout(()=>fs.writeFileSync(process.argv[1],JSON.stringify({profilePresentUntilClose:fs.existsSync(process.argv[2]),root:process.argv[3]})),400);`;
+  const descendant = spawn(process.execPath, ['-e', code, receipt, join(home, 'hooks.json'), dirname(dirname(home))], { cwd: dirname(home), stdio: ['ignore', 'inherit', 'inherit'] });
+  descendant.once('spawn', () => { descendant.unref(); process.exit(0); });
+});
