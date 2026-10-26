@@ -1,9 +1,11 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import https from 'node:https';import net from 'node:net';
 import { spawnSync } from 'node:child_process';import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createGit } from '../src/gitRuntime.js';import { runAutoSync } from '../src/autoSync.js';import { runPeriodicSync } from '../src/periodicSync.js';
-import { DEFAULT_CONFIG } from '../src/config.js';
+import { createGit } from '../src/gitRuntime.js';import { readAutoSyncState } from '../src/autoSync.js';import { readPeriodicSyncState } from '../src/periodicSync.js';
 import { runInit } from '../../../apps/cli/src/commands/init.js';
+import { runHook } from '../../../apps/cli/src/commands/hookCmd.js';
+import { runAutosync } from '../../../apps/cli/src/commands/autosync.js';
+import { buildContext } from '../../../apps/cli/src/context.js';
 import { runSync } from '../../../apps/cli/src/commands/sync.js';
 const adapter = vi.hoisted(() => ({ helper: '', proxy: '' }));
 // Only the credential backend and HTTP endpoint are fixtures. All sync callers, simple-git and Git are real.
@@ -20,7 +22,7 @@ const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const previousExit = process.exitCode;
 afterEach(() => { vi.unstubAllEnvs();vi.unstubAllGlobals();vi.clearAllMocks();process.exitCode=previousExit;adapter.helper='';adapter.proxy=''; });
 
-async function fixture(run: (f: { root: string; home: string; own: string; caveatHome: string; marker: string; forbidden: string; ctx: any; git: (args: string[]) => string }) => Promise<void>) {
+async function fixture(run: (f: { root: string; home: string; own: string; caveatHome: string; marker: string; forbidden: string; ctx: ReturnType<typeof buildContext>; git: (args: string[]) => string }) => Promise<void>) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'caveat-real-git-')),home=path.join(root,'home'),own=path.join(root,'own'),caveatHome=path.join(root,'caveat');
   for(const p of [home,own,caveatHome])fs.mkdirSync(p,{mode:0o700});
   const marker=path.join(root,'selected.jsonl'),forbidden=path.join(root,'forbidden');
@@ -40,8 +42,8 @@ if(process.argv[3]==='get')try{process.stdout.write(namedGithubCredential(fs.rea
   for(const k of Object.keys(process.env))if(k.toUpperCase().startsWith('GIT_CONFIG'))vi.stubEnv(k,undefined);
   vi.stubGlobal('fetch',vi.fn(async()=>new Response('',{status:401})));
   const git=(args:string[])=>{const r=spawnSync('git',['-C',own,...args],{encoding:'utf8',timeout:10000,windowsHide:true});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
-  const paths={caveatHome,knowledgeRepo:own,entriesDir:path.join(own,'entries'),dbPath:path.join(caveatHome,'index/caveat.db'),communityDir:path.join(caveatHome,'community'),publishMirrorDir:path.join(caveatHome,'publish')};
-  const ctx={userHome:home,caveatHome,userConfigPath:path.join(home,'.caveatrc.json'),paths,config:{...DEFAULT_CONFIG,knowledgeRepo:own,githubUser:'fixture-target'},logger:log};
+  fs.writeFileSync(path.join(home,'.caveatrc.json'),JSON.stringify({knowledgeRepo:own,githubUser:'fixture-target'}));
+  const ctx=buildContext(log,{userHome:home,caveatHome});
   try{await run({root,home,own,caveatHome,marker,forbidden,ctx,git});}
   finally{for(const s of sockets)s.destroy();await Promise.all([new Promise<void>(r=>proxy.close(()=>r())),new Promise<void>(r=>tls.close(()=>r()))]);fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});expect(fs.existsSync(root)).toBe(false);}
 }
@@ -51,8 +53,8 @@ for(const route of ['init','init-existing','sync-init','manual','background','pe
  if(route!=='init'&&route!=='sync-init')initialize(f);
  if(route==='init'||route==='init-existing')await expect(runInit(f.ctx,{sync:'https://github.com/fixture-owner/fixture-repository.git',yes:true,skipClaude:true,dryRun:false},{codexAvailable:()=>false,isTty:()=>false})).rejects.toThrow('CAVEAT_GITHUB_USER_UNAVAILABLE');
  else if(route==='sync-init'||route==='manual'){await runSync(f.ctx,route==='sync-init'?{init:'https://github.com/fixture-owner/fixture-repository.git'}:{});expect(log.error.mock.calls.flat().join(' ')).toContain('CAVEAT_GITHUB_USER_UNAVAILABLE');}
- else if(route==='background'){const r=await runAutoSync({ownDir:f.own,caveatHome:f.caveatHome,paths:f.ctx.paths,githubUser:'fixture-target',logger:log,debounceMs:0});expect(r.outcome?.own.code).toBe('CAVEAT_GITHUB_USER_UNAVAILABLE');}
- else{const r=await runPeriodicSync({ownDir:f.own,caveatHome:f.caveatHome,paths:f.ctx.paths,githubUser:'fixture-target',logger:log,intervalMs:0});expect(r.status).toBe('failed');expect(r.reason).toBe('caveat_github_user_unavailable');}
+ else if(route==='background'){vi.stubEnv('CAVEAT_AUTO_SYNC','on');const halt=new Error('fixture worker exit');const exit=vi.spyOn(process,'exit').mockImplementation(()=>{throw halt;});try{await expect(runHook('autosync')).rejects.toBe(halt);}finally{exit.mockRestore();}expect(readAutoSyncState(f.caveatHome)?.ownSync.consecutiveFailureCount).toBe(1);}
+ else{await runAutosync(f.ctx);const r=readPeriodicSyncState(f.caveatHome)?.last_result;expect(r?.status).toBe('failed');expect(r?.reason).toBe('caveat_github_user_unavailable');}
  selected(f);
 }),30000);
 
