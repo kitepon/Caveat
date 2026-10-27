@@ -398,6 +398,12 @@ Before the next managed release is published, retain an acceptance result from e
 
 ### CI toolchain
 
+The full Windows native suite has a 45-minute job budget; Linux/macOS retain
+30 minutes. The seven-file migration fixtures brought the measured Windows
+CLI completion to the old job deadline, which canceled the final native hook
+proof after all 345 CLI tests passed. Keep every individual owned-child probe
+deadline and all required gates unchanged; job cancellation is not success.
+
 Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json` の Node 24.22.1 と pnpm 10.0.0 を使う。pnpm は root の `packageManager` とも一致させ、実行時に実版を照合する。workflow の完全版指定と共有 contract の一致は文書・release smoke の両 gate で検査する。
 
 3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。core と CLI の移行試験は同じ既存 runner で実行 binary（共有 libnode 版は隣接 library も）を私有 fixture へコピーして起動し、製品の runtime 親保護条件を保つ。共有 runtime の権限は変更しない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
