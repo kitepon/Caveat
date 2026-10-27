@@ -65,7 +65,7 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
     assert.ok(Array.isArray(plan.absences) && plan.absences.length <= 16 && plan.absences.every(row => typeof row.path === 'string' && isAbsolute(row.path) && typeof row.parent === 'string' && isAbsolute(row.parent)), 'global_recovery_absence_invalid');
     assert.ok(Array.isArray(plan.directories) && plan.directories.length <= 512, 'global_recovery_directory_bound');
     const journal = parseGlobalMutationJournal(read('journal.jsonl'), expectedPlanSha256);
-    const base = { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus: journal.status,
+    const base = { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus: journal.status, journalSha256: journal.bytesSha256,
       filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const };
     if (!['ready', 'complete'].includes(journal.status)) return { ...base, status: 'stopped' as const, reason: 'interrupted_or_unknown', observations: [] };
     const results = journal.records.filter(row => row.kind === 'result');

@@ -681,7 +681,13 @@ preservation, working copies, fixed ordinary Node/npm uninstall, exclusive shell
 publication and independent status readback. Ordered bounded phase receipts omit
 raw paths, argv and exception text. The full preservation engine verification
 remains mandatory around wrapper operations. A complete journal is a mutation
-checkpoint, not proof of subsequent close or independent status. Partial/unknown
+checkpoint, not proof of subsequent close or independent status. Final readback
+reopens all saved original/state/journal/protected/working/generated evidence
+read-only against the checkpoint journal byte digest (a replacement empty
+completion is not a full state match), then must also match the reviewed pointer
+bytes, executable Node proof and rendered
+wrapper paths/hashes; a separately healthy selection cannot substitute for that
+reviewed plan after the original guard closes. Partial/unknown
 results are preserved; there is no automatic replay, unlink or overwrite.
 
 `deployment global-inspect-recovery <run-id> --plan-sha256 <digest> --json`

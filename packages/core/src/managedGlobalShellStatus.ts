@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -12,7 +13,7 @@ import { isWindows } from './platform.js';
 
 type NativeManifest = { schema: 'caveat.managed_shell.v2'; node: Pick<ReturnType<typeof snapshotGlobalPackage>['node'], 'canonical' | 'version' | 'binary'>;
   registrationNode: string; launcher: string; entrySha256: string; runtimeSha256: string; binDir: string; windows: boolean; binIdentity: GlobalGuardIdentity; files: { name: string; identity: GlobalGuardIdentity }[] };
-type Deployment = { release: string; version: string; launcher: string; payloadVerified: true };
+type Deployment = { release: string; version: string; launcher: string; payloadVerified: true; pointerSha256: string };
 const binding = ({ dev, ino, kind, owner, group, mode, securitySha256 }: GlobalGuardIdentity) => ({ dev, ino, kind, owner, group, mode, securitySha256 });
 const fields = (value: unknown, names: string[]) => {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), 'native_shell_object_required');
@@ -75,9 +76,10 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
       }
       for (const tree of [pointer, metadata, payload, entry, ...held]) guard.readTree(tree);
       assert.ok(guard.readPersistedJournal(directory, 'manifest.json').equals(bytes), 'native_shell_manifest_changed');
-      deployment = { release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true };
+      deployment = { release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, pointerSha256: guard.readTree(pointer)[0]!.identity.contentSha256! };
       if (changed) return { native: true as const, status: 'changed' as const, reason: changed, deployment };
       return { native: true as const, status: 'ready' as const, manifest: path, deployment,
+        nodeSha256: createHash('sha256').update(JSON.stringify({ canonical: value.node.canonical, version: value.node.version, binary: value.node.binary })).digest('hex'),
         wrappers: generated.map(file => ({ path: join(value.binDir, file.name), sha256: file.sha256 })) };
     } finally { guard.close(); }
   } catch (error) {

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import { bindGlobalAdmission, type GlobalMigrationInput } from './managedGlobalMigration.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
+import { inspectGlobalMigrationRecovery } from './managedGlobalRecovery.js';
 import { managedShellStatusCurrent } from './managedGlobalShellStatus.js';
 
 export type GlobalMigrationEvent = { schema: 'caveat.global_migration_event.v1'; sequence: number; phase: string; event: string; planSha256: string | null; runId: string | null; pid?: number };
@@ -25,6 +26,9 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     admission = await admit(input, probe => { const saved = phase; phase = 'process-preflight'; try { event(probe.event, probe.pid); } finally { phase = saved; } });
     planSha256 = admission.planSha256;
     assert.equal(planSha256, expectedPlanSha256, 'global_migration_expected_plan_changed'); event('completed');
+    const reviewed = admission.plan, node = reviewed.baseline.node;
+    const pointerSha256 = reviewed.protectedObjects.find(row => row.path === join(reviewed.root, 'active.json'))?.rows[0]?.identity.contentSha256;
+    assert.ok(pointerSha256, 'global_migration_reviewed_pointer_required');
     phase = 'prepare'; event('issued');
     const session = await admission.prepare(expectedPlanSha256); runId = basename(session.runDirectory); event('completed');
     for (const [step, run, expected] of [
@@ -42,11 +46,18 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     phase = 'checkpoint'; event('issued'); await session.engine.verifyCurrent();
     assert.equal(session.shell.status().status, 'ready', 'global_migration_shell_unconfirmed');
     // A complete mutation journal is a state checkpoint, not proof of later close or independent readback.
-    session.journal.complete(sha({ planSha256, originals: session.engine.manifest(), shell: session.shell.snapshot() })); event('completed');
+    session.journal.complete(sha({ planSha256, originals: session.engine.manifest(), shell: session.shell.snapshot() }));
+    const journalSha256 = session.journal.read().bytesSha256; event('completed');
     phase = 'close'; event('issued'); admission.close(); admission = null; event('completed');
     phase = 'readback'; event('issued');
-    const readback = await managedShellStatusCurrent({ root: session.plan.root });
-    assert.equal(readback.status, 'ready', 'global_migration_independent_readback_unconfirmed'); event('completed');
+    const persisted = await inspectGlobalMigrationRecovery(session.runDirectory, planSha256);
+    assert.ok(persisted.status === 'observed' && persisted.reason === 'recorded_state_matches' && persisted.journalStatus === 'complete', 'global_migration_persisted_readback_unconfirmed');
+    assert.equal(persisted.journalSha256, journalSha256, 'global_migration_readback_journal_changed'); event('persisted-verified');
+    const readback = await managedShellStatusCurrent({ root: reviewed.root });
+    assert.ok(readback.status === 'ready' && 'native' in readback, 'global_migration_independent_readback_unconfirmed');
+    assert.equal(readback.deployment?.pointerSha256, pointerSha256, 'global_migration_readback_pointer_changed');
+    assert.equal(readback.nodeSha256, sha({ canonical: node.canonical, version: node.version, binary: node.binary }), 'global_migration_readback_node_changed');
+    assert.deepEqual(readback.wrappers, reviewed.shellPlan.files.map(({ path, sha256 }) => ({ path, sha256 })), 'global_migration_readback_wrappers_changed'); event('completed');
     result = { status: 'completed', phase };
   } catch (error) {
     result = { status: phase === 'admission' ? 'stopped' : 'unknown', phase, errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) };

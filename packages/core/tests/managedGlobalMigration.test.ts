@@ -340,6 +340,14 @@ describe('read-only admission and native-v2 independent status', () => {
     expect(JSON.parse(readFileSync(file, 'utf8')).node.binary[0].sha256).toBe('0'.repeat(64));
   });
 });
+function fixtureCoordinatorAdmission(admission: Awaited<ReturnType<typeof bindGlobalAdmission>>) {
+  return { ...admission, async prepare(digest: string) {
+    const session = await admission.prepare(digest);
+    return { ...session, uninstall: (emit = () => {}) => session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath,
+      ['-e', "for(const file of process.argv.slice(1))require('node:fs').rmSync(file,{recursive:true})", ...session.engine.manifest().objects.map(row => join(row.directory, row.name))],
+      session.runDirectory, {}, emit, 5000)) };
+  } };
+}
 describe('product migration coordinator', () => {
   it('does not start preparation when the reviewed digest differs', { timeout: 60000 }, async () => {
     const f = fixture(), before = readdirSync(f.paths.root), events: unknown[] = [];
@@ -349,14 +357,7 @@ describe('product migration coordinator', () => {
   });
   it('connects all phases, closes the owning guard, and independently reads installed state', { timeout: 120000 }, async () => {
     const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables()), events: { sequence: number; phase: string; event: string }[] = [];
-    const result = await coordinateGlobalMigration(f.input, admission.planSha256, event => events.push(event), async () => ({ ...admission,
-      async prepare(digest) {
-        const session = await admission.prepare(digest);
-        return { ...session, uninstall: (emit = () => {}) => session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath,
-          ['-e', "for(const file of process.argv.slice(1))require('node:fs').rmSync(file,{recursive:true})", ...session.engine.manifest().objects.map(row => join(row.directory, row.name))],
-          session.runDirectory, {}, emit, 5000)) };
-      },
-    }));
+    const result = await coordinateGlobalMigration(f.input, admission.planSha256, event => events.push(event), async () => fixtureCoordinatorAdmission(admission));
     expect(result).toMatchObject({ status: 'completed', existingProcessOperations: 0, privilegeElevation: false });
     expect(events.map(row => row.sequence)).toEqual(events.map((_, index) => index + 1));
     expect(events.at(-1)).toMatchObject({ phase: 'terminal', event: 'completed' }); expect(existsSync(f.paths.lock)).toBe(false);
@@ -366,6 +367,31 @@ describe('product migration coordinator', () => {
   });
 });
 
+
+describe('coordinator readback changes after close', () => {
+  for (const change of ['pointer', 'node-proof', 'original', 'journal', 'journal-checkpoint'] as const) it('refuses a ready but changed ' + change, { timeout: 120000 }, async () => {
+    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    const result = await coordinateGlobalMigration(f.input, admission.planSha256, event => {
+      if (event.phase !== 'readback' || event.event !== (change === 'pointer' || change === 'node-proof' ? 'persisted-verified' : 'issued')) return;
+      if (change === 'pointer') {
+        const source = join(f.root, 'managed-source'); writeFileSync(join(source, 'package.json'), JSON.stringify({ name: 'caveat-cli', version: '1.0.1', bin: { caveat: 'dist/caveat.js' } }));
+        const staged = stageManagedDeployment(source, { userHome: f.profile }); activateManagedDeployment(staged.release, { userHome: f.profile });
+      } else if (change === 'journal-checkpoint') {
+        const file = join(f.paths.root, event.runId!, 'journal.jsonl'), lines = readFileSync(file, 'utf8').trimEnd().split('\n'), completion = JSON.parse(lines.at(-1)!);
+        completion.stateSha256 = '1'.repeat(64); lines[lines.length - 1] = JSON.stringify(completion); writeFileSync(file, lines.join('\n') + '\n');
+      } else if (change === 'journal') {
+        const file = join(f.paths.root, event.runId!, 'journal.jsonl'), header = readFileSync(file, 'utf8').split('\n')[0]!;
+        writeFileSync(file, header + '\n' + JSON.stringify({ sequence: 1, previousSha256: sha(Buffer.from(header + '\n')), kind: 'complete', stateSha256: '0'.repeat(64) }) + '\n');
+      } else if (change === 'original') {
+        appendFileSync(join(f.paths.root, event.runId!, 'original-package/package.json'), '\n');
+      } else {
+        const file = join(f.paths.root, 'shell/manifest.json'), manifest = JSON.parse(readFileSync(file, 'utf8')); manifest.node.version = 'v0.0.0'; writeFileSync(file, JSON.stringify(manifest) + '\n');
+      }
+    }, async () => fixtureCoordinatorAdmission(admission));
+    expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ status: 'ready', ...(change === 'pointer' ? { deployment: { version: '1.0.1' } } : {}) });
+    expect(result).toMatchObject({ status: 'unknown', phase: 'readback' }); expect(existsSync(f.paths.lock)).toBe(false);
+  });
+});
 
 describe('built product global CLI', () => {
   it('derives protected normal settings and stops a real preflight without private run writes', { timeout: 120000 }, async () => {
