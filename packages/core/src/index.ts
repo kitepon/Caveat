@@ -51,6 +51,8 @@ export { createWindowsAclSession } from './privateWindowsAclSession.js';
 export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
 
 export * from './managedShell.js';
+export { snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
+export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
 
 export { usesManagedGuidance } from './managedGuidance.js';
 export { readMcpSyncState, writeMcpSyncState, type McpSyncState } from './mcpSyncState.js';

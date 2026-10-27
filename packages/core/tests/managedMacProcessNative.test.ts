@@ -1,0 +1,46 @@
+import { describe, expect, it } from 'vitest';
+import { realpathSync } from 'node:fs';
+import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo } from '../src/managedMacProcessNative.js';
+import { isWindows } from '../src/platform.js';
+
+describe('native process bridge and Darwin layouts', () => {
+  it('loads the shipped native bridge and calls only the current process ID on each OS', async () => {
+    const koffi = await import('koffi');
+    const library = koffi.load(isWindows() ? 'kernel32.dll' : null);
+    const getPid = library.func(isWindows() ? 'uint32_t __stdcall GetCurrentProcessId()' : 'int getpid()');
+    expect(getPid()).toBe(process.pid);
+  });
+  it('reads only the declared argument strings and excludes the trailing environment segment', () => {
+    const count = Buffer.alloc(4); count.writeInt32LE(3);
+    const bytes = Buffer.concat([count, Buffer.from('/kernel/node\0\0node\0\0script.js\0SECRET_KEY=never-return-this\0')]);
+    const result = decodeMacArguments(bytes);
+    expect(result.argv).toEqual(['node', '', 'script.js']);
+    expect(result.savedExecutable).toBe('/kernel/node');
+    expect(JSON.stringify(result)).not.toContain('SECRET_KEY');
+    expect(JSON.stringify(result)).not.toContain('never-return-this');
+  });
+  it('rejects malformed count, truncated strings and oversized kernel argument data', () => {
+    const bytes = Buffer.from([255, 255, 255, 255, 1, 0]);
+    expect(() => decodeMacArguments(bytes)).toThrow('mac_argument_count');
+    const count = Buffer.alloc(4); count.writeInt32LE(2);
+    expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0unterminated')]))).toThrow('mac_argument_unterminated');
+    expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0SECRET_KEY=unrequested-value\0')]))).toThrow('mac_argument_environment_shaped');
+    expect(() => decodeMacArguments(Buffer.alloc(1024 * 1024 + 1))).toThrow('mac_arguments_bound');
+  });
+  it('checks the BSD ABI size, PID and microsecond birth instead of the process name', () => {
+    const bytes = Buffer.alloc(136); bytes.writeUInt32LE(42, 12); bytes.writeUInt32LE(1, 16); bytes.writeUInt32LE(501, 20);
+    bytes.writeBigUInt64LE(1700000000n, 120); bytes.writeBigUInt64LE(123456n, 128);
+    expect(decodeMacBsdInfo(bytes, 42)).toEqual({ pid: 42, ppid: 1, uid: 501, birth: '1700000000:123456', state: 'live' });
+    expect(() => decodeMacBsdInfo(bytes, 43)).toThrow('mac_bsd_pid_changed');
+    expect(() => decodeMacBsdInfo(bytes.subarray(0, 128), 42)).toThrow('mac_bsd_info_size');
+    bytes.writeBigUInt64LE(1000000n, 128);
+    expect(() => decodeMacBsdInfo(bytes, 42)).toThrow('mac_process_birth_invalid');
+  });
+  it.skipIf(process.platform !== 'darwin')('reads the real Darwin kernel identity and argv of its own test process without enumerating other processes', async () => {
+    const reader = await createMacKernelReader(), value = reader.readProcess(process.pid);
+    expect(value.reason).toBeUndefined(); expect(value.pid).toBe(process.pid);
+    expect(value.ppid).toBe(process.ppid); expect(value.uid).toBe(process.getuid?.());
+    expect(value.executable?.path).toBe(realpathSync(process.execPath));
+    expect(value.argv?.length).toBeGreaterThan(0); expect(value.birth).toMatch(/^\d+:\d+$/);
+  });
+});

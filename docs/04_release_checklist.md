@@ -61,6 +61,10 @@ requires every relative link and image in packed Markdown to resolve inside
 that same tarball. Pack from `apps/cli` with pnpm. Direct `npm publish` of the
 workspace source is forbidden because it can leave `workspace:*` strings in the
 packed manifest; the release workflow publishes the checked pnpm tarball.
+The pack check requires all six x64/arm64 native bridge variants and their MIT
+license, then loads the bridge from an isolated staged managed payload and calls
+only its own process-ID API. A successful source dependency import does not replace
+this archive check. Keep the fixed entry/runtime independent of the native probe.
 Derive the release version from that package manifest in the same shell used
 for the remaining release commands.
 
