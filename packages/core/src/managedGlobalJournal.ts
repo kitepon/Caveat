@@ -3,7 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { openGlobalPathGuard } from './managedGlobalGuard.js';
 
 type Guard = Awaited<ReturnType<typeof openGlobalPathGuard>>;
-export type GlobalJournalOperation = 'retain' | 'uninstall' | 'wrapper' | 'restore' | 'manifest';
+export type GlobalJournalOperation = 'retain' | 'working-copy' | 'uninstall' | 'wrapper' | 'restore' | 'manifest';
 type Header = { schema: 'caveat.global_journal.v1'; planSha256: string; runId: string };
 type Intent = { sequence: number; previousSha256: string; kind: 'intent'; step: string; operation: GlobalJournalOperation; stateSha256: string };
 type Result = Omit<Intent, 'kind' | 'stateSha256'> & { kind: 'result'; outcome: 'confirmed' | 'unknown'; stateSha256: string | null };
@@ -46,7 +46,7 @@ export function parseGlobalMutationJournal(bytes: Buffer, expectedPlanSha256: st
     assert.ok(row.sequence === records.length + 1 && row.previousSha256 === previousSha256, 'global_journal_chain_invalid');
     if (row.kind === 'intent' || row.kind === 'result') {
       assert.ok(typeof row.step === 'string' && /^[a-zA-Z0-9._-]{1,64}$/.test(row.step)
-        && ['retain', 'uninstall', 'wrapper', 'restore', 'manifest'].includes(row.operation), 'global_journal_operation_invalid');
+        && ['retain', 'working-copy', 'uninstall', 'wrapper', 'restore', 'manifest'].includes(row.operation), 'global_journal_operation_invalid');
     }
     if (row.kind === 'intent') {
       assert.ok(!pending && !steps.has(row.step) && digest(row.stateSha256), 'global_journal_intent_invalid'); pending = row;

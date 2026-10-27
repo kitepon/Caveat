@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, linkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, linkSync, statSync, readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bindGlobalPathGuard, openGlobalPathGuard, type NativeGuardDriver } from '../src/managedGlobalGuard.js';
@@ -139,6 +139,127 @@ describe('held original trees and known-only preservation', () => {
       const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan);
       expect(() => prepareGlobalObjectPreservation(guard, journal, [{ ...objects[0]!, name: 'other-global' }], async () => {})).toThrow('scope_invalid');
       expect(journal.read().records).toHaveLength(0);
+    } finally { guard.close(); }
+  });
+});
+
+
+describe('private working copies from retained originals', () => {
+  it('copies content to new private inodes only after durable original evidence and keeps originals intact', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      const original = engine.manifest();
+      await expect(engine.createWorkingCopies()).rejects.toThrow('not_ready_for_working_copy');
+      expect((await engine.preserveAll()).status).toBe('preserved');
+      expect(existsSync(join(backup, original.originalEvidence.name))).toBe(true);
+      const result = await engine.createWorkingCopies(); expect(result.status, JSON.stringify(result)).toBe('working');
+      for (const row of result.manifest.objects) {
+        expect(row.state).toBe('preserved'); expect(row.working?.status).toBe('known');
+        for (const copy of row.working!.rows!) {
+          const before = row.rows.find(value => value.relativePath === copy.relativePath)!;
+          expect(copy.identity.ino).not.toBe(before.identity.ino); expect(copy.identity.contentSha256).toBe(before.identity.contentSha256);
+        }
+      }
+      expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
+      expect(readFileSync(join(backup, 'original-package/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
+      expect(journal.read().records).toHaveLength(12);
+      if (!isWindows()) { expect(statSync(join(source, 'caveat-cli/package.json')).mode & 0o777).toBe(0o600); expect(statSync(join(source, 'caveat')).mode & 0o777).toBe(0o700); }
+    } finally { guard.close(); }
+  });
+  it('quarantines exact known working copies before restoring the original objects in dependency order', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      const original = engine.manifest(); expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      await expect(engine.restoreKnown('package')).rejects.toThrow('working_copy_present');
+      for (const row of objects) {
+        expect((await engine.quarantineWorking(row.step)).status).toBe('confirmed');
+        expect((await engine.restoreKnown(row.step)).status).toBe('confirmed');
+      }
+      for (let index = 0; index < objects.length; index++) expect(engine.manifest().objects[index]!.rows[0]!.identity.ino).toBe(original.objects[index]!.rows[0]!.identity.ino);
+      expect(readFileSync(join(source, 'caveat'), 'utf8')).toBe('old wrapper'); expect(journal.read().status).toBe('ready');
+    } finally { guard.close(); }
+  });
+  it('keeps an unknown destination unchanged instead of copying over it', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); writeFileSync(join(source, 'caveat-cli'), 'unknown destination', { mode: 0o600 });
+      expect((await engine.createWorkingCopies()).status).toBe('unknown'); expect(journal.read().status).toBe('unknown');
+      expect(readFileSync(join(source, 'caveat-cli'), 'utf8')).toBe('unknown destination'); expect(existsSync(join(backup, 'original-package'))).toBe(true);
+    } finally { guard.close(); }
+  });
+  it('retains a failed staging copy and exact partial state without publishing, deleting or retrying', async () => {
+    const { source, backup, objects } = fixture(), driver = await native(); let calls = 0;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver, copyWorkingFile(input, output) { calls++; driver.copyWorkingFile(input, output); throw Error('injected copy completion loss'); } });
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); const result = await engine.createWorkingCopies();
+      expect(result.status).toBe('unknown'); expect(calls).toBe(1); expect(journal.read().status).toBe('unknown');
+      expect(existsSync(join(source, 'caveat-cli'))).toBe(false); expect(existsSync(join(backup, result.manifest.objects[0]!.working!.stagingName))).toBe(true);
+      expect(result.manifest.objects[0]!.state).toBe('preserved'); expect(result.manifest.objects[0]!.working!.status).toBe('unknown');
+      await expect(engine.createWorkingCopies()).rejects.toThrow('not_ready_for_working_copy'); expect(calls).toBe(1);
+    } finally { guard.close(); }
+  });
+  it('refuses to quarantine a working tree changed by an unknown writer', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      const count = journal.read().records.length; writeFileSync(join(source, 'caveat-cli/node_modules/dep/index.js'), 'unknown new writer');
+      expect((await engine.quarantineWorking('package')).status).toBe('stopped'); expect(journal.read().records).toHaveLength(count);
+      expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js'), 'utf8')).toBe('unknown new writer');
+      expect(readFileSync(join(backup, 'original-package/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
+    } finally { guard.close(); }
+  });
+  it('only permits native file writes, chmod and release through newly created working brands', async () => {
+    const { source, backup } = fixture(), driver = await native(); let original: object | null = null, closedCopy: object | null = null;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver,
+      openChild(parent, name, purpose) { const ref = driver.openChild(parent, name, purpose); if (name === 'package.json' && purpose === 'mutation') original = ref; return ref; },
+      createWorking(...args) { const ref = driver.createWorking(...args); if (args[2] === 'file') closedCopy = ref; return ref; },
+    });
+    try {
+      const tree = guard.retainTree(source, 'caveat-cli'); expect(original).not.toBeNull();
+      expect(() => driver.copyWorkingFile(original!, original!)).toThrow('owned_creation_required'); expect(() => driver.finishWorking(original!, true)).toThrow('owned_creation_required');
+      expect(() => guard.releaseWorkingTree(tree)).toThrow('created_tree_required');
+      const result = guard.copyTreeNoReplace(tree, source, 'new-copy', backup, 'private-stage'); expect(result.status, JSON.stringify(result)).toBe('copied');
+      if (result.status !== 'copied') throw Error('copy_unconfirmed');
+      expect(() => driver.finishWorking(closedCopy!, true)).toThrow('owned_creation_required'); guard.releaseWorkingTree(result.tree);
+      expect(() => guard.readTree(result.tree)).toThrow('foreign_tree'); expect(guard.readTree(tree)[0]!.identity.kind).toBe('directory');
+    } finally { guard.close(); }
+  });
+  it.skipIf(isWindows())('copies relative internal symlink objects without following their targets', async () => {
+    const { source, backup, pkg, objects } = fixture(); symlinkSync('node_modules/dep/index.js', join(pkg, 'entry'));
+    const guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); const result = await engine.createWorkingCopies(); expect(result.status, JSON.stringify(result)).toBe('working');
+      expect(readlinkSync(join(source, 'caveat-cli/entry'))).toBe('node_modules/dep/index.js'); expect(readlinkSync(join(backup, 'original-package/entry'))).toBe('node_modules/dep/index.js');
+      expect(readFileSync(join(source, 'caveat-cli/entry'), 'utf8')).toBe('original dependency bytes');
+    } finally { guard.close(); }
+  });
+});
+
+
+describe('working-copy evidence and original attributes', () => {
+  it.skipIf(isWindows())('stops if the original evidence file changes before any original move', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      writeFileSync(join(backup, engine.manifest().originalEvidence.name), 'unknown evidence writer');
+      expect((await engine.preserveAll()).status).toBe('stopped'); expect(journal.read().records).toHaveLength(0); expect(existsSync(join(source, 'caveat-cli'))).toBe(true);
+    } finally { guard.close(); }
+  });
+  it.skipIf(!isWindows())('keeps the original descendant alternate stream through copying and exact recovery', async () => {
+    const { source, backup, pkg, objects } = fixture(); writeFileSync(join(pkg, 'node_modules/dep/index.js') + ':original-stream', 'original alternate bytes');
+    const guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      expect(readFileSync(join(backup, 'original-package/node_modules/dep/index.js') + ':original-stream', 'utf8')).toBe('original alternate bytes');
+      expect((await engine.quarantineWorking('package')).status).toBe('confirmed'); expect((await engine.restoreKnown('package')).status).toBe('confirmed');
+      expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js') + ':original-stream', 'utf8')).toBe('original alternate bytes');
     } finally { guard.close(); }
   });
 });

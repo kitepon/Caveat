@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { closeSync, constants, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, fchmodSync, readSync, writeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
@@ -16,6 +16,15 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
   const directoryRead = lib.func(spec.directoryRead, 'void *', ['void *']);
   const directoryClose = lib.func('int closedir(void *directory)');
   const linkRead = lib.func('intptr_t readlinkat(int directory, const char *name, _Out_ void *buffer, size_t size)');
+  const mkdirat = lib.func('int mkdirat(int parent, const char *name, uint32_t mode)');
+  const symlinkat = lib.func('int symlinkat(const char *target, int parent, const char *name)');
+  const createdWorking = new WeakSet<object>();
+  const working = (ref: object) => {
+    assert.ok(createdWorking.has(ref), 'global_working_owned_creation_required');
+    const value = ref as Ref, stat = fstatSync(value.fd, { bigint: true });
+    assert.ok(Number(stat.uid) === process.getuid?.() && (stat.isSymbolicLink() || (stat.mode & 0o077n) === 0n), 'global_working_private_required');
+    assert.ok(stat.isDirectory() || stat.nlink === 1n, 'global_working_shared_file'); return value;
+  };
   const createdJournals = new WeakSet<object>();
   const readOnlyJournals = new WeakSet<object>();
   const journal = (ref: object, write = false) => {
@@ -147,6 +156,42 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
         return names;
       } finally { assert.equal(directoryClose(stream), 0, 'global_guard_directory_close_failed'); }
     },
+    createWorking(parent, name, kind, linkTarget) {
+      let fd: number;
+      if (kind === 'directory') {
+        assert.equal(mkdirat((parent as Ref).fd, name, 0o700), 0, 'global_working_exclusive_directory_failed');
+        fd = Number(openat((parent as Ref).fd, name, flags | constants.O_DIRECTORY));
+      } else if (kind === 'link') {
+        assert.ok(typeof linkTarget === 'string' && linkTarget.length > 0 && !linkTarget.includes('\0'), 'global_working_link_target_required');
+        assert.equal(symlinkat(linkTarget, (parent as Ref).fd, name), 0, 'global_working_exclusive_link_failed');
+        fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
+      } else {
+        assert.equal(kind, 'file', 'global_working_kind_invalid');
+        fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 'int', 0o600));
+      }
+      assert.ok(fd >= 0, 'global_working_created_open_failed');
+      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdWorking.add(ref); return ref;
+    },
+    copyWorkingFile(source, target) {
+      const output = working(target), before = fstatSync((source as Ref).fd, { bigint: true }), empty = fstatSync(output.fd, { bigint: true });
+      assert.ok(before.isFile() && before.nlink === 1n && before.size <= 128n * 1024n * 1024n, 'global_working_source_invalid');
+      assert.ok(empty.isFile() && empty.size === 0n && !(empty.dev === before.dev && empty.ino === before.ino), 'global_working_empty_new_file_required');
+      const buffer = Buffer.alloc(65536); let offset = 0;
+      for (;;) {
+        const count = readSync((source as Ref).fd, buffer, 0, buffer.length, offset); if (!count) break;
+        assert.ok(offset + count <= Number(before.size), 'global_working_source_changed');
+        assert.equal(writeSync(output.fd, buffer, 0, count, offset), count, 'global_working_partial_write'); offset += count;
+      }
+      assert.equal(BigInt(offset), before.size, 'global_working_source_changed');
+      const after = fstatSync((source as Ref).fd, { bigint: true });
+      for (const key of ['dev', 'ino', 'size', 'mode', 'nlink', 'mtimeNs', 'ctimeNs'] as const) assert.equal(after[key], before[key], 'global_working_source_changed');
+    },
+    finishWorking(ref, executable) {
+      const value = working(ref), stat = fstatSync(value.fd);
+      if (stat.isFile()) { fchmodSync(value.fd, executable ? 0o700 : 0o600); fsyncSync(value.fd); }
+      else if (stat.isDirectory()) fsyncSync(value.fd);
+      fsyncSync(value.parent!.fd);
+    },
     createJournal(parent, name) {
       const stat = fstatSync((parent as Ref).fd, { bigint: true });
       assert.ok(stat.isDirectory() && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o077n) === 0n, 'global_journal_private_parent_required');
@@ -173,6 +218,6 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       Object.assign(source, { parent: to, name: target });
       fsyncSync((from as Ref).fd); fsyncSync((to as Ref).fd);
     },
-    close(ref) { createdJournals.delete(ref); readOnlyJournals.delete(ref); closeSync((ref as Ref).fd); },
+    close(ref) { createdWorking.delete(ref); createdJournals.delete(ref); readOnlyJournals.delete(ref); closeSync((ref as Ref).fd); },
   };
 }

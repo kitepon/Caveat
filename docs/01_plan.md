@@ -578,9 +578,29 @@ object, exact partial states and known-only restoration without destination
 overwrite. Before the first original move it exclusively creates, flushes and
 reads back a private full original-tree manifest. Before each result record it
 persists the current full state and binds that file digest into the journal.
-The backup directory must already be private; permissions are never repaired. This component does not yet create working copies, run npm, reopen a
-persisted recovery plan or install wrappers. Those integrations, final review and
+The backup directory must already be private; permissions are never repaired. This component does not yet run npm, reopen a persisted recovery plan or install
+wrappers. Those integrations, final review and
 candidate validation remain unfinished.
+
+The working-copy primitive exclusively creates new private directory/file/link
+objects relative to a held private staging directory. Only native references
+branded by that creation may receive copied bytes, mode changes or flushes;
+original, foreign and closed references cannot. It reads the retained original
+through held handles, preserves content/internal link text and owner execute,
+checks new file identities and private security, and rechecks the complete
+original tree. The staged tree is read back before an exclusive move to the
+original name. It does not unlink or overwrite competing names or failed stages.
+Original native metadata and alternate streams stay on the retained original;
+working copies use new private security and are not original-state backups.
+
+The engine rechecks its original evidence bytes, writes durable copy intent,
+persists exact copy outcomes and only quarantines an unchanged known working
+tree before original restoration. Partial writes, changed originals or working
+copies, failed flush/close and interrupted publication stay stopped/unknown.
+An explicit release method accepts only a successfully created working-tree
+token, allowing the future owned npm step to operate without dropping original
+pins. Fresh process/protected-state integration and scoped npm remain unfinished;
+this primitive is not an executable global-migration command.
 
 ### Windows hookの保護保存transport（未公開source）
 

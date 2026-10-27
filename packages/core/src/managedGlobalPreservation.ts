@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import type { openGlobalPathGuard } from './managedGlobalGuard.js';
-import type { createGlobalMutationJournal } from './managedGlobalJournal.js';
+import type { GlobalGuardTree, GlobalGuardTreeRow, openGlobalPathGuard } from './managedGlobalGuard.js';
+import type { GlobalJournalOperation, createGlobalMutationJournal } from './managedGlobalJournal.js';
 
 type Guard = Awaited<ReturnType<typeof openGlobalPathGuard>>;
 type Journal = ReturnType<typeof createGlobalMutationJournal>;
@@ -51,8 +51,9 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
         assert.ok(target && !isAbsolute(target) && inside(sources[items.indexOf(item)]!, resolve(dirname(join(item.directory, item.name, row.relativePath)), target)), 'global_preservation_external_package_link');
       }
     }
-    return { item, tree, rows, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
+    return { item, tree, rows, working: null as null | { status: 'known' | 'unknown' | 'quarantined'; rows: GlobalGuardTreeRow[] | null; stagingName: string }, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
   });
+  const workingTrees = new Map<string, GlobalGuardTree>();
   let stopped = false;
   const initial = journal.read();
   assert.equal(initial.status, 'ready', 'global_preservation_fresh_journal_required');
@@ -72,14 +73,27 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     objects: saved.map(row => ({ ...row.item, rows: row.rows })),
   });
   const manifest = () => ({ schema: 'caveat.global_original_objects.v1' as const,
-    objects: saved.map(row => ({ ...row.item, state: row.state, rows: structuredClone(row.rows), stateSha256: sha(row.rows) })),
+    objects: saved.map(row => ({ ...row.item, state: row.state, working: structuredClone(row.working), rows: structuredClone(row.rows), stateSha256: sha(row.rows) })),
     originalEvidence, originalsReconstructed: false as const, automaticRecovery: false as const });
+  const verify = async () => {
+    await verifyBeforeMutation();
+    assert.equal(createHash('sha256').update(guard.readPersistedJournal(evidenceDirectory, originalEvidence.name)).digest('hex'), originalEvidence.sha256, 'global_preservation_original_evidence_changed');
+    for (const known of saved) {
+      assert.deepEqual(guard.readTree(known.tree), known.rows, 'global_preservation_original_changed');
+      if (known.working?.status === 'known' || known.working?.status === 'quarantined') assert.deepEqual(guard.readTree(workingTrees.get(known.item.step)!), known.working.rows, 'global_preservation_working_changed');
+    }
+  };
+  const record = (step: string, operation: GlobalJournalOperation, outcome: 'confirmed' | 'unknown', result: unknown, errorSha256?: string) => {
+    const evidence = persist('state-' + initial.header.runId + '-' + journal.read().nextSequence + '.json', {
+      schema: 'caveat.global_preservation_state.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
+      step, operation, manifest: manifest(), result, errorSha256,
+    });
+    journal.result(step, operation, outcome, evidence.sha256);
+  };
   const move = async (row: typeof saved[number], restore: boolean) => {
     assert.ok(!stopped && row.state === (restore ? 'preserved' : 'original'), 'global_preservation_not_known');
     try {
-      await verifyBeforeMutation();
-      // Revalidate every known object, not only the next leaf. No unknown object is overwritten.
-      for (const known of saved) assert.deepEqual(guard.readTree(known.tree), known.rows, 'global_preservation_original_changed');
+      await verify();
     } catch (error) {
       stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest() };
     }
@@ -93,11 +107,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     } catch (error) { stopped = true; row.state = 'unknown'; errorSha256 = errorSha(error); }
     const outcome = row.state === 'unknown' ? 'unknown' as const : 'confirmed' as const;
     try {
-      const evidence = persist('state-' + initial.header.runId + '-' + journal.read().nextSequence + '.json', {
-        schema: 'caveat.global_preservation_state.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
-        step, operation, manifest: manifest(), result, errorSha256,
-      });
-      journal.result(step, operation, outcome, evidence.sha256);
+      record(step, operation, outcome, result, errorSha256);
     }
     catch (error) {
       stopped = true;
@@ -112,8 +122,45 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       for (const row of saved) { const result = await move(row, false); if (result.status !== 'confirmed') return result; }
       return { status: 'preserved' as const, manifest: manifest() };
     },
+    async createWorkingCopies() {
+      assert.ok(!stopped && saved.every(row => row.state === 'preserved' && !row.working), 'global_preservation_not_ready_for_working_copy');
+      for (const row of saved) {
+        try { await verify(); } catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest() }; }
+        const step = 'copy.' + row.item.step, stagingName = 'work-' + initial.header.runId + '-' + row.item.step;
+        journal.intent(step, 'working-copy', sha(manifest()));
+        let result: ReturnType<Guard['copyTreeNoReplace']> | undefined, errorSha256: string | undefined;
+        try {
+          result = guard.copyTreeNoReplace(row.tree, row.item.directory, row.item.name, row.item.backupDirectory, stagingName);
+          row.working = { status: result.status === 'copied' ? 'known' : 'unknown', rows: result.status === 'copied' ? result.rows : null, stagingName };
+          if (result.status === 'copied') workingTrees.set(row.item.step, result.tree); else stopped = true;
+        } catch (error) { stopped = true; errorSha256 = errorSha(error); row.working = { status: 'unknown', rows: null, stagingName }; }
+        const outcome = row.working!.status === 'known' ? 'confirmed' : 'unknown';
+        try { record(step, 'working-copy', outcome, result, errorSha256); }
+        catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), manifest: manifest() }; }
+        if (outcome === 'unknown') return { status: 'unknown' as const, result, manifest: manifest() };
+      }
+      return { status: 'working' as const, manifest: manifest() };
+    },
+    async quarantineWorking(step: string) {
+      const row = saved.find(value => value.item.step === step);
+      assert.ok(!stopped && row?.working?.status === 'known', 'global_preservation_no_known_working_copy');
+      try { await verify(); } catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest() }; }
+      const action = 'retire.' + step; journal.intent(action, 'working-copy', sha(manifest()));
+      let result: ReturnType<Guard['moveTreeNoReplace']> | undefined, errorSha256: string | undefined;
+      try {
+        const token = workingTrees.get(step)!;
+        result = guard.moveTreeNoReplace(token, row.item.backupDirectory, 'used-' + row.working.stagingName);
+        if (result.status === 'moved') row.working = { ...row.working, status: 'quarantined', rows: guard.readTree(token) };
+        else { stopped = true; row.working.status = 'unknown'; }
+      } catch (error) { stopped = true; row.working.status = 'unknown'; errorSha256 = errorSha(error); }
+      const outcome = row.working.status === 'quarantined' ? 'confirmed' : 'unknown';
+      try { record(action, 'working-copy', outcome, result, errorSha256); }
+      catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), manifest: manifest() }; }
+      return { status: outcome, result, manifest: manifest() };
+    },
     async restoreKnown(step: string) {
       const row = saved.find(value => value.item.step === step); assert.ok(row, 'global_preservation_unknown_step');
+      assert.ok(!row.working || row.working.status === 'quarantined', 'global_preservation_working_copy_present');
       if (row.item.role !== 'package') assert.ok(saved.filter(value => value.item.role === 'package').every(value => value.state === 'restored'), 'global_preservation_package_restore_required');
       if (row.item.role === 'leaf') assert.ok(saved.filter(value => value.item.role === 'npm-management').every(value => value.state === 'restored'), 'global_preservation_management_restore_required');
       return move(row, true);

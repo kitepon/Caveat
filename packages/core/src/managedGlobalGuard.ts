@@ -17,6 +17,9 @@ export type NativeGuardDriver = {
   snapshot(ref: object): GlobalGuardIdentity;
   listDirectory(ref: object): string[];
   assertPrivateDirectory(ref: object): void;
+  createWorking(parent: object, name: string, kind: GlobalGuardIdentity['kind'], linkTarget?: string): object;
+  copyWorkingFile(source: object, target: object): void;
+  finishWorking(ref: object, executable: boolean): void;
   createJournal(parent: object, name: string): object;
   appendJournal(ref: object, bytes: Buffer): void;
   flushJournal(ref: object): void;
@@ -45,6 +48,7 @@ export async function openGlobalPathGuard(paths: string[]) {
 
 /** Driver injection is internal to native fixtures, never exposed by CLI options. */
 export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) {
+  const retired = new WeakSet<object>(), copiedTrees = new WeakSet<GlobalGuardTree>();
   const opened: object[] = [], directories = new Map<string, Directory>(), entries = new WeakMap<GlobalGuardEntry, Entry>();
   const trees = new WeakMap<GlobalGuardTree, { entry: GlobalGuardEntry; rows: GlobalGuardTreeRow[] }>();
   const journals = new WeakMap<GlobalGuardJournal, Entry & { bytes: Buffer; failed: boolean }>();
@@ -53,7 +57,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
   const close = () => {
     if (closed) return; closed = true;
     const errors: unknown[] = [];
-    for (const ref of opened.reverse()) try { driver.close(ref); } catch (error) { errors.push(error); }
+    for (const ref of opened.reverse()) try { if (!retired.has(ref)) driver.close(ref); } catch (error) { errors.push(error); }
     if (errors.length) throw new AggregateError(errors, 'global_guard_close_unconfirmed');
   };
   const active = () => assert.ok(!closed, 'global_guard_closed');
@@ -185,6 +189,93 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.deepEqual(inspect(entry.directory.ref, entry.name), entry.expected, 'global_guard_tree_root_name_changed');
       const rows = treeInventory(entry.ref, entry.expected.dev);
       assert.deepEqual(rows, tree.rows, 'global_guard_tree_changed'); checkDirectories(); return structuredClone(rows);
+    },
+    copyTreeNoReplace(token: GlobalGuardTree, path: string, name: string, stagingPath: string, stagingName: string) {
+      leaf(name); leaf(stagingName); guard.readTree(token);
+      const tree = trees.get(token)!, source = entries.get(tree.entry)!, target = directory(path), stage = directory(stagingPath);
+      driver.assertPrivateDirectory(stage.ref);
+      assert.equal(stage.initial.dev, source.expected.dev, 'global_working_cross_volume');
+      assert.equal(target.initial.dev, source.expected.dev, 'global_working_cross_volume');
+      assert.equal(inspect(target.ref, name), null, 'global_working_destination_exists');
+      assert.equal(inspect(stage.ref, stagingName), null, 'global_working_stage_exists');
+      assert.ok(target !== stage || name !== stagingName, 'global_working_distinct_stage_required');
+      const originals = structuredClone(tree.rows), expected = new Map(originals.map(row => [row.relativePath, row.identity]));
+      const children = new Map<string, string[]>();
+      for (const row of originals) if (row.relativePath) {
+        const split = row.relativePath.lastIndexOf('/'), parent = row.relativePath.slice(0, split < 0 ? 0 : split);
+        const names = children.get(parent) ?? []; names.push(row.relativePath.slice(split + 1)); children.set(parent, names);
+      }
+      const created: { ref: object; parent: object; name: string; relativePath: string; binding: ReturnType<typeof directoryBinding> | null }[] = [];
+      const evidence: { relativePath: string; identity: GlobalGuardIdentity }[] = [];
+      const release = () => {
+        const errors: unknown[] = [];
+        for (const value of created.splice(0).reverse()) try { driver.close(value.ref); } catch (error) { errors.push(error); }
+        if (errors.length) throw new AggregateError(errors, 'global_working_close_unconfirmed');
+      };
+      let phase = 'stage-create', currentPath = '';
+      const copy = (input: object, parent: object, leafName: string, relativePath: string, ancestors: typeof created) => {
+        checkDirectories();
+        for (const held of ancestors) {
+          assert.deepEqual(directoryBinding(driver.snapshot(held.ref)), held.binding, 'global_working_parent_changed');
+          assert.deepEqual(inspect(held.parent, held.name), driver.snapshot(held.ref), 'global_working_parent_name_changed');
+        }
+        const before = driver.snapshot(input); assert.deepEqual(before, expected.get(relativePath), 'global_working_original_changed');
+        phase = 'object-create'; currentPath = relativePath;
+        const ref = driver.createWorking(parent, leafName, before.kind, before.linkTarget);
+        const entry: typeof created[number] = { ref, parent, name: leafName, relativePath, binding: null }; created.push(entry);
+        const initial = driver.snapshot(ref); entry.binding = directoryBinding(initial);
+        assert.deepEqual(inspect(parent, leafName), initial, 'global_working_new_name_changed');
+        assert.equal(initial.kind, before.kind, 'global_working_kind_changed');
+        assert.ok(initial.dev === before.dev && initial.ino !== before.ino, 'global_working_original_reused');
+        phase = 'file-copy';
+        if (before.kind === 'file') driver.copyWorkingFile(input, ref);
+        else if (before.kind === 'directory') {
+          const names = driver.listDirectory(input).sort();
+          assert.deepEqual(names, (children.get(relativePath) ?? []).sort(), 'global_working_original_names_changed');
+          for (const childName of names) {
+            leaf(childName); const child = driver.openChild(input, childName, 'mutation'); assert.ok(child, 'global_working_original_missing');
+            try { copy(child, ref, childName, relativePath ? relativePath + '/' + childName : childName, [...ancestors, entry]); }
+            finally { driver.close(child); }
+          }
+        }
+        phase = 'object-flush'; currentPath = relativePath; driver.finishWorking(ref, (before.mode & 0o100) !== 0);
+        const after = driver.snapshot(ref);
+        assert.equal(after.contentSha256, before.contentSha256, 'global_working_content_changed');
+        assert.equal(after.linkTarget, before.linkTarget, 'global_working_link_changed');
+        assert.deepEqual(inspect(parent, leafName), after, 'global_working_new_name_changed');
+        assert.deepEqual(driver.snapshot(input), before, 'global_working_original_changed');
+        evidence.push({ relativePath, identity: after });
+      };
+      try {
+        copy(source.ref, stage.ref, stagingName, '', []); guard.readTree(token);
+        release(); checkDirectories();
+        phase = 'stage-readback';
+        const working = guard.retainTree(stagingPath, stagingName), rows = guard.readTree(working);
+        assert.equal(rows.length, originals.length, 'global_working_tree_changed');
+        for (const row of rows) {
+          const original = expected.get(row.relativePath)!;
+          assert.ok(original && row.identity.kind === original.kind && row.identity.contentSha256 === original.contentSha256
+            && row.identity.linkTarget === original.linkTarget && row.identity.ino !== original.ino, 'global_working_tree_changed');
+        }
+        phase = 'publish-copy';
+        const moved = guard.moveTreeNoReplace(working, path, name); guard.readTree(token);
+        if (moved.status !== 'moved') return { status: 'unknown' as const, stagingName, created: evidence, move: moved, automaticRecovery: false as const };
+        copiedTrees.add(working);
+        return { status: 'copied' as const, stagingName, tree: working, rows: guard.readTree(working), originalSha256: createHash('sha256').update(JSON.stringify(originals)).digest('hex'), automaticRecovery: false as const };
+      } catch (error) {
+        const observations = created.map(value => {
+          try { return { relativePath: value.relativePath, state: 'present' as const, identity: driver.snapshot(value.ref), named: inspect(value.parent, value.name) }; }
+          catch { return { relativePath: value.relativePath, state: 'unknown' as const }; }
+        });
+        const code = error instanceof Error ? (error as Error & { nativeCode?: number }).nativeCode : undefined;
+        return { status: 'unknown' as const, stagingName, phase, relativePath: currentPath, nativeCode: Number.isSafeInteger(code) && code! >= 0 && code! <= 0xffffffff ? code! : null, created: evidence, observations,
+          errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
+      } finally { release(); }
+    },
+    releaseWorkingTree(token: GlobalGuardTree) {
+      active(); assert.ok(copiedTrees.has(token), 'global_working_created_tree_required'); guard.readTree(token);
+      const tree = trees.get(token)!, entry = entries.get(tree.entry)!; copiedTrees.delete(token); trees.delete(token); entries.delete(tree.entry);
+      retired.add(entry.ref); driver.close(entry.ref);
     },
     moveTreeNoReplace(token: GlobalGuardTree, path: string, name: string) {
       const tree = trees.get(token); assert.ok(tree, 'global_guard_foreign_tree');
