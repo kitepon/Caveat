@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { initOwnSync, KNOWLEDGE_GITIGNORE, preflightSync, syncOwn, SyncError, type ProbeImpl } from '../src/sync.js';
@@ -65,6 +65,13 @@ describe('preflightSync', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
     });
   });
 
+  it.each(['missing', 'file'])('types a %s own path before Git or remote probing', async kind => {
+    if (kind === 'file') writeFileSync(fixture.own, 'keep existing file');
+    const before = readdirSync(fixture.root); let probes = 0;
+    await expect(preflightSync(fixture.own, { probeImpl: async () => { probes++; return { kind: 'denied', status: 404 }; } })).rejects.toMatchObject({ name: 'SyncError', code: 'NOT_A_REPO' });
+    expect(probes).toBe(0); expect(readdirSync(fixture.root)).toEqual(before);
+    if (kind === 'file') expect(readFileSync(fixture.own, 'utf8')).toBe('keep existing file');
+  });
   it('passes the requested git timeout policy into preflight', async () => {
     mkdirSync(fixture.own, { recursive: true });
     await expect(preflightSync(fixture.own, { probeImpl: denied, gitTimeoutMs: 5_999 }))
@@ -135,6 +142,14 @@ describe('initOwnSync / syncOwn (local bare remote)', { timeout: GIT_TEST_TIMEOU
   beforeEach(() => { fixture = makeFixture(); });
   afterEach(() => { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
+  it.each(['missing', 'file'])('stops normal sync for a %s own path before creating index/lock state', async kind => {
+    if (kind === 'file') writeFileSync(fixture.own, 'keep existing file');
+    const before = readdirSync(fixture.root); let probes = 0;
+    await expect(syncOwn({ ownDir: fixture.own, caveatHome: fixture.home, paths: fixture.paths, logger,
+      probeImpl: async () => { probes++; return { kind: 'denied', status: 404 }; } })).rejects.toMatchObject({ name: 'SyncError', code: 'NOT_A_REPO' });
+    expect(probes).toBe(0); expect(readdirSync(fixture.root)).toEqual(before); expect(existsSync(fixture.home)).toBe(false);
+    if (kind === 'file') expect(readFileSync(fixture.own, 'utf8')).toBe('keep existing file');
+  });
   it('initializes an empty bare remote, then commits, indexes, and pushes local edits', async () => {
     // Supplying identity through environment is not supported by simple-git, so
     // initialize the worktree ourselves only to provide its local identity.

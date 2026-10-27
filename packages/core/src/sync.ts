@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import type { Logger } from './db.js';
@@ -141,12 +141,21 @@ async function assertPrivateRemotes(
   return worst;
 }
 
+/** Refuse an absent/non-directory own path before simple-git or any sync lock/state creation. */
+function checkedOwnGit(ownDir: string, options: Parameters<typeof createGit>[1]) {
+  let directory = false;
+  try { directory = statSync(ownDir).isDirectory(); }
+  catch (error) { if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) throw error; }
+  if (!directory) throw new SyncError('NOT_A_REPO', 'own knowledge directory is not a git repository; run `caveat sync --init` first');
+  return createGit(ownDir, options);
+}
+
 /** Validate that ownDir is exactly the checked-out worktree root and safe to push. */
 export async function preflightSync(
   ownDir: string,
   opts: PreflightSyncOptions = {},
 ): Promise<SyncPreflight> {
-  const git = createGit(ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
+  const git = checkedOwnGit(ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   if (!(await git.checkIsRepo())) {
     throw new SyncError('NOT_A_REPO', 'own knowledge directory is not a git repository; run `caveat sync --init` first');
   }
@@ -197,13 +206,13 @@ async function reindexAndMark(opts: Pick<SyncOwnOptions, 'caveatHome' | 'paths' 
 }
 
 export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
+  const git = checkedOwnGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   // All sync entry points take index then repository locks. The repository lock
   // lives in Git's common directory, so different CAVEAT_HOMEs/worktrees agree.
   const indexLock = opts.heldReindexLock ?? acquireReindexLock(opts.caveatHome);
   if (!indexLock) throw new SyncError('SYNC_BUSY', 'reindex is already running; retry later');
   let repoLock: FileLock | null = null;
   try {
-    const git = createGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
     if (await git.checkIsRepo()) {
       const common = realpathSync.native(resolve(opts.ownDir, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));
       repoLock = acquireFileLock(join(common, '.caveat-sync-lock'));
@@ -221,7 +230,7 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
 
 async function syncOwnLocked(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   const preflight = await preflightSync(opts.ownDir, opts);
-  const git = createGit(preflight.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
+  const git = checkedOwnGit(preflight.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   const status = await git.status();
   if (opts.dirtyPolicy === 'refuse' && !status.isClean()) {
     throw new SyncError('WORKTREE_DIRTY', 'scheduled sync retained uncommitted changes; retry after editing');
