@@ -35,7 +35,7 @@ type Directory = { ref: object; initial: GlobalGuardIdentity; parent?: Directory
 type Entry = { ref: object; directory: Directory; name: string; expected: GlobalGuardIdentity };
 const leaf = (name: string) => assert.ok(typeof name === 'string' && name.length > 0 && name.length <= 255
   && !['.', '..'].includes(name) && !/[\\/\x00-\x1f:]/.test(name), 'global_guard_simple_name_required');
-const directoryBinding = ({ dev, ino, kind, owner, group, mode, securitySha256 }: GlobalGuardIdentity) => ({ dev, ino, kind, owner, group, mode, securitySha256 });
+const directoryBinding = ({ dev, ino, kind, owner, group, mode, securitySha256 }: GlobalGuardIdentity) => ({ dev, ino, kind, owner, group, mode, ...(securitySha256 ? { securitySha256 } : {}) });
 const renamedBinding = ({ ctime: _, ...value }: GlobalGuardIdentity) => value;
 
 /** Holds native ancestors/objects until explicit close. It never repairs permissions or overwrites a destination. */
@@ -131,6 +131,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
   const guard = {
     close,
     assertCurrent: checkDirectories,
+    directoryBindings() { checkDirectories(); return [...directories].map(([path, value]) => ({ path, binding: directoryBinding(driver.snapshot(value.ref)) })); },
     createJournal(path: string, name: string, header: Buffer): GlobalGuardJournal {
       leaf(name); checkDirectories(); assert.ok(Buffer.isBuffer(header) && header.length > 0 && header.length <= 65536, 'global_journal_record_bound');
       const parent = directory(path), bytes = Buffer.from(header), ref = keep(driver.createJournal(parent.ref, name));

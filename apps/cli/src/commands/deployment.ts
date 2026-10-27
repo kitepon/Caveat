@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, managedShellStatus, managedShellPlan, captureManagedShellManifest } from '@caveat/core';
+import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, managedShellStatusCurrent, managedShellPlan, captureManagedShellManifest } from '@caveat/core';
 
 function installerPackageRoot() {
   let path = dirname(fileURLToPath(import.meta.url));
@@ -24,11 +24,15 @@ export function deploymentStage(packageRoot?: string) {
   return stageManagedDeployment(packageRoot ?? installer, { entrySourceRoot: installer });
 }
 export function deploymentActivate(release: string, recoverInvalidPointer = false) { return activateManagedDeployment(release, { recoverInvalidPointer }); }
-export function deploymentStatus() {
+export async function deploymentStatus() {
   const lock = managedInstallerLockStatus();
-  const shell = managedShellStatus();
+  const shell = await managedShellStatusCurrent();
   const ownSync = readMcpSyncState(findCaveatHome(homedir()));
   try {
+    if ('native' in shell) {
+      if (!shell.deployment) return { status: 'unavailable' as const, payloadVerified: false, lock, shell, ownSync, diagnostic: 'native_payload_unconfirmed' };
+      return { status: 'ready' as const, ...shell.deployment, lock, shell, ownSync };
+    }
     const active = verifyManagedDeployment();
     return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell, ownSync };
   } catch (error) {

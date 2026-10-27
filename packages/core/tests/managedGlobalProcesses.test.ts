@@ -209,3 +209,11 @@ function Get-CimInstance {
     expect(events.filter(row => row.phase === 'cim:after').map(row => row.event)).toEqual(['started', 'completed']);
   });
 });
+
+
+it('keeps native commands naming protected Node, entry or settings paths unknown', () => {
+  for (const file of ['/runtime/ordinary-node', '/managed/entry/caveat.mjs', '/profile/client/settings.json']) {
+    const result = assessGlobalProcesses({ ...scope, protectedPaths: [file] }, tables(record(20, '/usr/bin/cp', ['cp', '/input', file])));
+    expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1); expect(result.records[1]!.reason).toBe('scope_literal_outside_bound_script');
+  }
+});

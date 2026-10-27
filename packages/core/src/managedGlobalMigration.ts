@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, basename, join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { realpathSync } from 'node:fs';
-import { readGlobalPackageJson, snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput } from './managedGlobalSnapshot.js';
+import { readGlobalPackageJson, observeGlobalAbsence, snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput } from './managedGlobalSnapshot.js';
 import { openGlobalPathGuard } from './managedGlobalGuard.js';
 import { createGlobalMutationJournal } from './managedGlobalJournal.js';
 import { prepareGlobalObjectPreservation, writeGlobalPrivateEvidence, type GlobalPreservationObject } from './managedGlobalPreservation.js';
@@ -15,7 +15,7 @@ import { assertSqliteSearchCapability } from './runtimeCapabilities.js';
 import { renderManagedShellWrappers, type ManagedShellPlan } from './managedShell.js';
 import { prepareGlobalShellInstallation } from './managedGlobalShell.js';
 
-export type GlobalMigrationInput = { snapshot: GlobalPackageSnapshotInput; binDirectory: string };
+export type GlobalMigrationInput = { snapshot: GlobalPackageSnapshotInput; binDirectory: string; protectedAbsent?: string[] };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const inside = (parent: string, child: string) => { const name = relative(parent, child); return name === '' || name !== '..' && !name.startsWith('..' + sep) && !isAbsolute(name); };
 
@@ -26,10 +26,26 @@ export function prepareGlobalMigration(input: GlobalMigrationInput, onEvent: (ev
 
 /** Never exposed as a CLI collector/guard override. */
 export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
+  const admission = await bindGlobalAdmission(input, onEvent, collect);
+  try { return await admission.prepare(admission.planSha256); }
+  catch (error) { try { admission.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'global_migration_prepare_and_close_failed'); } throw error; }
+}
+
+/** A read-only plan never creates a private run or acquires the installer lock. */
+export async function planGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void = () => {}) {
+  const admission = await bindGlobalAdmission(input, onEvent, nativeGlobalProcessTables);
+  try { return { status: 'ready' as const, planSha256: admission.planSha256, plan: admission.plan, filesystemWrites: 0, existingProcessOperations: 0 }; }
+  finally { admission.close(); }
+}
+
+/** Internal fixture binder; public commands always use the real native collector. */
+export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
   onEvent({ phase: 'global-preflight', event: 'issued' });
   input = structuredClone(input); assertSqliteSearchCapability();
+  assert.equal(basename(input.snapshot.pointer), 'active.json', 'global_migration_active_pointer_required');
   const globalRoot = resolve(input.snapshot.globalRoot), baseline = snapshotGlobalPackage(input.snapshot), root = dirname(input.snapshot.pointer), active = readManagedDeploymentAtRoot(root);
   assert.equal(active.pointer.release, input.snapshot.expectedRelease, 'global_migration_active_release_changed');
+  assert.equal(realpathSync(input.snapshot.pointer), join(realpathSync(root), 'active.json'), 'global_migration_pointer_redirect');
   const layout = globalNpmLayout(globalRoot), binDirectory = realpathSync(input.binDirectory), npmRoot = dirname(dirname(baseline.npm.executable));
   assert.equal(realpathSync(layout.binDirectory), binDirectory, 'global_migration_bin_outside_prefix');
   const canonicalLayout = globalNpmLayout(realpathSync(globalRoot));
@@ -45,7 +61,11 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
   const payload = active.packageRoot, manifestFile = join(dirname(payload), 'manifest.json');
   const protectedPaths = [...new Set([...input.snapshot.protectedFiles.map(path => realpathSync(path)), realpathSync(input.snapshot.pointer), manifestFile, payload, join(root, 'entry')])];
   const protectedRoots = protectedPaths.filter(path => !protectedPaths.some(other => other !== path && inside(other, path)));
-  const guard = await openGlobalPathGuard([...new Set([globalRoot, layout.prefix, layout.binDirectory, input.binDirectory, binDirectory, root, ...protectedRoots.map(dirname)])]);
+  assert.ok(!input.protectedAbsent || Array.isArray(input.protectedAbsent) && input.protectedAbsent.length <= 16 && input.protectedAbsent.every(path => typeof path === 'string' && isAbsolute(path)), 'global_migration_absence_scope_invalid');
+  const absences = (input.protectedAbsent ?? []).map(observeGlobalAbsence);
+  const aliases = [...new Set([input.binDirectory, globalRoot, layout.prefix, layout.binDirectory, root, input.snapshot.node, input.snapshot.npmAlias,
+    input.snapshot.packageRoot, input.snapshot.pointer, ...input.snapshot.protectedFiles])].map(path => ({ path: resolve(path), canonical: realpathSync(path) }));
+  const guard = await openGlobalPathGuard([...new Set([globalRoot, layout.prefix, layout.binDirectory, input.binDirectory, binDirectory, root, dirname(baseline.node.canonical), npmRoot, ...absences.map(row => row.parent), ...protectedRoots.map(dirname)])]);
   let ownedLock: ReturnType<typeof guard.createJournal> | null = null, lockAtRoot = false, closed = false;
   let shell: ReturnType<typeof prepareGlobalShellInstallation> | null = null;
   const close = () => {
@@ -81,13 +101,15 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
       files: renderManagedShellWrappers(baseline.node.canonical, active.launcher).map(file => ({ ...file, path: join(binDirectory, file.name) })) };
     const leafNames = isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat'];
     const leaves = leafNames.map(name => ({ name, identity: guard.observe(binDirectory, name) }));
-    const scope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, binAliases: leaves.map(row => join(binDirectory, row.name)) };
+    const scope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [baseline.node.canonical, ...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
     const processCheck = async () => {
       const result = await preflightGlobalProcesses(scope, onEvent, collect);
       if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result }); return result;
     };
     const verifyProtected = () => {
       guard.assertCurrent();
+      for (const absent of absences) assert.deepEqual(observeGlobalAbsence(absent.path), absent, 'global_migration_absence_changed');
+      for (const alias of aliases) if (alias.path !== resolve(input.snapshot.packageRoot)) assert.equal(realpathSync(alias.path), alias.canonical, 'global_migration_alias_changed');
       if (ownedLock && lockAtRoot) guard.readJournal(ownedLock);
       if (planEvidence && runDirectory) assert.equal(createHash('sha256').update(guard.readPersistedJournal(runDirectory, planEvidence.name)).digest('hex'), planEvidence.sha256, 'global_migration_plan_evidence_changed');
       for (const object of protectedObjects) assert.deepEqual(guard.readTree(object.token), object.rows, 'global_migration_protected_changed');
@@ -108,31 +130,47 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
     assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_initial_snapshot_changed');
     for (const leaf of leaves) assert.deepEqual(guard.observe(binDirectory, leaf.name), leaf.identity, 'global_migration_initial_leaf_changed');
     const plan = { schema: 'caveat.global_migration_plan.v1', baseline, leaves, protectedObjects: protectedObjects.map(({ path, rows }) => ({ path, rows })), prefix: canonicalLayout.prefix,
-      root: realpathSync(root), globalRoot: realpathSync(globalRoot), binDirectory, shellPlan };
-    const planSha256 = hash(plan), runName = 'global-migration-' + randomBytes(16).toString('hex');
-    phase = 'private-run-create'; runDirectory = join(root, runName); guard.createPrivateDirectory(root, runName);
-    planEvidence = writeGlobalPrivateEvidence(guard, runDirectory, 'plan.json', plan);
-    phase = 'installer-lock-acquire';
-    ownedLock = guard.createJournal(runDirectory, 'installer-lock.json', Buffer.from(JSON.stringify({ schema: 1, pid: process.pid, startedAt: new Date().toISOString() }) + '\n'));
-    const acquired = guard.moveJournalNoReplace(ownedLock, root, 'installer.lock');
-    if (acquired.status !== 'moved') throw Object.assign(Error('global_migration_lock_acquire_unknown'), { lockAcquire: acquired });
-    lockAtRoot = true; await verify();
-    const journal = createGlobalMutationJournal(guard, runDirectory, 'journal.jsonl', planSha256);
-    const objects: GlobalPreservationObject[] = [{ step: 'package', role: 'package', directory: globalRoot, name: 'caveat-cli', backupDirectory: runDirectory, backupName: 'original-package' }];
-    if (!baseline.npmManagement.absent) objects.push({ step: 'management', role: 'npm-management', directory: globalRoot, name: '.package-lock.json', backupDirectory: runDirectory, backupName: 'original-management' });
-    for (const leaf of leaves) if (leaf.identity) objects.push({ step: leaf.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: leaf.name, backupDirectory: runDirectory, backupName: 'original-' + leaf.name });
-    const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify);
-    const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
-    const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));
-    const preparedRun = runDirectory;
-    shell = prepareGlobalShellInstallation(guard, journal, engine, preparedRun, root, shellPlan, engine.verifyCurrent);
-    const uninstall = (observer: (event: GlobalNpmEvent) => void = () => {}) => engine.uninstallWorking(async () => {
-      assert.ok(guard.readJournal(userToken).equals(Buffer.from('\n')) && guard.readJournal(globalToken).equals(Buffer.from('\n')), 'global_migration_npm_config_changed');
-      return runGlobalNpmUninstall({ node: baseline.node.canonical, script: baseline.npm.executable, prefix: canonicalLayout.prefix, runDirectory: preparedRun, userConfig, globalConfig }, observer);
-    });
+      root: realpathSync(root), globalRoot: realpathSync(globalRoot), binDirectory, shellPlan, aliases, absences, directories: guard.directoryBindings() };
+    const planSha256 = hash(plan);
+    let prepared = false;
+    const prepare = async (expectedPlanSha256: string) => {
+      assert.ok(!prepared, 'global_migration_prepare_already_attempted');
+      assert.equal(expectedPlanSha256, planSha256, 'global_migration_expected_plan_changed');
+      prepared = true; phase = 'prepare-fresh-check';
+      try {
+        await verify();
+        assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_initial_snapshot_changed');
+        const runName = 'global-migration-' + randomBytes(16).toString('hex');
+        phase = 'private-run-create'; runDirectory = join(root, runName); guard.createPrivateDirectory(root, runName);
+        planEvidence = writeGlobalPrivateEvidence(guard, runDirectory, 'plan.json', plan);
+        phase = 'installer-lock-acquire';
+        ownedLock = guard.createJournal(runDirectory, 'installer-lock.json', Buffer.from(JSON.stringify({ schema: 1, pid: process.pid, startedAt: new Date().toISOString() }) + '\n'));
+        const acquired = guard.moveJournalNoReplace(ownedLock, root, 'installer.lock');
+        if (acquired.status !== 'moved') throw Object.assign(Error('global_migration_lock_acquire_unknown'), { lockAcquire: acquired });
+        lockAtRoot = true; await verify();
+        const journal = createGlobalMutationJournal(guard, runDirectory, 'journal.jsonl', planSha256);
+        const objects: GlobalPreservationObject[] = [{ step: 'package', role: 'package', directory: globalRoot, name: 'caveat-cli', backupDirectory: runDirectory, backupName: 'original-package' }];
+        if (!baseline.npmManagement.absent) objects.push({ step: 'management', role: 'npm-management', directory: globalRoot, name: '.package-lock.json', backupDirectory: runDirectory, backupName: 'original-management' });
+        for (const leaf of leaves) if (leaf.identity) objects.push({ step: leaf.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: leaf.name, backupDirectory: runDirectory, backupName: 'original-' + leaf.name });
+        const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify);
+        const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
+        const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));
+        const preparedRun = runDirectory;
+        shell = prepareGlobalShellInstallation(guard, journal, engine, preparedRun, root, shellPlan, engine.verifyCurrent, baseline.node);
+        const uninstall = (observer: (event: GlobalNpmEvent) => void = () => {}) => engine.uninstallWorking(async () => {
+          assert.ok(guard.readJournal(userToken).equals(Buffer.from('\n')) && guard.readJournal(globalToken).equals(Buffer.from('\n')), 'global_migration_npm_config_changed');
+          return runGlobalNpmUninstall({ node: baseline.node.canonical, script: baseline.npm.executable, prefix: canonicalLayout.prefix, runDirectory: preparedRun, userConfig, globalConfig }, observer);
+        });
+        onEvent({ phase: 'global-prepare', event: 'completed' });
+        return { status: 'prepared' as const, planSha256, runDirectory, plan: structuredClone(plan), engine, uninstall, shell, journal, verify, verifyProtected, guard,
+          close, existingProcessOperations: 0, privilegeElevation: false as const };
+      } catch (error) {
+        if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
+        throw error;
+      }
+    };
     onEvent({ phase: 'global-preflight', event: 'completed' });
-    return { status: 'prepared' as const, planSha256, runDirectory, plan, engine, uninstall, shell, journal, verify, verifyProtected, guard,
-      close, existingProcessOperations: 0, privilegeElevation: false as const };
+    return { planSha256, plan: structuredClone(plan), prepare, verify, close };
   } catch (error) {
     if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
     try { onEvent({ phase: 'global-preflight', event: 'stopped' }); } catch { /* Preserve the failed preflight. */ }

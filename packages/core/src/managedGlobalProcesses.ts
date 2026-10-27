@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
-export type GlobalProcessScope = { packageRoot: string; npmRoot: string; binAliases: string[] };
+export type GlobalProcessScope = { packageRoot: string; npmRoot: string; binAliases: string[]; protectedPaths?: string[] };
 type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'other-executable';
 export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string };
 const normalized = (value: string, fold: boolean) => {
@@ -13,7 +13,8 @@ const normalized = (value: string, fold: boolean) => {
 };
 const absolute = (value: string) => value.startsWith('/') || /^[a-z]:\//i.test(value);
 function validateScope(scope: GlobalProcessScope) {
-  const paths = [scope.packageRoot, scope.npmRoot, ...scope.binAliases].map(value => normalized(value, false));
+  assert.ok(!scope.protectedPaths || Array.isArray(scope.protectedPaths) && scope.protectedPaths.length <= 64, 'process_protected_scope_bound');
+  const paths = [scope.packageRoot, scope.npmRoot, ...scope.binAliases, ...(scope.protectedPaths ?? [])].map(value => normalized(value, false));
   assert.ok(paths.every(value => absolute(value) && value.length > 1 && !/[\x00-\x1f]/.test(value) && !value.split('/').some(part => part === '.' || part === '..')), 'absolute_process_scope_required');
 }
 function nodeScript(argv: string[]) {
@@ -74,7 +75,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       } else result.reason = 'current_process_binding_changed';
       continue;
     }
-    if (args.some(value => [root, npm, ...aliases].some(path => hasLiteral(value, path)))) {
+    if (args.some(value => [root, npm, ...aliases, ...(scope.protectedPaths ?? []).map(norm)].some(path => hasLiteral(value, path)))) {
       result.reason = 'scope_literal_outside_bound_script'; continue;
     }
     // Unknown JS or inline code may import the old global after this observation.

@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { openGlobalPathGuard, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import { parseGlobalMutationJournal } from './managedGlobalJournal.js';
-import { snapshotGlobalTree } from './managedGlobalSnapshot.js';
+import { observeGlobalAbsence, snapshotGlobalTree } from './managedGlobalSnapshot.js';
 import { globalNpmLayout } from './platform.js';
 import type { bindGlobalMigration } from './managedGlobalMigration.js';
 
@@ -50,7 +51,7 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
     };
     const planBytes = read('plan.json'); assert.equal(sha(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
     const plan = decode(planBytes) as Plan;
-    keys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan']);
+    keys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories']);
     assert.equal(plan.schema, 'caveat.global_migration_plan.v1', 'global_recovery_plan_invalid');
     assert.equal(plan.root, dirname(runDirectory), 'global_recovery_run_outside_root');
     assert.ok([plan.root, plan.globalRoot, plan.binDirectory, plan.prefix].every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path), 'global_recovery_absolute_scope_required');
@@ -60,6 +61,9 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
       && new Set(plan.leaves.map(row => row.name)).size === plan.leaves.length
       && plan.leaves.every(row => ['caveat', 'caveat.cmd', 'caveat.ps1'].includes(row.name)), 'global_recovery_leaf_scope_invalid');
     for (const leaf of plan.leaves) { keys(leaf, ['name', 'identity']); if (leaf.identity !== null) rows([{ relativePath: '', identity: leaf.identity }]); }
+    assert.ok(Array.isArray(plan.aliases) && plan.aliases.length <= 32 && plan.aliases.every(row => typeof row.path === 'string' && isAbsolute(row.path) && typeof row.canonical === 'string' && isAbsolute(row.canonical)), 'global_recovery_alias_scope_invalid');
+    assert.ok(Array.isArray(plan.absences) && plan.absences.length <= 16 && plan.absences.every(row => typeof row.path === 'string' && isAbsolute(row.path) && typeof row.parent === 'string' && isAbsolute(row.parent)), 'global_recovery_absence_invalid');
+    assert.ok(Array.isArray(plan.directories) && plan.directories.length <= 512, 'global_recovery_directory_bound');
     const journal = parseGlobalMutationJournal(read('journal.jsonl'), expectedPlanSha256);
     const base = { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus: journal.status,
       filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const };
@@ -121,7 +125,7 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
     assert.ok(original, 'global_recovery_originals_required');
     assert.ok(Array.isArray(plan.protectedObjects) && plan.protectedObjects.length <= 16, 'global_recovery_protected_bound');
     for (const object of plan.protectedObjects) { assert.ok(isAbsolute(object.path) && resolve(object.path) === object.path, 'global_recovery_protected_path_invalid'); rows(object.rows); }
-    const guard = await openGlobalPathGuard([...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, ...plan.protectedObjects.map(row => dirname(row.path))])]);
+    const guard = await openGlobalPathGuard([...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical), dirname(dirname(plan.baseline.npm.executable)), ...plan.absences.map(row => row.parent), ...plan.protectedObjects.map(row => dirname(row.path))])]);
     try {
       guard.assertPrivateDirectory(runDirectory);
       const observations: { step: string; state: 'known' | 'absent' | 'changed' | 'unknown' }[] = [];
@@ -145,6 +149,21 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
       for (const object of shell ? [...shell.files, shell.manifest] : []) if (object.status !== 'absent') {
         check('generated.' + object.name, object.status === 'quarantined' ? runDirectory : object.name === 'shell' ? plan.root : plan.binDirectory,
           object.status === 'quarantined' ? 'used-' + object.backupName : object.name, object.rows);
+      }
+      const directories = guard.directoryBindings();
+      for (const [index, row] of plan.directories.entries()) {
+        try { assert.deepEqual(directories.find(current => current.path === row.path), row); observations.push({ step: 'directory.' + index, state: 'known' }); }
+        catch { observations.push({ step: 'directory.' + index, state: 'unknown' }); }
+      }
+      for (const [index, row] of plan.absences.entries()) {
+        try { assert.deepEqual(observeGlobalAbsence(row.path), row); observations.push({ step: 'absent-config.' + index, state: 'absent' }); }
+        catch { observations.push({ step: 'absent-config.' + index, state: 'unknown' }); }
+      }
+      for (const [index, alias] of plan.aliases.entries()) {
+        // Original package names may legitimately be absent after preservation/removal.
+        if (alias.path === plan.baseline.packageRoot) continue;
+        try { assert.equal(realpathSync(alias.path), alias.canonical); observations.push({ step: 'alias.' + index, state: 'known' }); }
+        catch { observations.push({ step: 'alias.' + index, state: 'unknown' }); }
       }
       for (const [step, observed, expected] of [
         ['node', () => snapshotGlobalTree(plan.baseline.node.canonical, { observeOnly: true, maxBytes: 256 * 1024 * 1024 }), plan.baseline.node.binary],

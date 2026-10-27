@@ -78,7 +78,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
   });
   const manifest = () => ({ schema: 'caveat.global_original_objects.v1' as const,
     objects: saved.map(row => ({ ...row.item, state: row.state, working: structuredClone(row.working), rows: structuredClone(row.rows), stateSha256: sha(row.rows) })),
-    originalEvidence, originalsReconstructed: false as const, automaticRecovery: false as const });
+    originalEvidence: structuredClone(originalEvidence), originalsReconstructed: false as const, automaticRecovery: false as const });
   const verify = async () => {
     await verifyBeforeMutation();
     assert.equal(createHash('sha256').update(guard.readPersistedJournal(evidenceDirectory, originalEvidence.name)).digest('hex'), originalEvidence.sha256, 'global_preservation_original_evidence_changed');

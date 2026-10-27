@@ -659,8 +659,36 @@ rechecked before returning. Pending/torn/unknown stops before replay. A matching
 observation grants no execution permission and starts no child or filesystem
 write. It does not reopen a writer or execute recovery actions.
 
-CLI/native-v2 status wiring, separately journaled persisted recovery execution,
-registration migration, versioning and the final candidate remain incomplete.
+Native-v2 status now opens the private bounded manifest through the native guard,
+verifies the selected A payload/entry, ordinary Node proof and rendered wrapper
+identities, and finishes fresh readback before reporting payload health. It uses
+no PATH PowerShell child. Legacy v1 status remains compatible; the async product
+status caller selects the manifest version without reinterpreting v1 identities.
+An unknown native read never falls back to the legacy reader.
+
+The product `deployment global-plan --global-root <global-node-modules>
+--npm-cli <absolute-npm-cli.js> --json` performs read-only admission, using normal
+product settings paths and the production native process/writer collector. It
+creates no private run or installer lock. Its digest binds the active.json boundary,
+input aliases/canonical targets, parent identities/security, existing protected
+settings and absent settings with their nearest existing parents. It reads no
+knowledge repository or credential store. Unknown processes/writers stop admission.
+
+`deployment global-migrate` takes the same inputs plus mandatory
+`--expected-plan-sha256 <digest> --json`. The coordinator checks that reviewed
+plan digest before preparation, repeats fresh admission, then connects original
+preservation, working copies, fixed ordinary Node/npm uninstall, exclusive shell
+publication and independent status readback. Ordered bounded phase receipts omit
+raw paths, argv and exception text. The full preservation engine verification
+remains mandatory around wrapper operations. A complete journal is a mutation
+checkpoint, not proof of subsequent close or independent status. Partial/unknown
+results are preserved; there is no automatic replay, unlink or overwrite.
+
+`deployment global-inspect-recovery <run-id> --plan-sha256 <digest> --json`
+only inspects bounded saved evidence. It grants no execution permission and does
+not open a writer. Separately journaled persisted recovery execution, registration
+migration, versioning and the final candidate remain incomplete. These source
+commands do not grant approval for distribution or machine changes.
 
 ### Windows hookの保護保存transport（未公開source）
 

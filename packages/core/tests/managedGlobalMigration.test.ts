@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { bindGlobalMigration } from '../src/managedGlobalMigration.js';
+import { coordinateGlobalMigration } from '../src/managedGlobalCoordinator.js';
+import { managedShellStatusCurrent } from '../src/managedGlobalShellStatus.js';
+import { bindGlobalAdmission, bindGlobalMigration } from '../src/managedGlobalMigration.js';
 import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPaths } from '../src/managedDeployment.js';
 import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platform.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
@@ -177,7 +180,7 @@ describe('product-owned shell publication and known-only rollback', () => {
     try {
       await removeFixtureWorking(session);
       const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
-        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.engine.verifyCurrent(); });
+        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.engine.verifyCurrent(); }, session.plan.baseline.node);
       expect((await shell.install()).status).toBe('stopped'); expect(session.journal.read().status).toBe('ready');
       expect(shell.snapshot().files.every(row => row.status === 'installed')).toBe(true); expect(existsSync(join(f.paths.root, 'shell'))).toBe(false);
       expect((await shell.quarantineKnown()).status).toBe('quarantined');
@@ -280,4 +283,102 @@ it('stops publication when an original changes after the first wrapper and forbi
     await expect(session.engine.restoreKnown('package')).rejects.toThrow('not_known');
     expect(readFileSync(join(session.runDirectory, 'original-package/dist/caveat.js'), 'utf8')).toBe('changed original');
   } finally { session.close(); }
+});
+
+
+describe('read-only admission and native-v2 independent status', () => {
+  it('keeps admission read-only, isolates its returned plan, and consumes preparation only once', { timeout: 120000 }, async () => {
+    const f = fixture(), before = readdirSync(f.paths.root), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    expect(readdirSync(f.paths.root)).toEqual(before); expect(existsSync(f.paths.lock)).toBe(false);
+    admission.plan.baseline.packageVersion = 'caller mutation';
+    try {
+      const prepared = await admission.prepare(admission.planSha256);
+      expect(prepared.plan.baseline.packageVersion).toBe('0.9.0');
+      await expect(admission.prepare(admission.planSha256)).rejects.toThrow('already_attempted');
+    } finally { admission.close(); }
+  });
+  it('rejects a stale plan digest or a non-active pointer without creating run state', { timeout: 60000 }, async () => {
+    const f = fixture(), before = readdirSync(f.paths.root), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    try { await expect(admission.prepare('0'.repeat(64))).rejects.toThrow('expected_plan_changed'); expect(readdirSync(f.paths.root)).toEqual(before); }
+    finally { admission.close(); }
+    const alternate = join(f.paths.root, 'other.json'); writeFileSync(alternate, readFileSync(f.paths.pointer)); f.input.snapshot.pointer = alternate;
+    await expect(bindGlobalAdmission(f.input, () => {}, async () => tables())).rejects.toThrow('active_pointer_required');
+    expect(existsSync(f.paths.lock)).toBe(false);
+  });
+  it('binds absent settings and their nearest existing parent before mutation', { timeout: 60000 }, async () => {
+    const f = fixture(), absent = join(f.profile, 'new-client', 'settings.json'), input = { ...f.input, protectedAbsent: [absent] };
+    const admission = await bindGlobalAdmission(input, () => {}, async () => tables());
+    try {
+      expect(admission.plan.absences).toMatchObject([{ path: absent, parent: f.profile }]);
+      mkdirSync(dirname(absent));
+      await expect(admission.prepare(admission.planSha256)).rejects.toThrow('absence_changed'); expect(existsSync(f.paths.lock)).toBe(false);
+    } finally { admission.close(); }
+  });
+  it('reopens native-v2 status after release and detects a missing wrapper without altering it', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try { await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); } finally { session.close(); }
+    expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ native: true, status: 'ready', deployment: { payloadVerified: true } });
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url)), 'deployment', 'status', '--json'],
+      { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CAVEAT_HOME: join(f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 30000 });
+    expect(cli.status, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout)).toMatchObject({ status: 'ready', payloadVerified: true, shell: { native: true, status: 'ready' } });
+    rmSync(join(f.binDirectory, 'caveat'));
+    expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ native: true, status: 'changed', reason: 'wrapper_identity_or_bytes_changed', deployment: { payloadVerified: true } });
+    expect(existsSync(join(f.binDirectory, 'caveat'))).toBe(false);
+  });
+  it('refuses a changed Node proof without silently using another Node or a legacy reader', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try { await removeFixtureWorking(session); await session.shell.install(); } finally { session.close(); }
+    const file = join(f.paths.root, 'shell/manifest.json'), manifest = JSON.parse(readFileSync(file, 'utf8')); manifest.node.binary[0].sha256 = '0'.repeat(64);
+    writeFileSync(file, JSON.stringify(manifest) + '\n');
+    expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ native: true, status: 'unknown', reason: 'native_shell_unconfirmed', deployment: null });
+    expect(JSON.parse(readFileSync(file, 'utf8')).node.binary[0].sha256).toBe('0'.repeat(64));
+  });
+});
+describe('product migration coordinator', () => {
+  it('does not start preparation when the reviewed digest differs', { timeout: 60000 }, async () => {
+    const f = fixture(), before = readdirSync(f.paths.root), events: unknown[] = [];
+    const result = await coordinateGlobalMigration(f.input, '0'.repeat(64), event => events.push(event), (input, event) => bindGlobalAdmission(input, event, async () => tables()));
+    expect(result).toMatchObject({ status: 'stopped', phase: 'admission', runId: null }); expect(readdirSync(f.paths.root)).toEqual(before);
+    expect(JSON.stringify(events)).not.toContain(f.root);
+  });
+  it('connects all phases, closes the owning guard, and independently reads installed state', { timeout: 120000 }, async () => {
+    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables()), events: { sequence: number; phase: string; event: string }[] = [];
+    const result = await coordinateGlobalMigration(f.input, admission.planSha256, event => events.push(event), async () => ({ ...admission,
+      async prepare(digest) {
+        const session = await admission.prepare(digest);
+        return { ...session, uninstall: (emit = () => {}) => session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath,
+          ['-e', "for(const file of process.argv.slice(1))require('node:fs').rmSync(file,{recursive:true})", ...session.engine.manifest().objects.map(row => join(row.directory, row.name))],
+          session.runDirectory, {}, emit, 5000)) };
+      },
+    }));
+    expect(result).toMatchObject({ status: 'completed', existingProcessOperations: 0, privilegeElevation: false });
+    expect(events.map(row => row.sequence)).toEqual(events.map((_, index) => index + 1));
+    expect(events.at(-1)).toMatchObject({ phase: 'terminal', event: 'completed' }); expect(existsSync(f.paths.lock)).toBe(false);
+    expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ status: 'ready' });
+    const inspected = await inspectGlobalMigrationRecovery(join(f.paths.root, result.runId!), admission.planSha256);
+    expect(inspected).toMatchObject({ status: 'observed', journalStatus: 'complete', executionPermission: false });
+  });
+});
+
+
+describe('built product global CLI', () => {
+  it('derives protected normal settings and stops a real preflight without private run writes', { timeout: 120000 }, async () => {
+    const f = fixture(), { globalMigrationInput } = await import('../../../apps/cli/src/commands/globalMigration.js');
+    const options = { globalRoot: f.globalRoot, npmCli: f.input.snapshot.npmAlias };
+    const selected = globalMigrationInput(options, f.profile, {});
+    expect(selected.snapshot.protectedFiles).toEqual([f.paths.pointer]); expect(selected.protectedAbsent).toHaveLength(8);
+    const settings = join(f.profile, '.claude.json'); writeFileSync(settings, '{"mcpServers":{}}\n', { mode: 0o600 });
+    const next = globalMigrationInput(options, f.profile, {});
+    expect(next.snapshot.protectedFiles).toEqual([f.paths.pointer, settings]); expect(next.protectedAbsent).toHaveLength(7);
+    const before = readdirSync(f.paths.root), npmBefore = readFileSync(options.npmCli);
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url)), 'deployment', 'global-plan', '--global-root', options.globalRoot, '--npm-cli', options.npmCli, '--json'],
+      { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CAVEAT_HOME: join(f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 60000 });
+    expect(cli.status, cli.stderr).toBe(1);
+    const events = cli.stdout.trim().split('\n').map(line => JSON.parse(line));
+    expect(events[0]).toMatchObject({ phase: 'input', event: 'issued', sequence: 1 });
+    expect(events.at(-1)).toMatchObject({ status: 'stopped', filesystemWrites: 0, existingProcessOperations: 0 });
+    expect(events.map(row => row.sequence)).toEqual(events.map((_, index) => index + 1));
+    expect(cli.stdout).not.toContain(f.root); expect(readdirSync(f.paths.root)).toEqual(before); expect(existsSync(f.paths.lock)).toBe(false);
+    expect(readFileSync(options.npmCli)).toEqual(npmBefore); expect(readFileSync(settings, 'utf8')).toBe('{"mcpServers":{}}\n');
+  });
 });

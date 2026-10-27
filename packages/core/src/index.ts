@@ -51,13 +51,17 @@ export { createWindowsAclSession } from './privateWindowsAclSession.js';
 export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
 
 export * from './managedShell.js';
-export { snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
+export { readGlobalPackageJson, snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
 export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
 export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardTree, type GlobalGuardTreeRow, type GlobalGuardIdentity } from './managedGlobalGuard.js';
 export { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
-export { prepareGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
+export { prepareGlobalMigration, planGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
 
 export { usesManagedGuidance } from './managedGuidance.js';
 export { readMcpSyncState, writeMcpSyncState, type McpSyncState } from './mcpSyncState.js';
 
 export { inspectGlobalMigrationRecovery } from './managedGlobalRecovery.js';
+
+export { managedShellStatusCurrent } from './managedGlobalShellStatus.js';
+
+export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlobalCoordinator.js';

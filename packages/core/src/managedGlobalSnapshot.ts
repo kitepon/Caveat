@@ -94,6 +94,20 @@ export function snapshotGlobalTree(root: string, options: {
   return rows;
 }
 
+/** Record the first existing ancestor too, so creating a missing configuration directory is a change. */
+export function observeGlobalAbsence(file: string) {
+  file = resolve(file); let missing = false;
+  try { lstatSync(file); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; missing = true; }
+  assert.ok(missing, 'global_protected_absence_changed');
+  let parent = dirname(file);
+  for (;;) {
+    let exists = true;
+    try { lstatSync(parent); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; exists = false; }
+    if (exists) { const canonical = realpathSync(parent); assert.ok(lstatSync(canonical).isDirectory(), 'global_protected_parent_not_directory'); return { path: file, parent, canonical }; }
+    assert.notEqual(dirname(parent), parent, 'global_protected_parent_missing'); parent = dirname(parent);
+  }
+}
+
 export type GlobalPackageSnapshotInput = {
   packageRoot: string; globalRoot: string; expectedPackageVersion: string;
   node: string; nodeVersion: string; npmAlias: string;
