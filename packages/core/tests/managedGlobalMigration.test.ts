@@ -19,6 +19,7 @@ import type { NativeProcessTables } from '../src/managedProcessNative.js';
 import { inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
 import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
+import { resolveManagedNode, type ManagedNodeProof } from '../src/managedNode.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { force: true, recursive: true }); });
@@ -374,7 +375,13 @@ describe('product migration coordinator', () => {
 
 describe('coordinator readback changes after close', () => {
   for (const change of ['pointer', 'node-proof', 'original', 'journal', 'journal-checkpoint'] as const) it('refuses a ready but changed ' + change, { timeout: 120000 }, async () => {
-    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    const f = fixture(); let alternateNode: ManagedNodeProof | undefined;
+    if (change === 'node-proof') {
+      const alias = join(f.root, 'runtime-alias'); symlinkSync(dirname(process.execPath), alias, isWindows() ? 'junction' : 'dir');
+      const selected = await resolveManagedNode(join(alias, basename(process.execPath)), process.version);
+      try { alternateNode = structuredClone(selected.proof); } finally { selected.close(); }
+    }
+    const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
     const result = await coordinateGlobalMigration(f.input, admission.planSha256, event => {
       if (event.phase !== 'readback' || event.event !== (change === 'pointer' || change === 'node-proof' ? 'persisted-verified' : 'issued')) return;
       if (change === 'pointer') {
@@ -389,7 +396,7 @@ describe('coordinator readback changes after close', () => {
       } else if (change === 'original') {
         appendFileSync(join(f.paths.root, event.runId!, 'original-package/package.json'), '\n');
       } else {
-        const file = join(f.paths.root, 'shell/manifest.json'), manifest = JSON.parse(readFileSync(file, 'utf8')); manifest.node.version = 'v0.0.0'; writeFileSync(file, JSON.stringify(manifest) + '\n');
+        const file = join(f.paths.root, 'shell/manifest.json'), manifest = JSON.parse(readFileSync(file, 'utf8')); manifest.node.proof = alternateNode; writeFileSync(file, JSON.stringify(manifest) + '\n');
       }
     }, async () => fixtureCoordinatorAdmission(admission));
     expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ status: 'ready', ...(change === 'pointer' ? { deployment: { version: '1.0.1' } } : {}) });
