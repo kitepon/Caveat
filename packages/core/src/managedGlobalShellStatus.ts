@@ -10,8 +10,9 @@ import { managedShellStatus, renderManagedShellWrappers } from './managedShell.j
 import { readGlobalPackageJson, snapshotGlobalTree, type snapshotGlobalPackage } from './managedGlobalSnapshot.js';
 import { legacyHomeFromRoot } from './managedDeploymentLegacy.js';
 import { isWindows } from './platform.js';
+import { bindManagedNodeProof, managedNodeDirectories, type ManagedNodeProof } from './managedNode.js';
 
-type NativeManifest = { schema: 'caveat.managed_shell.v2'; node: Pick<ReturnType<typeof snapshotGlobalPackage>['node'], 'canonical' | 'version' | 'binary'>;
+type NativeManifest = { schema: 'caveat.managed_shell.v2'; node: Pick<ReturnType<typeof snapshotGlobalPackage>['node'], 'canonical' | 'version' | 'binary'> & { proof: ManagedNodeProof };
   registrationNode: string; launcher: string; entrySha256: string; runtimeSha256: string; binDir: string; windows: boolean; binIdentity: GlobalGuardIdentity; files: { name: string; identity: GlobalGuardIdentity }[] };
 type Deployment = { release: string; version: string; launcher: string; payloadVerified: true; pointerSha256: string };
 const binding = ({ dev, ino, kind, owner, group, mode, securitySha256 }: GlobalGuardIdentity) => ({ dev, ino, kind, owner, group, mode, securitySha256 });
@@ -36,7 +37,9 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
       && realpathSync(selected.binDir) === selected.binDir, 'native_shell_bin_invalid');
     assert.ok(selected.node && typeof selected.node === 'object' && 'canonical' in selected.node
       && typeof selected.node.canonical === 'string' && isAbsolute(selected.node.canonical), 'native_shell_node_invalid');
-    const active = readManagedDeploymentAtRoot(root), guard = await openGlobalPathGuard([root, directory, selected.binDir, dirname(selected.node.canonical), dirname(active.packageRoot)]);
+    if (!('proof' in selected.node)) return { native: true as const, status: 'unknown' as const, reason: 'native_shell_runtime_unproved', deployment: null };
+    const proof = selected.node.proof as ManagedNodeProof;
+    const active = readManagedDeploymentAtRoot(root), guard = await openGlobalPathGuard([...new Set([root, directory, selected.binDir, ...managedNodeDirectories(proof), dirname(active.packageRoot)])]);
     try {
       guard.assertPrivateDirectory(directory);
       const bytes = guard.readPersistedJournal(directory, 'manifest.json'); assert.ok(bytes.length <= 65536, 'native_shell_manifest_bound');
@@ -59,7 +62,11 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
         assert.equal(entryRows.find(row => row.relativePath === name)?.identity.contentSha256, value[field], 'native_shell_entry_changed');
         assert.equal(active.manifest.files.find(row => row.path === source)?.sha256, value[field], 'native_shell_entry_changed');
       }
-      fields(value.node, ['canonical', 'version', 'binary']);
+      fields(value.node, ['canonical', 'version', 'binary', 'proof']);
+      assert.equal(value.node.proof.executable.canonical, value.node.canonical, 'native_shell_node_proof_changed');
+      assert.equal(value.node.proof.capability.version, value.node.version, 'native_shell_node_proof_changed');
+      assert.equal(value.node.proof.executable.identity.contentSha256, value.node.binary[0]?.sha256, 'native_shell_node_proof_changed');
+      const verifyNode = bindManagedNodeProof(value.node.proof, guard); verifyNode();
       assert.equal(value.node.canonical, value.registrationNode, 'native_shell_node_invalid');
       assert.ok(isAbsolute(value.registrationNode) && realpathSync(value.registrationNode) === value.registrationNode && typeof value.node.version === 'string', 'native_shell_node_invalid');
       assert.deepEqual(snapshotGlobalTree(value.registrationNode, { observeOnly: true, maxBytes: 256 * 1024 * 1024 }), value.node.binary, 'native_shell_node_changed');
@@ -75,11 +82,12 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
         held.push(guard.retainTree(value.binDir, file.name));
       }
       for (const tree of [pointer, metadata, payload, entry, ...held]) guard.readTree(tree);
+      verifyNode();
       assert.ok(guard.readPersistedJournal(directory, 'manifest.json').equals(bytes), 'native_shell_manifest_changed');
       deployment = { release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, pointerSha256: guard.readTree(pointer)[0]!.identity.contentSha256! };
       if (changed) return { native: true as const, status: 'changed' as const, reason: changed, deployment };
       return { native: true as const, status: 'ready' as const, manifest: path, deployment,
-        nodeSha256: createHash('sha256').update(JSON.stringify({ canonical: value.node.canonical, version: value.node.version, binary: value.node.binary })).digest('hex'),
+        nodeSha256: createHash('sha256').update(JSON.stringify(value.node)).digest('hex'), processAssessment: 'not-performed' as const,
         wrappers: generated.map(file => ({ path: join(value.binDir, file.name), sha256: file.sha256 })) };
     } finally { guard.close(); }
   } catch (error) {

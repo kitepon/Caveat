@@ -61,6 +61,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     assert.equal(guard.directoryIdentity(item.directory).dev, guard.directoryIdentity(item.backupDirectory).dev, 'global_preservation_cross_volume');
     // Reuse the reviewed native pin: a second DELETE handle conflicts with Windows deny-delete sharing.
     const tree = reviewedTrees.get(item.step) ?? guard.retainTree(item.directory, item.name), rows = guard.readTree(tree);
+    assert.deepEqual(guard.observe(item.directory, item.name), rows[0]!.identity, 'global_preservation_reviewed_name_changed');
     assert.ok(rows[0]!.identity.kind === (item.role === 'package' ? 'directory' : item.role === 'npm-management' ? 'file' : rows[0]!.identity.kind), 'global_preservation_kind_invalid');
     assert.ok(item.role !== 'leaf' || rows.length === 1 && ['file', 'link'].includes(rows[0]!.identity.kind), 'global_preservation_leaf_invalid');
     if (item.role === 'package') {

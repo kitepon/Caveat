@@ -29,6 +29,18 @@ function fixture() {
 }
 async function native(): Promise<NativeGuardDriver> { const spec = globalFilesystemNativeSpec(); return spec.windows ? createWindowsGlobalGuard() : createPosixGlobalGuard(spec); }
 describe('held original trees and known-only preservation', () => {
+  it('rejects a reviewed token for another object before writing original evidence', async () => {
+    const { source, backup, objects } = fixture();
+    cpSync(join(source, 'caveat-cli'), join(source, 'other-original'), { recursive: true });
+    if (isWindows()) runWindowsAclPrivateTree(source);
+    const guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const wrong = guard.retainTree(source, 'other-original'), journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan);
+      expect(() => prepareGlobalObjectPreservation(guard, journal, objects, async () => {}, new Map([['package', wrong]]))).toThrow('reviewed_name_changed');
+      expect(journal.read().records).toHaveLength(0);
+      expect(existsSync(join(source, 'caveat-cli'))).toBe(true);
+    } finally { guard.close(); }
+  });
   it('uses the same reviewed native pins for preservation without opening conflicting mutation handles', async () => {
     const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
     try {

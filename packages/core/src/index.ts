@@ -69,3 +69,4 @@ export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlob
 export { executeGlobalRecovery, inspectGlobalRecoveryAttempt, type GlobalRecoveryEvent } from './managedGlobalRecoveryExecution.js';
 
 export { planGlobalRecovery } from './managedGlobalRecoveryChain.js';
+export { resolveManagedNode, type ManagedNodeProof } from './managedNode.js';

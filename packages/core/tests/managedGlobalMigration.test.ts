@@ -185,7 +185,7 @@ describe('product-owned shell publication and known-only rollback', () => {
     try {
       await removeFixtureWorking(session);
       const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
-        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.engine.verifyCurrent(); }, session.plan.baseline.node);
+        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.engine.verifyCurrent(); }, session.plan.baseline.node, session.plan.nodeProof);
       expect((await shell.install()).status).toBe('stopped'); expect(session.journal.read().status).toBe('ready');
       expect(shell.snapshot().files.every(row => row.status === 'installed')).toBe(true); expect(existsSync(join(f.paths.root, 'shell'))).toBe(false);
       expect((await shell.quarantineKnown()).status).toBe('quarantined');
@@ -431,7 +431,7 @@ async function recoveryFixture(mode: 'backup' | 'working' | 'installed' | 'parti
     } else if (mode === 'partial') {
       await removeFixtureWorking(session); let calls = 0;
       const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
-        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture before manifest'); await session.engine.verifyCurrent(); }, session.plan.baseline.node);
+        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture before manifest'); await session.engine.verifyCurrent(); }, session.plan.baseline.node, session.plan.nodeProof);
       expect((await shell.install()).status).toBe('stopped');
     } else if (mode === 'installed') { await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); session.journal.complete('a'.repeat(64)); }
     else { expect((await session.engine.preserveAll()).status).toBe('preserved'); if (mode === 'working') expect((await session.engine.createWorkingCopies()).status).toBe('working'); }

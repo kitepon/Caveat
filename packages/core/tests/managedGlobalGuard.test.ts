@@ -26,6 +26,27 @@ function moved(result: ReturnType<Awaited<ReturnType<typeof openGlobalPathGuard>
   expect(result.status, result.status === 'unknown' ? `${result.phase}:${result.nativeCode}` : undefined).toBe('moved');
 }
 describe('retained global filesystem guard', () => {
+  it('rejects a different native name identity even when its runtime bytes match the held file', async () => {
+    const { source, backup } = fixture(); writeFileSync(join(source, 'other'), 'original bytes', { mode: 0o600 });
+    if (isWindows()) runWindowsAclPrivateTree(source);
+    const driver = await nativeDriver(); let opens = 0;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver, openChild(parent, name, purpose) {
+      return driver.openChild(parent, purpose === 'runtime' && name === 'leaf' && ++opens === 2 ? 'other' : name, purpose);
+    } });
+    try { expect(() => guard.retainRuntimeFile(source, 'leaf')).toThrow('runtime_name_changed'); }
+    finally { guard.close(); }
+  });
+  it('holds runtime files with read-only tokens that cannot rename or impersonate a retained object', async () => {
+    const { source, backup } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    const token = guard.retainRuntimeFile(source, 'leaf');
+    try {
+      expect(guard.readRuntimeFile(token).contentSha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(() => guard.readRuntimeFile({ ...token })).toThrow('foreign_runtime');
+      expect(() => guard.moveTreeNoReplace(token as never, backup, 'illegal')).toThrow();
+      expect(existsSync(join(source, 'leaf'))).toBe(true); expect(existsSync(join(backup, 'illegal'))).toBe(false);
+    } finally { guard.close(); }
+    expect(() => guard.readRuntimeFile(token)).toThrow('closed');
+  });
   it('moves and restores the original object without replacing inode, bytes or mode', async () => {
     const { source, backup } = fixture(), original = statSync(join(source, 'leaf'), { bigint: true });
     const guard = await openGlobalPathGuard([source, backup]);

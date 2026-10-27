@@ -128,8 +128,8 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
   const observed = (file: string, maxBytes?: number) => snapshotGlobalTree(file, { observeOnly: true, maxBytes });
   let phase = 'runtime_binding';
   try {
-    assert.equal(realpathSync(input.node), realpathSync(process.execPath), 'runtime_path_changed');
-    assert.equal(process.version, input.nodeVersion, 'runtime_version_changed');
+    assert.ok(isAbsolute(input.node) && resolve(input.node) === input.node, 'runtime_absolute_selection_required');
+    assert.ok(/^v\d+\.\d+\.\d+$/.test(input.nodeVersion) && Number(input.nodeVersion.slice(1).split('.')[0]) >= 22, 'runtime_version_changed');
     const node = realpathSync(input.node), nodeTree = observed(node, 256 * MiB);
     const packageRoot = resolve(input.packageRoot), globalRoot = resolve(input.globalRoot);
     assert.equal(dirname(packageRoot), globalRoot, 'package_not_direct_global_child');
@@ -213,7 +213,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     }
     return { schema: 'caveat.global_package_snapshot.v1' as const, status: 'consistent' as const,
       packageRoot, packageVersion: pkg.version, packageTree, dependencies, reachableManifests: seen.size,
-      protectedFiles, node: { alias: input.node, canonical: node, version: process.version, binary: nodeTree },
+      protectedFiles, node: { alias: input.node, canonical: node, version: input.nodeVersion, binary: nodeTree },
       npm: { executable: npm, version: npmPackage.version, tree: npmTree }, npmManagement, otherGlobals,
       filesystemWrites: 0, childProcesses: 0, writePermission: false as const, processAssessment: 'not-performed' as const };
   } catch (error) {

@@ -56,7 +56,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     const readback = await managedShellStatusCurrent({ root: reviewed.root });
     assert.ok(readback.status === 'ready' && 'native' in readback, 'global_migration_independent_readback_unconfirmed');
     assert.equal(readback.deployment?.pointerSha256, pointerSha256, 'global_migration_readback_pointer_changed');
-    assert.equal(readback.nodeSha256, sha({ canonical: node.canonical, version: node.version, binary: node.binary }), 'global_migration_readback_node_changed');
+    assert.equal(readback.nodeSha256, sha({ canonical: node.canonical, version: node.version, binary: node.binary, proof: reviewed.nodeProof }), 'global_migration_readback_node_changed');
     assert.deepEqual(readback.wrappers, reviewed.shellPlan.files.map(({ path, sha256 }) => ({ path, sha256 })), 'global_migration_readback_wrappers_changed'); event('completed');
     result = { status: 'completed', phase };
   } catch (error) {

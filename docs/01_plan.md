@@ -723,10 +723,29 @@ as unknown rather than silently repaired.
 its bounded journal/result evidence: `currentObjects: not-assessed` and
 `executionPermission: false` are explicit even for a complete journal. Resuming
 from a known partial recovery-attempt requires the separately reviewed fresh
-binding described below; journal inspection does not supply it. Ordinary Node
-selection/shared-runtime proof, registration migration, versioning and the final
+binding described below; journal inspection does not supply it. Registration migration, versioning and the final
 candidate remain incomplete. These source commands do not grant approval for
 distribution or machine changes.
+
+Ordinary Node selection uses an explicit absolute executable path, independently
+of the interpreter running Caveat. A bounded owned child uses a restricted
+environment, tests in-memory SQLite FTS5/trigram, and reports the actual loaded
+libnode dependencies from Node's diagnostic report. Spawn, exit and pipe close
+must all succeed. The product binds alias identity, canonical file identity,
+contents, native security and every parent for the executable and reported
+libnode files, then repeats the capability under those held bindings. A shared
+build with missing or inconsistent dependency evidence is explicitly refused.
+No runtime/library permissions are repaired. This proof covers the executable
+and libnode; it does not attest every system library or the whole host.
+
+The stable runtime proof enters the reviewed plan, native shell manifest,
+coordinator readback digest and recovery admission; transient child PIDs do not
+change the plan hash. Every mutation gate freshly checks binary/library bindings
+and includes their alias/canonical paths in the native process/writer scope.
+Native status independently reads those objects without claiming process/writer
+absence (`processAssessment: not-performed`). Legacy saved history remains
+readable; a missing runtime proof cannot grant new execution or a native-ready
+result. The immutable entry/runtime sources and accepted bytes remain unchanged.
 
 Confirmed partial recovery journals may be planned with `deployment global-recovery-plan
 <run-id> --plan-sha256 <original-digest> --json`. This is read-only: no run, lock or

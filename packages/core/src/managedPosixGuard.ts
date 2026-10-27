@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
   directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; aclType?: number };
-type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
+type Ref = { fd: number; mutation?: boolean; runtime?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
 
 export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
@@ -79,24 +79,29 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     }
     return createHash('sha256').update(JSON.stringify({ values, aclSha256 })).digest('hex');
   };
-  const snapshot = (value: object): GlobalGuardIdentity => {
+  const snapshot = (value: object, metadataOnly = false): GlobalGuardIdentity => {
     const stat = fstatSync((value as Ref).fd, { bigint: true });
     assert.ok(stat.isDirectory() || stat.isFile() || stat.isSymbolicLink(), 'global_guard_special_leaf');
     if ((value as Ref).mutation) {
       assert.equal(Number(stat.uid), process.getuid?.(), 'global_guard_foreign_leaf');
       assert.ok(stat.isSymbolicLink() || (stat.mode & 0o022n) === 0n, 'global_guard_writable_leaf');
     }
+    if ((value as Ref).runtime) {
+      assert.ok(stat.isFile() && (stat.uid === 0n || Number(stat.uid) === process.getuid?.()), 'global_guard_foreign_runtime');
+      assert.equal(stat.mode & 0o022n, 0n, 'global_guard_writable_runtime');
+    }
     if (stat.isDirectory()) {
       assert.ok(stat.uid === 0n || Number(stat.uid) === process.getuid?.(), 'global_guard_foreign_parent');
       assert.ok((stat.mode & 0o022n) === 0n || (stat.mode & 0o1000n) !== 0n, 'global_guard_writable_parent');
     }
     let contentSha256: string | undefined;
-    if (stat.isFile()) {
-      assert.ok(stat.size <= 128n * 1024n * 1024n, 'global_guard_file_bound');
+    if (stat.isFile() && !metadataOnly) {
+      const limit = (value as Ref).runtime ? 256 : 128;
+      assert.ok(stat.size <= BigInt(limit) * 1024n * 1024n, 'global_guard_file_bound');
       const hash = createHash('sha256'), buffer = Buffer.alloc(65536); let offset = 0;
       for (;;) {
-        const n = readSync((value as Ref).fd, buffer, 0, Math.min(buffer.length, 128 * 1024 * 1024 - offset + 1), offset);
-        if (!n) break; offset += n; assert.ok(offset <= 128 * 1024 * 1024, 'global_guard_file_bound'); hash.update(buffer.subarray(0, n));
+        const n = readSync((value as Ref).fd, buffer, 0, Math.min(buffer.length, limit * 1024 * 1024 - offset + 1), offset);
+        if (!n) break; offset += n; assert.ok(offset <= limit * 1024 * 1024, 'global_guard_file_bound'); hash.update(buffer.subarray(0, n));
       }
       const after = fstatSync((value as Ref).fd, { bigint: true });
       for (const key of ['dev', 'ino', 'size', 'uid', 'gid', 'mode', 'nlink', 'mtimeNs', 'ctimeNs'] as const) assert.equal(after[key], stat[key], 'global_guard_file_changed_during_read');
@@ -124,7 +129,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      const ref = { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
+      const ref = { fd, mutation: purpose === 'mutation', runtime: purpose === 'runtime', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,

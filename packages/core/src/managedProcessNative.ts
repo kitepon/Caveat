@@ -46,13 +46,13 @@ function executable(file: string, path = file): ProcessExecutable {
 }
 
 /** Only the child created here may be terminated. Close, not exit, completes the probe. */
-export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = () => {}): ProcessProbeRun {
+export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = () => {}, options: { env?: NodeJS.ProcessEnv; cwd?: string; outputLimit?: number } = {}): ProcessProbeRun {
   return (command, args, phase, deadline) => new Promise((resolve, reject) => {
     const timeout = deadline - Date.now();
     if (timeout <= 0) { reject(Error('process_probe_deadline')); return; }
     onEvent({ phase, event: 'issued' });
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: { ...process.env, LC_ALL: 'C' } });
-    const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, settled = false, progress = '', spawned = false, terminationRequested = false;
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: options.env ?? { ...process.env, LC_ALL: 'C' }, ...(options.cwd ? { cwd: options.cwd } : {}) });
+    const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, settled = false, progress = '', spawned = false, exited = false, terminationRequested = false;
     const observedFailure = (error: Error, closed: boolean) => Object.assign(error, { ownedProbe: {
       pid: child.pid ?? null, spawned, exitObserved: child.exitCode !== null || child.signalCode !== null,
       closeObserved: closed, terminationRequested,
@@ -78,7 +78,7 @@ export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = 
     child.stdout.on('data', (chunk: Buffer) => {
       if (settled || failure) return;
       size += chunk.length;
-      if (size > 16 * 1024 * 1024) stop(Error('process_probe_output_bound'));
+      if (size > (options.outputLimit ?? 16 * 1024 * 1024)) stop(Error('process_probe_output_bound'));
       else {
         chunks.push(chunk);
         if (phase === 'cim') {
@@ -95,14 +95,15 @@ export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = 
         }
       }
     });
-    child.stderr.on('data', () => { /* Raw native errors can contain process arguments. */ });
+    child.stderr.on('data', (chunk: Buffer) => { size += chunk.length; if (size > (options.outputLimit ?? 16 * 1024 * 1024)) stop(Error('process_probe_output_bound')); });
     child.on('error', () => { failure ??= Error('process_probe_spawn_failed'); });
+    child.on('exit', () => { exited = true; });
     child.on('close', code => {
       clearTimeout(timer);
       if (teardown) clearTimeout(teardown);
       if (settled) return;
       settled = true;
-      if (failure || code !== 0 || child.pid === undefined) {
+      if (failure || code !== 0 || child.pid === undefined || !spawned || !exited) {
         try { onEvent({ phase, event: 'stopped', pid: child.pid }); } catch { /* The original failure remains primary. */ }
         reject(observedFailure(failure ?? Error('process_probe_exit_failed'), true));
       } else {

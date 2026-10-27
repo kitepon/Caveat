@@ -428,7 +428,13 @@ identity/content/security in the reviewed plan; a self-consistent seed/result ha
 rewrite must not substitute a different original. Reject pending/torn/unknown
 intents, cycles, changed parents/aliases and arbitrary saved-path authority before
 creating a new journal. Keep journal inspection separate from current-object admission.
-The selected Node's shared-runtime proof (or explicit rejection),
+Retain actual selected-Node SQLite capability and owned-child close receipts,
+executable/alias/parent/native-security bindings, reported actual libnode
+identity/hash/parent bindings or explicit shared-build rejection, and changed
+library/alias/writer refusal fixtures. The same stable proof must enter plan,
+manifest, status, coordinator and recovery without altering fixed entry/runtime
+bytes or repairing shared runtime permissions. Status alone does not assess
+process/writer absence. These proofs,
 registration-token migration/readback/known rollback,
 versioning and final review remain required before the completed candidate.
 Release or machine-operation approval is separate from these source fixtures.

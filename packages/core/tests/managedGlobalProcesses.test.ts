@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assessGlobalProcesses, preflightGlobalProcesses } from '../src/managedGlobalProcesses.js';
 import { decodeWindowsProcessTables, ownedProcessProbe, parseLinuxProcessStat, parseWindowsProcessArguments, parseMacTextImages, readLinuxProcessTables, readMacProcessTables, WINDOWS_PROCESS_PROBE, type NativeProcessRecord, type NativeProcessTables, type ProcessProbeEvent } from '../src/managedProcessNative.js';
-import { isWindows, quoteWindowsArgument } from '../src/platform.js';
+import { globalNpmEnvironment, isWindows, quoteWindowsArgument } from '../src/platform.js';
 
 const scope = { packageRoot: '/global/node_modules/caveat-cli', npmRoot: '/runtime/npm', binAliases: ['/global/bin/caveat'] };
 const roots: string[] = [];
@@ -36,6 +36,12 @@ describe('global process assessment', () => {
   it('blocks npm independently of the old package argument', () => {
     const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', '/runtime/npm/bin/npm-cli.js', 'install'])));
     expect(result.writers).toBe(1); expect(result.status).toBe('stopped');
+  });
+  it('recognizes the selected runtime under an arbitrary executable name', () => {
+    const selected = '/ordinary/custom-runtime';
+    expect(assessGlobalProcesses(scope, tables(record(20, selected, [selected, '/unrelated/script.js']))).status).toBe('ready');
+    const result = assessGlobalProcesses({ ...scope, runtimeExecutables: [selected] }, tables(record(20, selected, [selected, '/unrelated/script.js'])));
+    expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1);
   });
   it('requires a bound Node script slot and leaves data/flag literals unknown', () => {
     const root = scope.packageRoot + '/dist/caveat.js';
@@ -161,6 +167,10 @@ describe('native process parsers and owned transport', () => {
   });
   it('rejects oversized output without retaining it as metadata', async () => {
     await expect(ownedProcessProbe()(process.execPath, ['-e', 'process.stdout.write(Buffer.alloc(17*1024*1024,97))'], 'fixture', Date.now() + 5000)).rejects.toThrow('process_probe_output_bound');
+  });
+  it('bounds stderr too when running the restricted Node capability probe', async () => {
+    await expect(ownedProcessProbe(() => {}, { env: globalNpmEnvironment(process.execPath, tmpdir()), outputLimit: 1024 })(process.execPath,
+      ['-e', 'process.stderr.write(Buffer.alloc(2048,97))'], 'node-capability', Date.now() + 5000)).rejects.toThrow('process_probe_output_bound');
   });
   it('requires lsof txt device/inode fields and preserves spaces in executable names', () => {
     const images = parseMacTextImages('p20\0\nftxt\0D0x100\0i777\0n/space path/native\0\n');

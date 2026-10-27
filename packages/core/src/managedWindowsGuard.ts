@@ -32,7 +32,7 @@ export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: bo
   assert.ok(offset <= bytes.length, 'global_guard_invalid_acl');
 }
 
-type Ref = { handle: unknown; mutation: boolean };
+type Ref = { handle: unknown; mutation: boolean; runtime?: boolean };
 export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const koffi = await import('koffi');
   assert.equal(koffi.sizeof('void *'), 8, 'global_guard_64_bit_windows_required');
@@ -95,7 +95,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
         assert.ok((Number(control[0]) & 0x1000) !== 0, 'global_journal_dacl_unprotected');
       }
       const header = bytesAt(dacl[0], 8), size = header.readUInt16LE(2);
-      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation, privateFile ? currentSid : undefined);
+      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation || ref.runtime === true, privateFile ? currentSid : undefined);
       const text: unknown[] = [null], length = [0];
       assert.notEqual(toString(sd[0], 1, 7, text, length), 0, 'global_guard_security_unavailable');
       try {
@@ -105,7 +105,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       } finally { localFree(text[0]); }
     } finally { localFree(sd[0]); }
   };
-  const snapshot = (value: object): GlobalGuardIdentity => {
+  const snapshot = (value: object, metadataOnly = false): GlobalGuardIdentity => {
     const ref = value as Ref, id = Buffer.alloc(24), basic = Buffer.alloc(40), standard = Buffer.alloc(24);
     assert.notEqual(info(ref.handle, 18, id, id.length), 0, 'global_guard_file_id_unavailable');
     assert.notEqual(info(ref.handle, 0, basic, basic.length), 0, 'global_guard_file_info_unavailable');
@@ -113,14 +113,15 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     assert.ok(id.subarray(8).some(value => value !== 0), 'global_guard_file_id_unavailable');
     assert.ok((basic.readUInt32LE(32) & 0x400) === 0 && !standard[20], 'global_guard_reparse_or_delete_pending');
     let contentSha256: string | undefined;
-    if (!standard[21]) {
-      const size = standard.readBigInt64LE(8); assert.ok(size >= 0n && size <= 128n * 1024n * 1024n, 'global_guard_file_bound');
+    if (!standard[21] && !metadataOnly) {
+      const limit = ref.runtime ? 256 : 128;
+      const size = standard.readBigInt64LE(8); assert.ok(size >= 0n && size <= BigInt(limit) * 1024n * 1024n, 'global_guard_file_bound');
       assert.notEqual(seek(ref.handle, 0, null, 0), 0, 'global_guard_file_seek_failed');
       const hash = createHash('sha256'), buffer = Buffer.alloc(65536); let total = 0;
       for (;;) {
         const count = [0]; assert.notEqual(read(ref.handle, buffer, buffer.length, count, null), 0, 'global_guard_file_read_failed');
         const n = Number(count[0]); assert.ok(n >= 0 && n <= buffer.length, 'global_guard_file_read_failed');
-        if (!n) break; total += n; assert.ok(total <= 128 * 1024 * 1024, 'global_guard_file_bound'); hash.update(buffer.subarray(0, n));
+        if (!n) break; total += n; assert.ok(total <= limit * 1024 * 1024, 'global_guard_file_bound'); hash.update(buffer.subarray(0, n));
       }
       const after = Buffer.alloc(40); assert.notEqual(info(ref.handle, 0, after, after.length), 0, 'global_guard_file_info_unavailable');
       assert.equal(BigInt(total), size, 'global_guard_file_changed_during_read');
@@ -139,7 +140,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
     if (sd) attributes.writeBigUInt64LE(koffi.address(sd), 32);
     // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
-    const share = creating === 'directory' ? 3 : mutation ? 1 : purpose === 'parent' ? 3 : 7;
+    const share = creating === 'directory' ? 3 : mutation || purpose === 'runtime' ? 1 : purpose === 'parent' ? 3 : 7;
     const access = 0x00120081 | (mutation && creating !== 'directory' ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
     const result = Number(openRelative(handle, access, attributes, status, null, creating === 'directory' ? 0x10 : creating ? 0x80 : 0, share, creating ? 2 : 1, creating === 'directory' ? 0x23 : 0x00200020 | (creating ? 0x42 : 0), null, 0));
     // Keep nested buffers alive across the native call; raw addresses do not root them for GC.
@@ -149,7 +150,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       if (!creating && (result === -1073741772 || result === -1073741766)) return null;
       throw Object.assign(Error('global_guard_relative_open_failed_' + (result >>> 0).toString(16)), { nativeCode: result >>> 0 });
     }
-    const ref = { handle: handle[0], mutation }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
+    const ref = { handle: handle[0], mutation, runtime: purpose === 'runtime' }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
   };
   return {
     openRoot(path) {

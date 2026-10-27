@@ -7,6 +7,7 @@ import { recoveryLocations, recoveryModelFromMigration, recoveryVacancySlots, va
 import { openGlobalPathGuard } from './managedGlobalGuard.js';
 import { preflightGlobalProcesses } from './managedGlobalProcesses.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
+import { managedNodePaths } from './managedNode.js';
 
 type Reference = GlobalMigrationEvidence['references'][number];
 type Chain = { origin: GlobalMigrationEvidence; model: RecoveryModel; roots: string[]; references: Reference[];
@@ -104,8 +105,8 @@ export function withGlobalRecoverySourceSnapshot<T>(runDirectory: string, planSh
 export async function checkGlobalRecoveryProcesses(source: GlobalRecoverySnapshot, runDirectory: string, target: string,
   emit: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
   const { plan } = source;
-  const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)),
-    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([plan.baseline.node.canonical,
+  const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)), runtimeExecutables: [plan.nodeProof.executable.canonical],
+    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([...managedNodePaths(plan.nodeProof),
       ...(source.sourceRoots ?? [runDirectory]), target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
   const result = await preflightGlobalProcesses(scope, emit, collect);
   assert.equal(result.status, 'ready', 'global_recovery_process_preflight_stopped');

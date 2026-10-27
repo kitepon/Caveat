@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
-export type GlobalProcessScope = { packageRoot: string; npmRoot: string; binAliases: string[]; protectedPaths?: string[] };
+export type GlobalProcessScope = { packageRoot: string; npmRoot: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
 type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'other-executable';
 export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string };
 const normalized = (value: string, fold: boolean) => {
@@ -14,7 +14,8 @@ const normalized = (value: string, fold: boolean) => {
 const absolute = (value: string) => value.startsWith('/') || /^[a-z]:\//i.test(value);
 function validateScope(scope: GlobalProcessScope) {
   assert.ok(!scope.protectedPaths || Array.isArray(scope.protectedPaths) && scope.protectedPaths.length <= 64, 'process_protected_scope_bound');
-  const paths = [scope.packageRoot, scope.npmRoot, ...scope.binAliases, ...(scope.protectedPaths ?? [])].map(value => normalized(value, false));
+  assert.ok(!scope.runtimeExecutables || Array.isArray(scope.runtimeExecutables) && scope.runtimeExecutables.length <= 8, 'process_runtime_scope_bound');
+  const paths = [scope.packageRoot, scope.npmRoot, ...scope.binAliases, ...(scope.protectedPaths ?? []), ...(scope.runtimeExecutables ?? [])].map(value => normalized(value, false));
   assert.ok(paths.every(value => absolute(value) && value.length > 1 && !/[\x00-\x1f]/.test(value) && !value.split('/').some(part => part === '.' || part === '..')), 'absolute_process_scope_required');
 }
 function nodeScript(argv: string[]) {
@@ -61,6 +62,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     result.executableSha256 = createHash('sha256').update(JSON.stringify(row.executable)).digest('hex');
     const image = norm(row.executable.path), args = (row.argv ?? []).map(norm);
     const isNode = /(?:^|\/)(?:node|nodejs)(?:\.exe)?$/.test(image)
+      || (scope.runtimeExecutables ?? []).some(path => norm(path) === image)
       || row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
     const script = isNode && row.argv ? nodeScript(args) : null;
     if (within(image, npm) || script && within(script, npm)) {

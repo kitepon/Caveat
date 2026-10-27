@@ -7,6 +7,7 @@ import { parseGlobalMutationJournal } from './managedGlobalJournal.js';
 import { observeGlobalAbsence, snapshotGlobalTree } from './managedGlobalSnapshot.js';
 import { globalNpmLayout } from './platform.js';
 import type { bindGlobalMigration } from './managedGlobalMigration.js';
+import { bindManagedNodeProof, managedNodeDirectories } from './managedNode.js';
 
 type Plan = Awaited<ReturnType<typeof bindGlobalMigration>>['plan'];
 type OriginalManifest = ReturnType<Awaited<ReturnType<typeof bindGlobalMigration>>['engine']['manifest']>;
@@ -39,12 +40,15 @@ export type GlobalRecoverySnapshot = { plan: Plan; original: OriginalManifest; s
   verifyEvidence: () => void; verifyProtected: () => void; admission?: unknown; sourceRoots?: string[]; vacancySlots?: { directory: string; name: string }[] };
 
 export function globalRecoveryGuardPaths(plan: Plan, runDirectory: string) {
-  return [...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical),
+  return [...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical), ...(plan.nodeProof ? managedNodeDirectories(plan.nodeProof) : []),
     dirname(dirname(plan.baseline.npm.executable)), ...plan.absences.map(row => row.parent), ...plan.protectedObjects.map(row => dirname(row.path))])];
 }
 
 /** Shared immutable binding for admission, recovery mutations and independent recovery readback. */
 export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnType<typeof openGlobalPathGuard>>) {
+  const runtime = plan.nodeProof ? bindManagedNodeProof(plan.nodeProof, guard) : null;
+  if (runtime) assert.ok(plan.nodeProof.executable.canonical === plan.baseline.node.canonical && plan.nodeProof.executable.alias === plan.baseline.node.alias
+    && plan.nodeProof.capability.version === plan.baseline.node.version && plan.nodeProof.executable.identity.contentSha256 === plan.baseline.node.binary[0]?.sha256, 'global_recovery_node_proof_unbound');
   const bindings = new Map<string, Binding>();
   for (const [index, object] of plan.protectedObjects.entries()) {
     const binding: Binding = { directory: dirname(object.path), name: basename(object.path), rows: object.rows, tree: null };
@@ -54,6 +58,8 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
   const observe = () => {
     const checks: { step: string; state: 'known' | 'absent' | 'unknown' }[] = [];
     guard.assertCurrent();
+    try { assert.ok(runtime, 'global_recovery_node_proof_required'); runtime(); checks.push({ step: 'node-runtime', state: 'known' }); }
+    catch { checks.push({ step: 'node-runtime', state: 'unknown' }); }
     for (const [step, binding] of bindings) if (step.startsWith('protected.')) {
       try { assert.deepEqual(guard.readTree(binding.tree!), binding.rows); checks.push({ step, state: 'known' }); }
       catch { checks.push({ step, state: 'unknown' }); }
@@ -117,7 +123,7 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
     };
     const planBytes = read('plan.json'); assert.equal(shaGlobalRecoveryValue(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
     const plan = decode(planBytes) as Plan;
-    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories', ...(Object.hasOwn(plan, 'originalObjects') ? ['originalObjects'] : [])]);
+    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories', ...(Object.hasOwn(plan, 'originalObjects') ? ['originalObjects'] : []), ...(Object.hasOwn(plan, 'nodeProof') ? ['nodeProof'] : [])]);
     assert.equal(plan.schema, 'caveat.global_migration_plan.v1', 'global_recovery_plan_invalid');
     assert.equal(plan.root, dirname(runDirectory), 'global_recovery_run_outside_root');
     assert.ok([plan.root, plan.globalRoot, plan.binDirectory, plan.prefix].every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path), 'global_recovery_absolute_scope_required');
