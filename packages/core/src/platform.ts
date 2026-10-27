@@ -14,6 +14,18 @@ export function isWindows(platform: NodeJS.Platform = process.platform): boolean
   return platform === 'win32';
 }
 
+/** Native constants absent from Node's fs.constants; never infer them from another OS. */
+export function globalFilesystemNativeSpec(platform: NodeJS.Platform = process.platform) {
+  if (platform === 'linux') return { windows: false as const, library: null,
+    closeOnExec: 0x80000, linkOpen: 0x220000, loopError: 40, rename: 'renameat2', noReplace: 1,
+    xattrListTail: [] as number[], xattrGetTail: [] as number[], linkAttributesViaProc: true, aclType: undefined as number | undefined };
+  if (platform === 'darwin') return { windows: false as const, library: '/usr/lib/libSystem.B.dylib',
+    closeOnExec: 0x1000000, linkOpen: 0x200000, loopError: 62, rename: 'renameatx_np', noReplace: 4,
+    xattrListTail: [0x20], xattrGetTail: [0, 0x20], linkAttributesViaProc: false, aclType: 0x100 };
+  if (platform === 'win32') return { windows: true as const };
+  throw Error('global_filesystem_platform_not_implemented');
+}
+
 export function collectNativeGlobalProcesses<T>(readers: { linux: () => T; darwin: () => T; win32: (command: string) => T }, platform: NodeJS.Platform = process.platform): T {
   if (platform === 'linux') return readers.linux();
   if (platform === 'darwin') return readers.darwin();

@@ -526,6 +526,24 @@ or load the native bridge. Full preservation, guarded uninstall/recovery, wrappe
 replacement and registration/Node migration remain separate unfinished source
 work. The preflight API does not authorize or perform those mutations.
 
+The unreleased path guard retains directory and leaf handles. POSIX uses
+directory-relative exclusive rename; Windows opens children relative to retained
+native directory handles and renames the held object without replacement. It
+checks names, ancestry, ownership, metadata and bounded file-content hashes before
+moving, then verifies the original identity at the destination. Visible xattrs and
+Darwin extended ACLs, or Windows owner/group/DACL, have separate bounded digests.
+Hidden or privileged metadata is never inferred absent from a readable projection;
+the original object is retained rather than reconstructed from these digests.
+Darwin extended allow ACL entries remain unclassified and are refused. Unsupported
+ACL layouts, reparse objects and permission failures are stopped without repair.
+
+A failed or incomplete move returns unknown with separately observed held/source/
+destination states. It never assumes a failed syscall means unchanged state and
+never automatically overwrites an unknown object during recovery. The directory
+guard does not verify an entire descendant tree or establish process/writer
+absence; full package preservation and the mutation journal must supply those
+checks before scoped uninstall can be connected.
+
 ### Windows hookの保護保存transport（未公開source）
 
 Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。
