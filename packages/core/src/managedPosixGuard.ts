@@ -12,7 +12,8 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
   const openat = lib.func('int openat(int dirfd, const char *path, int flags)');
   const createat = lib.func('int openat(int dirfd, const char *path, int flags, ...)');
   const directoryOpen = lib.func('void *fdopendir(int fd)');
-  const directoryRead = lib.func('void *' + spec.directoryRead + '(void *directory)');
+  // Darwin x64's versioned symbol contains '$', which the C prototype parser rejects.
+  const directoryRead = lib.func(spec.directoryRead, 'void *', ['void *']);
   const directoryClose = lib.func('int closedir(void *directory)');
   const linkRead = lib.func('intptr_t readlinkat(int directory, const char *name, _Out_ void *buffer, size_t size)');
   const createdJournals = new WeakSet<object>();

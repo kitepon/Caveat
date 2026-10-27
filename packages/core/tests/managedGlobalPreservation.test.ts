@@ -129,6 +129,10 @@ describe('held original trees and known-only preservation', () => {
       await expect(engine.preserveAll()).rejects.toThrow('not_fresh'); expect(calls).toBe(1);
     } finally { guard.close(); }
   });
+  it.skipIf(isWindows())('binds versioned native symbols by name without feeding dollar signs to the C parser', async () => {
+    const spec = globalFilesystemNativeSpec(); if (spec.windows) throw Error('fixture_platform_mismatch');
+    await expect(createPosixGlobalGuard({ ...spec, directoryRead: 'caveat$missing_fixture_symbol' })).rejects.toThrow(/Cannot find function/);
+  });
   it('rejects scope expansion to another global package before reading its contents', async () => {
     const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
     try {
