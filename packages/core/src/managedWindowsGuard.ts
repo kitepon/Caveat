@@ -119,10 +119,14 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       const nameBuffer = Buffer.from(name + '\0', 'utf16le'), unicode = Buffer.alloc(16), attributes = Buffer.alloc(48), status = Buffer.alloc(16), handle: unknown[] = [null];
       unicode.writeUInt16LE(nameBuffer.length - 2); unicode.writeUInt16LE(nameBuffer.length, 2); unicode.writeBigUInt64LE(koffi.address(nameBuffer), 8);
       attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
-      const result = Number(openRelative(handle, 0x00120081 | (mutation ? 0x10000 : 0), attributes, status, null, 0, mutation ? 1 : 3, 1, 0x00200020, null, 0));
+      // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
+      const share = mutation ? 1 : purpose === 'parent' ? 3 : 7;
+      const result = Number(openRelative(handle, 0x00120081 | (mutation ? 0x10000 : 0), attributes, status, null, 0, share, 1, 0x00200020, null, 0));
+      // Keep both nested input buffers alive across the native call; raw pointer addresses do not root them for GC.
+      assert.equal(unicode.readUInt16LE(0), nameBuffer.length - 2); assert.equal(nameBuffer.readUInt16LE(nameBuffer.length - 2), 0);
       if (result !== 0) {
         if (result === -1073741772 || result === -1073741766) return null; // STATUS_OBJECT_NAME_NOT_FOUND / PATH_NOT_FOUND
-        throw Error('global_guard_relative_open_failed');
+        throw Error('global_guard_relative_open_failed_' + (result >>> 0).toString(16));
       }
       return { handle: handle[0], mutation };
     },

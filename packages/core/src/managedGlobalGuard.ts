@@ -13,7 +13,7 @@ export type GlobalGuardIdentity = {
 };
 export type NativeGuardDriver = {
   openRoot(path: string): object;
-  openChild(parent: object, name: string, purpose: 'parent' | 'observe' | 'mutation'): object | null;
+  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation'): object | null;
   snapshot(ref: object): GlobalGuardIdentity;
   rename(sourceParent: object, sourceName: string, source: object, targetParent: object, targetName: string): void;
   close(ref: object): void;
@@ -47,7 +47,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
   };
   const active = () => assert.ok(!closed, 'global_guard_closed');
   const inspect = (parent: object, name: string, purpose: 'parent' | 'observe' = 'observe') => {
-    const ref = driver.openChild(parent, name, purpose); if (!ref) return null;
+    const ref = driver.openChild(parent, name, purpose === 'parent' ? 'observe-parent' : 'observe'); if (!ref) return null;
     try { return driver.snapshot(ref); } finally { driver.close(ref); }
   };
   const checkDirectories = () => {

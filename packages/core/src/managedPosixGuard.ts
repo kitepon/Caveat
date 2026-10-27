@@ -94,7 +94,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      return { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent', parent: parent as Ref, name };
+      return { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
     },
     snapshot,
     rename(from, name, source, to, target) {
