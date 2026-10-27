@@ -177,7 +177,7 @@ describe('product-owned shell publication and known-only rollback', () => {
     try {
       await removeFixtureWorking(session);
       const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
-        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.verify(); });
+        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.engine.verifyCurrent(); });
       expect((await shell.install()).status).toBe('stopped'); expect(session.journal.read().status).toBe('ready');
       expect(shell.snapshot().files.every(row => row.status === 'installed')).toBe(true); expect(existsSync(join(f.paths.root, 'shell'))).toBe(false);
       expect((await shell.quarantineKnown()).status).toBe('quarantined');
@@ -263,4 +263,21 @@ it.skipIf(isWindows())('rejects a redirected prefix bin before creating private 
   const before = readdirSync(f.paths.root);
   await expect(bindGlobalMigration(f.input, () => {}, async () => tables())).rejects.toThrow('bin_redirect');
   expect(readdirSync(f.paths.root)).toEqual(before); expect(readFileSync(join(moved, 'caveat'), 'utf8')).toBe('fixture old wrapper');
+});
+
+
+it('stops publication when an original changes after the first wrapper and forbids further original mutation', { timeout: 120000 }, async () => {
+  const f = fixture(); let armed = false, changed = false;
+  const session = await bindGlobalMigration(f.input, () => {}, async () => {
+    if (armed && !changed && existsSync(join(f.binDirectory, 'caveat'))) { changed = true; writeFileSync(join(f.paths.root, runName, 'original-package/dist/caveat.js'), 'changed original'); }
+    return tables();
+  });
+  const runName = basename(session.runDirectory);
+  try {
+    await removeFixtureWorking(session); armed = true;
+    expect((await session.shell.install()).status).toBe('unknown'); expect(changed).toBe(true); expect(session.journal.read().status).toBe('unknown');
+    expect(existsSync(join(f.binDirectory, 'caveat'))).toBe(true); expect(existsSync(join(f.paths.root, 'shell'))).toBe(false);
+    await expect(session.engine.restoreKnown('package')).rejects.toThrow('not_known');
+    expect(readFileSync(join(session.runDirectory, 'original-package/dist/caveat.js'), 'utf8')).toBe('changed original');
+  } finally { session.close(); }
 });

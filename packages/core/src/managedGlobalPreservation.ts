@@ -121,6 +121,10 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
   };
   return {
     manifest,
+    async verifyCurrent() {
+      assert.ok(!stopped, 'global_preservation_not_known');
+      try { await verify(); } catch (error) { stopped = true; throw error; }
+    },
     async preserveAll() {
       assert.ok(!stopped && saved.every(row => row.state === 'original'), 'global_preservation_not_fresh');
       for (const row of saved) { const result = await move(row, false); if (result.status !== 'confirmed') return result; }

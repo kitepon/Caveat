@@ -125,7 +125,7 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
     const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
     const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));
     const preparedRun = runDirectory;
-    shell = prepareGlobalShellInstallation(guard, journal, engine, preparedRun, root, shellPlan, verify);
+    shell = prepareGlobalShellInstallation(guard, journal, engine, preparedRun, root, shellPlan, engine.verifyCurrent);
     const uninstall = (observer: (event: GlobalNpmEvent) => void = () => {}) => engine.uninstallWorking(async () => {
       assert.ok(guard.readJournal(userToken).equals(Buffer.from('\n')) && guard.readJournal(globalToken).equals(Buffer.from('\n')), 'global_migration_npm_config_changed');
       return runGlobalNpmUninstall({ node: baseline.node.canonical, script: baseline.npm.executable, prefix: canonicalLayout.prefix, runDirectory: preparedRun, userConfig, globalConfig }, observer);

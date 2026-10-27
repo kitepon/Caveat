@@ -643,6 +643,9 @@ publication path uses no PATH PowerShell reader. Accepted bin aliases are bound;
 redirecting a separate prefix bin outside the canonical layout is refused.
 
 Each wrapper/manifest operation persists intent, exact result and current state.
+Before and after publication it reuses the preservation engine's original-tree/
+original-evidence verification and sticky stop state, alongside fresh process and
+protected-state checks. A changed backup cannot be hidden by a healthy wrapper.
 Known partial publication can be quarantined after a fresh successful check,
 then originals restored in their required order. Unknown publication retains
 separate destination/stage/quarantine observations and is never replayed or
