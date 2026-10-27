@@ -123,14 +123,18 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     phase = 'package_tree';
     const packageTree = observed(packageRoot);
     assert.equal(packageTree[0]?.kind, 'directory', 'package_root_redirect');
+    const canonicalPackageRoot = realpathSync(packageRoot);
+    assert.equal(dirname(canonicalPackageRoot), realpathSync(globalRoot), 'package_parent_redirect');
     const pkg = readGlobalPackageJson(join(packageRoot, 'package.json'));
     assert.equal(pkg.name, 'caveat-cli');
     assert.equal(pkg.version, input.expectedPackageVersion, 'unexpected_old_global');
     phase = 'dependency_closure';
     const dependencies: { from: string; name: string; manifest: string }[] = [], seen = new Set<string>();
     function visit(manifest: string) {
-      if (seen.has(manifest)) return;
-      seen.add(manifest);
+      const canonicalManifest = realpathSync(manifest);
+      assert.ok(inside(canonicalPackageRoot, canonicalManifest), 'dependency_redirect');
+      if (seen.has(canonicalManifest)) return;
+      seen.add(canonicalManifest);
       const doc = readGlobalPackageJson(manifest);
       for (const name of new Set([...dependencyNames(doc.dependencies), ...dependencyNames(doc.optionalDependencies)])) {
         let directory = dirname(manifest), found: string | undefined;
@@ -143,7 +147,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
           assert.ok(directory === packageRoot || inside(packageRoot, directory), 'dependency_outside_retained_package');
         }
         assert.ok(found, 'dependency_outside_retained_package');
-        assert.ok(inside(packageRoot, realpathSync(found)), 'dependency_redirect');
+        assert.ok(inside(canonicalPackageRoot, realpathSync(found)), 'dependency_redirect');
         dependencies.push({ from: relative(packageRoot, manifest), name, manifest: relative(packageRoot, found) });
         visit(found);
       }
@@ -180,6 +184,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
       observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true,
     }).filter(row => row.relativePath !== '');
     phase = 'final_identity';
+    assert.equal(realpathSync(packageRoot), canonicalPackageRoot, 'package_root_changed_during_read');
     assert.deepEqual(observed(packageRoot), packageTree, 'package_changed_during_read');
     for (const file of protectedFiles) assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read');
     assert.deepEqual(observed(node, 256 * MiB), nodeTree, 'runtime_changed_during_read');

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { appendFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -44,6 +44,20 @@ describe('global package snapshot', () => {
     const before = snapshotGlobalTree(root);
     expect(() => snapshotGlobalPackage(input)).toThrow('dependency_outside_retained_package');
     expect(snapshotGlobalTree(root)).toEqual(before);
+  });
+  it('compares canonical dependency boundaries when an ancestor directory is an alias', () => {
+    const { root, input } = fixture(), alias = join(root, 'parent-alias');
+    symlinkSync(root, alias, isWindows() ? 'junction' : 'dir');
+    const result = snapshotGlobalPackage({ ...input, globalRoot: join(alias, 'global'), packageRoot: join(alias, 'global/caveat-cli') });
+    expect(result.reachableManifests).toBe(2);
+    expect(result.writePermission).toBe(false);
+  });
+  it('keeps external dependency redirects rejected', () => {
+    const { root, input } = fixture(), dep = join(input.packageRoot, 'node_modules/dep'), outside = join(root, 'external-dep');
+    mkdirSync(outside); writeFileSync(join(outside, 'package.json'), JSON.stringify({ name: 'dep', version: '1' }));
+    rmSync(dep, { recursive: true });
+    symlinkSync(outside, dep, isWindows() ? 'junction' : 'dir');
+    expect(() => snapshotGlobalPackage(input)).toThrow('external_or_absolute_link');
   });
   it('rejects dependency traversal names', () => {
     const { input } = fixture();
