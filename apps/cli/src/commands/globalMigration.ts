@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { executeGlobalMigration, globalNpmLayout, inspectGlobalMigrationRecovery, managedDeploymentPaths, planGlobalMigration,
+import { executeGlobalMigration, executeGlobalRecovery, globalNpmLayout, inspectGlobalMigrationRecovery, inspectGlobalRecoveryAttempt, managedDeploymentPaths, planGlobalMigration,
   readGlobalPackageJson, readManagedDeployment, snapshotGlobalTree, type GlobalMigrationInput } from '@caveat/core';
 import { resolveAgentConfigPaths } from '../installShared.js';
 
@@ -56,12 +56,28 @@ export async function runGlobalMigrationCommand(mode: 'plan' | 'execute', option
 
 export async function runGlobalRecoveryInspection(runId: string, planSha256: string) {
   try {
-    assert.ok(/^global-migration-[a-f0-9]{32}$/.test(runId), 'global_cli_run_id_invalid');
-    const result = await inspectGlobalMigrationRecovery(join(managedDeploymentPaths().root, runId), planSha256);
+    assert.ok(/^global-(migration|recovery)-[a-f0-9]{32}$/.test(runId), 'global_cli_run_id_invalid');
+    const inspect = runId.startsWith('global-recovery-') ? inspectGlobalRecoveryAttempt : inspectGlobalMigrationRecovery;
+    const result = await inspect(join(managedDeploymentPaths().root, runId), planSha256);
     process.stdout.write(JSON.stringify(result) + '\n'); if (result.status !== 'observed') process.exitCode = 1;
   } catch (error) {
     process.stdout.write(JSON.stringify({ schema: 'caveat.global_recovery_inspection.v1', status: 'stopped', reason: 'inspection_unconfirmed',
       errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'),
       filesystemWrites: 0, childProcesses: 0, executionPermission: false }) + '\n'); process.exitCode = 1;
+  }
+}
+
+
+export async function runGlobalRecovery(runId: string, planSha256: string, evidenceSha256: string) {
+  let sequence = 0, dispatched = false;
+  const output = (value: Record<string, unknown>) => process.stdout.write(JSON.stringify({ ...value, sequence: ++sequence }) + '\n');
+  output({ schema: 'caveat.global_recovery_event.v1', phase: 'input', event: 'issued', runId: null, planSha256: null, evidenceSha256: null });
+  try {
+    assert.ok(/^global-migration-[a-f0-9]{32}$/.test(runId), 'global_cli_run_id_invalid');
+    dispatched = true; const result = await executeGlobalRecovery(join(managedDeploymentPaths().root, runId), planSha256, evidenceSha256, event => output({ ...event }));
+    output({ ...result }); if (result.status !== 'restored') process.exitCode = 1;
+  } catch (error) {
+    output({ schema: 'caveat.global_recovery_result.v1', status: dispatched ? 'unknown' : 'stopped', phase: dispatched ? 'execution-or-receipt' : 'input', filesystemWrites: dispatched ? null : 0, existingProcessOperations: 0,
+      errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex') }); process.exitCode = 1;
   }
 }

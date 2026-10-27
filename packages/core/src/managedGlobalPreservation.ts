@@ -17,6 +17,13 @@ const inside = (parent: string, child: string) => {
 };
 const errorSha = (error: unknown) => sha(error instanceof Error ? error.name + ':' + error.message : String(error));
 
+/** An untouched original already satisfies the same ordering as a restored one. */
+export function assertGlobalRestoreOrder(objects: { role: string; state: string }[], role: string) {
+  const original = (state: string) => state === 'original' || state === 'restored';
+  if (role !== 'package') assert.ok(objects.filter(row => row.role === 'package').every(row => original(row.state)), 'global_preservation_package_restore_required');
+  if (role === 'leaf') assert.ok(objects.filter(row => row.role === 'npm-management').every(row => original(row.state)), 'global_preservation_management_restore_required');
+}
+
 /** Exclusive private evidence shared by the plan, original manifest and operation state. */
 export function writeGlobalPrivateEvidence(guard: Guard, directory: string, name: string, value: unknown) {
   const bytes = Buffer.from(JSON.stringify(value) + '\n');
@@ -207,8 +214,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     async restoreKnown(step: string) {
       const row = saved.find(value => value.item.step === step); assert.ok(row, 'global_preservation_unknown_step');
       assert.ok(!row.working || row.working.status === 'quarantined' || row.working.status === 'absent', 'global_preservation_working_copy_present');
-      if (row.item.role !== 'package') assert.ok(saved.filter(value => value.item.role === 'package').every(value => value.state === 'restored'), 'global_preservation_package_restore_required');
-      if (row.item.role === 'leaf') assert.ok(saved.filter(value => value.item.role === 'npm-management').every(value => value.state === 'restored'), 'global_preservation_management_restore_required');
+      assertGlobalRestoreOrder(saved.map(value => ({ role: value.item.role, state: value.state })), row.item.role);
       return move(row, true);
     },
   };

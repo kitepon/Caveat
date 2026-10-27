@@ -691,10 +691,42 @@ reviewed plan after the original guard closes. Partial/unknown
 results are preserved; there is no automatic replay, unlink or overwrite.
 
 `deployment global-inspect-recovery <run-id> --plan-sha256 <digest> --json`
-only inspects bounded saved evidence. It grants no execution permission and does
-not open a writer. Separately journaled persisted recovery execution, registration
-migration, versioning and the final candidate remain incomplete. These source
-commands do not grant approval for distribution or machine changes.
+inspects bounded saved migration evidence read-only and returns its full evidence
+digest. It grants no execution permission and does not open a writer.
+
+`deployment global-recover <migration-run-id> --plan-sha256 <digest>
+--evidence-sha256 <digest> --json` separately restores independently proved original
+objects. It requires matching plan and full evidence digests, holds old evidence
+read-only, and rebinds current original/working/generated objects, protected
+state, aliases/parents/absences, Node/npm/other globals and the production native
+process/writer collector. A legitimately absent package is not a new package
+snapshot failure. Unknown or pending/torn/unknown source intent stops before a
+new run. Another installer lock is retained unchanged.
+
+The new exclusive private recovery directory is bound to the source evidence
+digest and cannot be reused. Only its new journal receives intent/result writes.
+Fresh verification occurs before intent and again after intent flush, immediately
+before each rename. Known generated objects and remaining working copies move
+into owned quarantine, then exact original objects move back in package/npm
+management/old-leaf order. Original contents and permissions are never rewritten;
+unknown names are never removed or overwritten. New state records distinguish
+confirmed observations from uncertain ones and say whether rename was issued.
+A lost receipt leaves pending/unknown history and never grants replay.
+
+Before reporting restored, recovery verifies the full state, captures its complete
+journal digest, closes the original guard and independently reopens all current
+objects, protected state, source evidence and new result files. A checkpoint
+alone is not proof of that later readback. A separately changed object is retained
+as unknown rather than silently repaired.
+
+`global-inspect-recovery` also accepts a recovery-attempt id. This only verifies
+its bounded journal/result evidence: `currentObjects: not-assessed` and
+`executionPermission: false` are explicit even for a complete journal. Resuming
+from a known partial recovery-attempt state still needs a separately reviewed
+fresh binding; it is not implemented by that journal inspection. Ordinary Node
+selection/shared-runtime proof, registration migration, versioning and the final
+candidate also remain incomplete. These source commands do not grant approval
+for distribution or machine changes.
 
 ### Windows hookの保護保存transport（未公開source）
 

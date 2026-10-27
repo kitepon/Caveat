@@ -400,7 +400,7 @@ Before the next managed release is published, retain an acceptance result from e
 
 Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json` の Node 24.22.1 と pnpm 10.0.0 を使う。pnpm は root の `packageManager` とも一致させ、実行時に実版を照合する。workflow の完全版指定と共有 contract の一致は文書・release smoke の両 gate で検査する。
 
-3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
+3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。core の移行試験は同じ実行 binary（共有 libnode 版は隣接 library も）を私有 fixture へコピーして起動し、製品の runtime 親保護条件を保つ。共有 runtime の権限は変更しない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
 
 影響版の出典は contract に記録する。Realm lifetime の範囲は [Lattice PR32](https://github.com/kitepon/Lattice/pull/32) と同じ [Node upstream repair](https://github.com/nodejs/node/pull/65778) を使い、24.x の修理は [24.22.0](https://nodejs.org/en/blog/release/v24.22.0) に収載されている。選定した 24.22.1 は、さらに [2026-10-21 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) の修正版である。これは記録した既知範囲の検査であり、将来の未知の欠陥や host 全体の trust を保証するものではない。
 
@@ -408,6 +408,22 @@ Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json`
 
 `deployment shell-plan --node … --bin-dir … --json` は固定の絶対 Node 入口と managed entry に結び付く wrapper の内容・完全 SHA を返す。POSIX は `exec`、Windows は拡張子なし・cmd・ps1 の3ファイル。Windows ps1 は Windows PowerShell 5.1 と PowerShell 7 で同じ argv を渡し、native stdio を継承する。シェル自体が入力時に展開する記法は、そのシェルの規則に従う。Node を PATH から探索したり、entry への symlink を作ったりしない。cmd は固定 Node の小さい bootstrap から同じ実体の Node 子へ entry の絶対 argv を渡し、batch の文字コードによる Unicode path の破損を避ける。この三形式の生成は ASCII の Node path に限定し、それ以外は明示拒否する（entry と通常引数は Unicode を保持する）。
 
-実配置は host 管理者の作業。既存同名 formula/package・PATH 優先順位・親の権限・実行中の旧 global consumer を先に確認し、未知の衝突を上書きしない。旧 package と全依存・npm 管理ファイル・元 bin/alias の復旧物を保存し、global 除去と leaf 配置を同時に実行しない。製品の plan/capture/status は、配置や uninstall、PATH・実行 policy・共有 ACL の変更をしない。
+旧 v1 の手動配置・host による製品受入の委任は撤回する。通常の移行・完全保全・限定 uninstall・既知だけの復帰・wrapper/manifest 配置・読戻しは Caveat 製品の責務である。host 担当の範囲は OS/共有 runtime 自体の通常保守と作業窓の合意とし、専用 collector/launcher/補完コードへ依存しない。v1 の plan/capture/status API は read-only 互換として保持する。新しい製品移行の契約は [現行 plan](01_plan.md) に従う。
 
-配置後の `deployment shell-manifest --node … --bin-dir … --json` は read-only で内容・owner・mode・identity、Windows の owner SID と ACL digest を照合し、所有 manifest を返す。host の受入後にだけ、管理 root の `shell/manifest.json` として private な権限で保存する。`deployment status --json` の `shell` は payload と独立した診断で、未導入、欠落、別 wrapper、所有/ACL/identity の変更、redirect、不明を示す。Homebrew/npm が後から leaf を置き換えた場合も診断し、勝手な修理や global fallback は行わない。
+配置後の `deployment shell-manifest --node … --bin-dir … --json` は read-only で内容・owner・mode・identity、Windows の owner SID と ACL digest を照合し、所有 manifest を返す。この v1 API の手動保存手順を host の工程へ再委任しない。新しい移行は製品が native-v2 manifest を私有作成・照合・配置する。`deployment status --json` の `shell` は payload と独立した診断で、未導入、欠落、別 wrapper、所有/ACL/identity の変更、redirect、不明を示す。Homebrew/npm が後から leaf を置き換えた場合も診断し、勝手な修理や global fallback は行わない。
+
+
+### Product-owned global migration and recovery candidate gate
+
+Before a completed candidate, retain native three-OS fixtures for read-only plans
+without a run/lock, unknown process/writer refusal, original-tree preservation,
+scoped npm removal and wrapper/readback binding to the reviewed pointer, Node
+proof and exact checkpoint journal. Persisted recovery must keep old evidence
+read-only, use only a new private journal and prove original inode/content/security
+restoration, known partial states, parent/alias/absence changes, unknown writers,
+interrupted/new/duplicate attempts and post-close readback changes. An observed
+journal is not current-object acceptance or permission to execute. Fresh binding
+of known partial recovery-attempt states, the selected Node's shared-runtime
+proof (or explicit rejection), registration-token migration/readback/known rollback,
+versioning and final review remain required before the completed candidate.
+Release or machine-operation approval is separate from these source fixtures.

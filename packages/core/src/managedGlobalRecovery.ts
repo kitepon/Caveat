@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { openGlobalPathGuard, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
+import { openGlobalPathGuard, type GlobalGuardTree, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import { parseGlobalMutationJournal } from './managedGlobalJournal.js';
 import { observeGlobalAbsence, snapshotGlobalTree } from './managedGlobalSnapshot.js';
 import { globalNpmLayout } from './platform.js';
@@ -33,8 +33,69 @@ function rows(value: unknown): asserts value is GlobalGuardTreeRow[] {
   assert.equal(value[0].relativePath, '', 'global_recovery_root_row_required');
 };
 
+type Binding = { directory: string; name: string; rows: GlobalGuardTreeRow[] | null; tree: GlobalGuardTree | null };
+export type GlobalRecoverySnapshot = { plan: Plan; original: OriginalManifest; shell: ShellState | undefined;
+  guard: Awaited<ReturnType<typeof openGlobalPathGuard>>; bindings: Map<string, Binding>; evidenceSha256: string; journalSha256: string;
+  verifyEvidence: () => void; verifyProtected: () => void };
+
+export function globalRecoveryGuardPaths(plan: Plan, runDirectory: string) {
+  return [...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical),
+    dirname(dirname(plan.baseline.npm.executable)), ...plan.absences.map(row => row.parent), ...plan.protectedObjects.map(row => dirname(row.path))])];
+}
+
+/** Shared immutable binding for admission, recovery mutations and independent recovery readback. */
+export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnType<typeof openGlobalPathGuard>>) {
+  const bindings = new Map<string, Binding>();
+  for (const [index, object] of plan.protectedObjects.entries()) {
+    const binding: Binding = { directory: dirname(object.path), name: basename(object.path), rows: object.rows, tree: null };
+    try { binding.tree = guard.retainTree(binding.directory, binding.name); } catch { /* Unknown remains a permanent failed binding. */ }
+    bindings.set('protected.' + index, binding);
+  }
+  const observe = () => {
+    const checks: { step: string; state: 'known' | 'absent' | 'unknown' }[] = [];
+    guard.assertCurrent();
+    for (const [step, binding] of bindings) if (step.startsWith('protected.')) {
+      try { assert.deepEqual(guard.readTree(binding.tree!), binding.rows); checks.push({ step, state: 'known' }); }
+      catch { checks.push({ step, state: 'unknown' }); }
+    }
+    if (plan.baseline.npmManagement.absent) {
+      try { assert.equal(guard.observe(plan.globalRoot, '.package-lock.json'), null); checks.push({ step: 'absent-management', state: 'absent' }); }
+      catch { checks.push({ step: 'absent-management', state: 'unknown' }); }
+    }
+    const directories = guard.directoryBindings();
+    for (const [index, row] of plan.directories.entries()) {
+      try { assert.deepEqual(directories.find(current => current.path === row.path), row); checks.push({ step: 'directory.' + index, state: 'known' }); }
+      catch { checks.push({ step: 'directory.' + index, state: 'unknown' }); }
+    }
+    for (const [index, row] of plan.absences.entries()) {
+      try { assert.deepEqual(observeGlobalAbsence(row.path), row); checks.push({ step: 'absent-config.' + index, state: 'absent' }); }
+      catch { checks.push({ step: 'absent-config.' + index, state: 'unknown' }); }
+    }
+    for (const [index, alias] of plan.aliases.entries()) {
+      // Original package names may legitimately be absent after preservation/removal.
+      if (alias.path === plan.baseline.packageRoot) continue;
+      try { assert.equal(realpathSync(alias.path), alias.canonical); checks.push({ step: 'alias.' + index, state: 'known' }); }
+      catch { checks.push({ step: 'alias.' + index, state: 'unknown' }); }
+    }
+    for (const [step, observed, expected] of [
+      ['node', () => snapshotGlobalTree(plan.baseline.node.canonical, { observeOnly: true, maxBytes: 256 * 1024 * 1024 }), plan.baseline.node.binary],
+      ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
+      ['other-globals', () => snapshotGlobalTree(plan.globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'] }).filter(row => row.relativePath), plan.baseline.otherGlobals],
+    ] as const) {
+      try { assert.deepEqual(observed(), expected); checks.push({ step, state: 'known' }); } catch { checks.push({ step, state: 'unknown' }); }
+    }
+    return checks;
+  };
+  return { observe, verify() { assert.ok(observe().every(row => row.state === 'known' || row.state === 'absent'), 'global_recovery_protected_state_changed'); } };
+}
+
 /** Read-only inspection, never an execution permit. Interrupted/unknown actions cannot be replayed here. */
-export async function inspectGlobalMigrationRecovery(runDirectory: string, expectedPlanSha256: string) {
+export function inspectGlobalMigrationRecovery(runDirectory: string, expectedPlanSha256: string) {
+  return withGlobalRecoverySnapshot(runDirectory, expectedPlanSha256);
+}
+
+/** Internal scoped lease: old evidence stays read-only and native objects remain held until use returns. */
+export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expectedPlanSha256: string, use?: (snapshot: GlobalRecoverySnapshot) => Promise<T>) {
   assert.ok(isAbsolute(runDirectory) && resolve(runDirectory) === runDirectory && /^global-migration-[a-f0-9]{32}$/.test(basename(runDirectory)), 'global_recovery_run_path_invalid');
   const evidence = await openGlobalPathGuard([runDirectory]);
   try {
@@ -125,14 +186,16 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
     assert.ok(original, 'global_recovery_originals_required');
     assert.ok(Array.isArray(plan.protectedObjects) && plan.protectedObjects.length <= 16, 'global_recovery_protected_bound');
     for (const object of plan.protectedObjects) { assert.ok(isAbsolute(object.path) && resolve(object.path) === object.path, 'global_recovery_protected_path_invalid'); rows(object.rows); }
-    const guard = await openGlobalPathGuard([...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical), dirname(dirname(plan.baseline.npm.executable)), ...plan.absences.map(row => row.parent), ...plan.protectedObjects.map(row => dirname(row.path))])]);
+    const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(plan, runDirectory));
     try {
       guard.assertPrivateDirectory(runDirectory);
-      const observations: { step: string; state: 'known' | 'absent' | 'changed' | 'unknown' }[] = [];
+      const observations: { step: string; state: 'known' | 'absent' | 'changed' | 'unknown' }[] = [], bindings = new Map<string, Binding>();
       const check = (step: string, directory: string, name: string, expected: GlobalGuardTreeRow[] | null) => {
         try {
-          if (!expected) { assert.equal(guard.observe(directory, name), null); observations.push({ step, state: 'absent' }); }
-          else { assert.deepEqual(guard.readTree(guard.retainTree(directory, name)), expected); observations.push({ step, state: 'known' }); }
+          const tree = expected ? guard.retainTree(directory, name) : null;
+          if (!tree) { assert.equal(guard.observe(directory, name), null); observations.push({ step, state: 'absent' }); }
+          else { assert.deepEqual(guard.readTree(tree), expected); observations.push({ step, state: 'known' }); }
+          bindings.set(step, { directory, name, rows: structuredClone(expected), tree });
         } catch { observations.push({ step, state: 'unknown' }); }
       };
       for (const object of original.objects) {
@@ -145,37 +208,20 @@ export async function inspectGlobalMigrationRecovery(runDirectory: string, expec
         }
       }
       for (const leaf of plan.leaves) if (!leaf.identity && !shell?.files.some(row => row.name === leaf.name && row.status === 'installed')) check('absent.' + leaf.name, plan.binDirectory, leaf.name, null);
-      for (const object of plan.protectedObjects) check('protected.' + observations.length, dirname(object.path), basename(object.path), object.rows);
       for (const object of shell ? [...shell.files, shell.manifest] : []) if (object.status !== 'absent') {
         check('generated.' + object.name, object.status === 'quarantined' ? runDirectory : object.name === 'shell' ? plan.root : plan.binDirectory,
           object.status === 'quarantined' ? 'used-' + object.backupName : object.name, object.rows);
       }
-      const directories = guard.directoryBindings();
-      for (const [index, row] of plan.directories.entries()) {
-        try { assert.deepEqual(directories.find(current => current.path === row.path), row); observations.push({ step: 'directory.' + index, state: 'known' }); }
-        catch { observations.push({ step: 'directory.' + index, state: 'unknown' }); }
-      }
-      for (const [index, row] of plan.absences.entries()) {
-        try { assert.deepEqual(observeGlobalAbsence(row.path), row); observations.push({ step: 'absent-config.' + index, state: 'absent' }); }
-        catch { observations.push({ step: 'absent-config.' + index, state: 'unknown' }); }
-      }
-      for (const [index, alias] of plan.aliases.entries()) {
-        // Original package names may legitimately be absent after preservation/removal.
-        if (alias.path === plan.baseline.packageRoot) continue;
-        try { assert.equal(realpathSync(alias.path), alias.canonical); observations.push({ step: 'alias.' + index, state: 'known' }); }
-        catch { observations.push({ step: 'alias.' + index, state: 'unknown' }); }
-      }
-      for (const [step, observed, expected] of [
-        ['node', () => snapshotGlobalTree(plan.baseline.node.canonical, { observeOnly: true, maxBytes: 256 * 1024 * 1024 }), plan.baseline.node.binary],
-        ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
-        ['other-globals', () => snapshotGlobalTree(plan.globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'] }).filter(row => row.relativePath), plan.baseline.otherGlobals],
-      ] as const) {
-        try { assert.deepEqual(observed(), expected); observations.push({ step, state: 'known' }); } catch { observations.push({ step, state: 'unknown' }); }
-      }
+      const protectedState = bindGlobalRecoveryProtected(plan, guard);
+      observations.push(...protectedState.observe());
       // A concurrent edit of any previously read evidence invalidates this entire inspection.
-      for (const [name, bytes] of cached) assert.ok(evidence.readPersistedJournal(runDirectory, name).equals(bytes), 'global_recovery_evidence_changed_during_read');
+      const verifyEvidence = () => { for (const [name, bytes] of cached) assert.ok(evidence.readPersistedJournal(runDirectory, name).equals(bytes), 'global_recovery_evidence_changed_during_read'); };
+      verifyEvidence();
+      const evidenceSha256 = sha([...cached].map(([name, bytes]) => ({ name, sha256: digest(bytes) })).sort((a, b) => a.name.localeCompare(b.name)));
       const changed = observations.some(row => row.state === 'changed' || row.state === 'unknown');
-      return { ...base, status: changed ? 'stopped' as const : 'observed' as const, reason: changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations };
+      if (use && !changed) return await use({ plan, original, shell, guard, bindings, evidenceSha256, journalSha256: journal.bytesSha256, verifyEvidence,
+        verifyProtected: protectedState.verify });
+      return { ...base, evidenceSha256, status: changed ? 'stopped' as const : 'observed' as const, reason: changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations };
     } finally { guard.close(); }
   } finally { evidence.close(); }
 }
