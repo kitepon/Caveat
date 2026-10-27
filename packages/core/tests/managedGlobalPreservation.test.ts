@@ -229,6 +229,20 @@ describe('private working copies from retained originals', () => {
       expect(() => guard.readTree(result.tree)).toThrow('foreign_tree'); expect(guard.readTree(tree)[0]!.identity.kind).toBe('directory');
     } finally { guard.close(); }
   });
+  it('stops before publication if closing a newly created handle has an unconfirmed outcome', async () => {
+    const { source, backup } = fixture(), driver = await native(), created = new WeakSet<object>(); let closes = 0;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver,
+      createWorking(...args) { const ref = driver.createWorking(...args); created.add(ref); return ref; },
+      close(ref) { driver.close(ref); if (created.has(ref) && ++closes === 1) throw Error('injected close outcome lost'); },
+    });
+    try {
+      const tree = guard.retainTree(source, 'caveat-cli'), result = guard.copyTreeNoReplace(tree, source, 'new-copy', backup, 'private-stage');
+      expect(result.status).toBe('unknown'); expect(existsSync(join(source, 'new-copy'))).toBe(false); expect(existsSync(join(backup, 'private-stage'))).toBe(true);
+      if (result.status === 'unknown' && 'cleanupErrors' in result) { expect(result.cleanupErrors).toHaveLength(1); expect(result.placements.destination.state).toBe('absent'); }
+      else throw Error('cleanup_receipt_missing');
+      expect(guard.readTree(tree)[0]!.identity.kind).toBe('directory');
+    } finally { guard.close(); }
+  });
   it('rejects a substituted staging tree even when its content matches the created copy', async () => {
     const { source, backup } = fixture(), driver = await native(); let stageRoot: object | null = null;
     const guard = bindGlobalPathGuard([source, backup], { ...driver,

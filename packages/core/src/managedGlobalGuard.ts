@@ -206,11 +206,11 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         const names = children.get(parent) ?? []; names.push(row.relativePath.slice(split + 1)); children.set(parent, names);
       }
       const created: { ref: object; parent: object; name: string; relativePath: string; binding: ReturnType<typeof directoryBinding> | null }[] = [];
-      const evidence: { relativePath: string; identity: GlobalGuardIdentity }[] = [];
+      const evidence: { relativePath: string; identity: GlobalGuardIdentity }[] = [], cleanupErrors: string[] = [];
+      let publication: unknown = null;
       const release = () => {
-        const errors: unknown[] = [];
-        for (const value of created.splice(0).reverse()) try { driver.close(value.ref); } catch (error) { errors.push(error); }
-        if (errors.length) throw new AggregateError(errors, 'global_working_close_unconfirmed');
+        for (const value of created.splice(0).reverse()) try { driver.close(value.ref); }
+        catch (error) { cleanupErrors.push(createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex')); }
       };
       let phase = 'stage-create', currentPath = '';
       const copy = (input: object, parent: object, leafName: string, relativePath: string, ancestors: typeof created) => {
@@ -248,7 +248,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       };
       try {
         copy(source.ref, stage.ref, stagingName, '', []); guard.readTree(token);
-        release(); checkDirectories();
+        release(); assert.equal(cleanupErrors.length, 0, 'global_working_close_unconfirmed'); checkDirectories();
         phase = 'stage-readback';
         const working = guard.retainTree(stagingPath, stagingName), rows = guard.readTree(working);
         assert.equal(rows.length, originals.length, 'global_working_tree_changed');
@@ -262,7 +262,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
             && row.identity.linkTarget === original.linkTarget && row.identity.ino !== original.ino, 'global_working_tree_changed');
         }
         phase = 'publish-copy';
-        const moved = guard.moveTreeNoReplace(working, path, name); guard.readTree(token);
+        const moved = guard.moveTreeNoReplace(working, path, name); publication = moved; guard.readTree(token);
         if (moved.status !== 'moved') return { status: 'unknown' as const, stagingName, created: evidence, move: moved, automaticRecovery: false as const };
         copiedTrees.add(working);
         return { status: 'copied' as const, stagingName, tree: working, rows: guard.readTree(working), originalSha256: createHash('sha256').update(JSON.stringify(originals)).digest('hex'), automaticRecovery: false as const };
@@ -271,8 +271,13 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
           try { return { relativePath: value.relativePath, state: 'present' as const, identity: driver.snapshot(value.ref), named: inspect(value.parent, value.name) }; }
           catch { return { relativePath: value.relativePath, state: 'unknown' as const }; }
         });
+        const observe = (read: () => GlobalGuardIdentity | null) => {
+          try { const identity = read(); return identity ? { state: 'present' as const, identity } : { state: 'absent' as const }; }
+          catch { return { state: 'unknown' as const }; }
+        };
         const code = error instanceof Error ? (error as Error & { nativeCode?: number }).nativeCode : undefined;
-        return { status: 'unknown' as const, stagingName, phase, relativePath: currentPath, nativeCode: Number.isSafeInteger(code) && code! >= 0 && code! <= 0xffffffff ? code! : null, created: evidence, observations,
+        return { status: 'unknown' as const, stagingName, phase, relativePath: currentPath, nativeCode: Number.isSafeInteger(code) && code! >= 0 && code! <= 0xffffffff ? code! : null, created: evidence, observations, publication, cleanupErrors,
+          placements: { stage: observe(() => inspect(stage.ref, stagingName)), destination: observe(() => inspect(target.ref, name)), original: observe(() => driver.snapshot(source.ref)) },
           errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
       } finally { release(); }
     },
