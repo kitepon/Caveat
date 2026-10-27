@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GlobalGuardTree, GlobalGuardTreeRow, openGlobalPathGuard } from './managedGlobalGuard.js';
+import type { GlobalNpmReceipt } from './managedGlobalNpm.js';
 import type { GlobalJournalOperation, createGlobalMutationJournal } from './managedGlobalJournal.js';
 
 type Guard = Awaited<ReturnType<typeof openGlobalPathGuard>>;
@@ -15,6 +16,16 @@ const inside = (parent: string, child: string) => {
   const path = relative(parent, child); return path === '' || path !== '..' && !path.startsWith('..' + sep) && !isAbsolute(path);
 };
 const errorSha = (error: unknown) => sha(error instanceof Error ? error.name + ':' + error.message : String(error));
+
+/** Exclusive private evidence shared by the plan, original manifest and operation state. */
+export function writeGlobalPrivateEvidence(guard: Guard, directory: string, name: string, value: unknown) {
+  const bytes = Buffer.from(JSON.stringify(value) + '\n');
+  assert.ok(bytes.length > 0 && bytes.length <= 16 * 1024 * 1024, 'global_preservation_manifest_bound');
+  const token = guard.createJournal(directory, name, bytes.subarray(0, 65536));
+  for (let offset = 65536; offset < bytes.length; offset += 65536) guard.appendJournal(token, bytes.subarray(offset, offset + 65536));
+  assert.ok(guard.readJournal(token).equals(bytes), 'global_preservation_manifest_readback_changed');
+  return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+}
 
 /** Internal engine: the caller must bind fresh package/protected-state/process checks; no CLI bypass exists. */
 export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, input: GlobalPreservationObject[], verifyBeforeMutation: () => Promise<void>) {
@@ -51,7 +62,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
         assert.ok(target && !isAbsolute(target) && inside(sources[items.indexOf(item)]!, resolve(dirname(join(item.directory, item.name, row.relativePath)), target)), 'global_preservation_external_package_link');
       }
     }
-    return { item, tree, rows, working: null as null | { status: 'known' | 'unknown' | 'quarantined'; rows: GlobalGuardTreeRow[] | null; stagingName: string }, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
+    return { item, tree, rows, working: null as null | { status: 'known' | 'released' | 'after-known' | 'absent' | 'unknown' | 'quarantined'; rows: GlobalGuardTreeRow[] | null; stagingName: string }, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
   });
   const workingTrees = new Map<string, GlobalGuardTree>();
   let stopped = false;
@@ -60,14 +71,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
   assert.equal(initial.records.length, 0, 'global_preservation_fresh_journal_required');
   const evidenceDirectory = items[0]!.backupDirectory;
   assert.ok(items.every(item => item.backupDirectory === evidenceDirectory), 'global_preservation_one_private_backup_required');
-  const persist = (name: string, value: unknown) => {
-    const bytes = Buffer.from(JSON.stringify(value) + '\n');
-    assert.ok(bytes.length > 0 && bytes.length <= 16 * 1024 * 1024, 'global_preservation_manifest_bound');
-    const token = guard.createJournal(evidenceDirectory, name, bytes.subarray(0, 65536));
-    for (let offset = 65536; offset < bytes.length; offset += 65536) guard.appendJournal(token, bytes.subarray(offset, offset + 65536));
-    assert.ok(guard.readJournal(token).equals(bytes), 'global_preservation_manifest_readback_changed');
-    return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
-  };
+  const persist = (name: string, value: unknown) => writeGlobalPrivateEvidence(guard, evidenceDirectory, name, value);
   const originalEvidence = persist('originals-' + initial.header.runId + '.json', {
     schema: 'caveat.global_original_evidence.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
     objects: saved.map(row => ({ ...row.item, rows: row.rows })),
@@ -80,7 +84,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     assert.equal(createHash('sha256').update(guard.readPersistedJournal(evidenceDirectory, originalEvidence.name)).digest('hex'), originalEvidence.sha256, 'global_preservation_original_evidence_changed');
     for (const known of saved) {
       assert.deepEqual(guard.readTree(known.tree), known.rows, 'global_preservation_original_changed');
-      if (known.working?.status === 'known' || known.working?.status === 'quarantined') assert.deepEqual(guard.readTree(workingTrees.get(known.item.step)!), known.working.rows, 'global_preservation_working_changed');
+      if (known.working?.status === 'known' || known.working?.status === 'after-known' || known.working?.status === 'quarantined') assert.deepEqual(guard.readTree(workingTrees.get(known.item.step)!), known.working.rows, 'global_preservation_working_changed');
     }
   };
   const record = (step: string, operation: GlobalJournalOperation, outcome: 'confirmed' | 'unknown', result: unknown, errorSha256?: string) => {
@@ -141,9 +145,47 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       }
       return { status: 'working' as const, manifest: manifest() };
     },
+    async uninstallWorking(run: () => Promise<GlobalNpmReceipt>) {
+      assert.ok(!stopped && saved.every(row => row.state === 'preserved' && row.working?.status === 'known'), 'global_preservation_uninstall_not_ready');
+      try { await verify(); } catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest() }; }
+      journal.intent('npm-uninstall', 'uninstall', sha(manifest()));
+      let receipt: GlobalNpmReceipt | undefined, errorSha256: string | undefined;
+      const after: { step: string; state: 'unobserved' | 'present' | 'absent'; identity?: GlobalGuardTreeRow['identity']; rows?: GlobalGuardTreeRow[] }[] = saved.map(row => ({ step: row.item.step, state: 'unobserved' }));
+      try {
+        for (const row of saved) { guard.releaseWorkingTree(workingTrees.get(row.item.step)!); workingTrees.delete(row.item.step); row.working!.status = 'released'; }
+        receipt = await run();
+        assert.ok(receipt.spawned && receipt.exitObserved && receipt.closeObserved && !receipt.terminationRequested && !receipt.signal, 'global_preservation_npm_terminal_unknown');
+        await verify();
+        for (const row of saved) {
+          const observed = guard.observe(row.item.directory, row.item.name);
+          const observation = after.find(value => value.step === row.item.step)!;
+          if (!observed) { observation.state = 'absent'; row.working = { ...row.working!, status: 'absent', rows: null }; continue; }
+          observation.state = 'present'; observation.identity = observed;
+          const token = guard.retainTree(row.item.directory, row.item.name), rows = guard.readTree(token), before = new Map(row.working!.rows!.map(value => [value.relativePath, value.identity]));
+          observation.rows = rows;
+          assert.ok(rows.length <= before.size, 'global_preservation_npm_new_object');
+          for (const value of rows) {
+            const expected = before.get(value.relativePath); assert.ok(expected, 'global_preservation_npm_new_object');
+            const stable = (identity: typeof value.identity) => {
+              const { ctime: _, ...file } = identity;
+              if (identity.kind !== 'directory') return file;
+              const { mtime: __, links: ___, size: ____, ...directory } = file; return directory;
+            };
+            assert.deepEqual(stable(value.identity), stable(expected), 'global_preservation_npm_unknown_after');
+          }
+          workingTrees.set(row.item.step, token); row.working = { ...row.working!, status: 'after-known', rows };
+        }
+      } catch (error) { stopped = true; errorSha256 = errorSha(error); for (const row of saved) if (row.working?.status === 'released') row.working.status = 'unknown'; }
+      const outcome = stopped ? 'unknown' : 'confirmed';
+      try { record('npm-uninstall', 'uninstall', outcome, { receipt, after }, errorSha256); }
+      catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, receipt, errorSha256: errorSha(error), manifest: manifest() }; }
+      if (stopped) return { status: 'unknown' as const, receipt, after, errorSha256, manifest: manifest() };
+      const removed = saved.filter(row => row.item.role !== 'npm-management').every(row => row.working?.status === 'absent');
+      return { status: receipt?.status === 'completed' && removed ? 'removed' as const : 'failed-known' as const, receipt, after, manifest: manifest() };
+    },
     async quarantineWorking(step: string) {
       const row = saved.find(value => value.item.step === step);
-      assert.ok(!stopped && row?.working?.status === 'known', 'global_preservation_no_known_working_copy');
+      assert.ok(!stopped && (row?.working?.status === 'known' || row?.working?.status === 'after-known'), 'global_preservation_no_known_working_copy');
       try { await verify(); } catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest() }; }
       const action = 'retire.' + step; journal.intent(action, 'working-copy', sha(manifest()));
       let result: ReturnType<Guard['moveTreeNoReplace']> | undefined, errorSha256: string | undefined;
@@ -160,7 +202,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     },
     async restoreKnown(step: string) {
       const row = saved.find(value => value.item.step === step); assert.ok(row, 'global_preservation_unknown_step');
-      assert.ok(!row.working || row.working.status === 'quarantined', 'global_preservation_working_copy_present');
+      assert.ok(!row.working || row.working.status === 'quarantined' || row.working.status === 'absent', 'global_preservation_working_copy_present');
       if (row.item.role !== 'package') assert.ok(saved.filter(value => value.item.role === 'package').every(value => value.state === 'restored'), 'global_preservation_package_restore_required');
       if (row.item.role === 'leaf') assert.ok(saved.filter(value => value.item.role === 'npm-management').every(value => value.state === 'restored'), 'global_preservation_management_restore_required');
       return move(row, true);

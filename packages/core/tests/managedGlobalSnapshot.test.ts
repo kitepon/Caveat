@@ -59,6 +59,12 @@ describe('global package snapshot', () => {
     symlinkSync(outside, dep, isWindows() ? 'junction' : 'dir');
     expect(() => snapshotGlobalPackage(input)).toThrow('external_or_absolute_link');
   });
+  it('rejects a declared peer that would resolve outside the retained package', () => {
+    const { input } = fixture();
+    writeFileSync(join(input.packageRoot, 'package.json'), JSON.stringify({ name: 'caveat-cli', version: '1.2.3', peerDependencies: { outside: '*' } }));
+    mkdirSync(join(input.globalRoot, 'outside')); writeFileSync(join(input.globalRoot, 'outside/package.json'), '{"name":"outside","version":"1.0.0"}');
+    expect(() => snapshotGlobalPackage(input)).toThrow('dependency_outside_retained_package');
+  });
   it('rejects dependency traversal names', () => {
     const { input } = fixture();
     writeFileSync(join(input.packageRoot, 'package.json'), JSON.stringify({ name: 'caveat-cli', version: '1.2.3', dependencies: { '../escape': '1' } }));

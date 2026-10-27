@@ -8,6 +8,7 @@ import { prepareGlobalObjectPreservation, type GlobalPreservationObject } from '
 import { globalFilesystemNativeSpec, isWindows } from '../src/platform.js';
 import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
 import { createWindowsGlobalGuard } from '../src/managedWindowsGuard.js';
+import { runOwnedGlobalNpm } from '../src/managedGlobalNpm.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 const roots: string[] = [], plan = 'c'.repeat(64);
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -289,6 +290,36 @@ describe('working-copy evidence and original attributes', () => {
       expect(readFileSync(join(backup, 'original-package/node_modules/dep/index.js') + ':original-stream', 'utf8')).toBe('original alternate bytes');
       expect((await engine.quarantineWorking('package')).status).toBe('confirmed'); expect((await engine.restoreKnown('package')).status).toBe('confirmed');
       expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js') + ':original-stream', 'utf8')).toBe('original alternate bytes');
+    } finally { guard.close(); }
+  });
+});
+
+
+describe('known-only state after an owned child fails', () => {
+  it('can quarantine a verified deletion-only partial tree and restore the original after nonzero close', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      const code = 'require("node:fs").unlinkSync(' + JSON.stringify(join(source, 'caveat-cli/node_modules/dep/index.js')) + ');process.exit(7);';
+      const result = await engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath, ['-e', code], source, {}, () => {}, 5000));
+      expect(result.status).toBe('failed-known'); expect(result.receipt?.exitCode).toBe(7);
+      expect((await engine.quarantineWorking('package')).status).toBe('confirmed'); expect((await engine.restoreKnown('package')).status).toBe('confirmed');
+      expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
+    } finally { guard.close(); }
+  });
+  it('retains unknown new files and their observed identities instead of deleting or restoring over them', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      const file = join(source, 'caveat-cli/unexpected');
+      const code = 'require("node:fs").writeFileSync(' + JSON.stringify(file) + ',"unknown bytes",{mode:0o600});process.exit(7);';
+      const result = await engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath, ['-e', code], source, {}, () => {}, 5000));
+      expect(result.status).toBe('unknown'); expect(journal.read().status).toBe('unknown');
+      if ('after' in result) expect(result.after?.[0]?.rows?.some(row => row.relativePath === 'unexpected')).toBe(true);
+      expect(readFileSync(file, 'utf8')).toBe('unknown bytes'); await expect(engine.quarantineWorking('package')).rejects.toThrow('no_known_working_copy');
+      expect(readFileSync(join(backup, 'original-package/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
     } finally { guard.close(); }
   });
 });

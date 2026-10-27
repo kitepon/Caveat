@@ -602,6 +602,39 @@ token, allowing the future owned npm step to operate without dropping original
 pins. Fresh process/protected-state integration and scoped npm remain unfinished;
 this primitive is not an executable global-migration command.
 
+The product migration caller now captures the old package/dependency closure,
+Node/npm bytes and aliases, other globals and existing/absent shell leaves. It
+validates the active managed payload against its manifest and retains native
+objects for its pointer, entry, payload and protected settings. Before each
+mutation it rechecks those objects, runtime/npm and other-global baselines, and a
+fresh native process assessment. Original and working objects have separate
+identities; a missing original name is never treated as a successful fresh
+package snapshot. Declared peers outside the retained package also stop.
+
+After read-only admission it creates an exclusive private run directory and
+persists the complete plan. It shares the existing installer.lock protocol:
+a complete owned lock moves exclusively into place, then returns to the private
+run as evidence on close. It never removes someone else's lock or probes/kills
+its process. No CLI collector/deadline bypass is provided.
+
+The owned npm child uses the fixed Node and npm script with only caveat-cli,
+a bound global prefix, ignore-scripts/offline/no-audit/no-fund flags, private
+empty user/global config and a restricted environment without inherited Node
+options, npm configuration or credentials. Its started, exit and close events
+are distinct. Timeout, failed receipts, nonzero exit or unconfirmed close are
+never success; only that spawned child can receive a single termination request.
+Captured output is bounded/hashed and never returned raw. Closing owned capture
+handles after timeout does not prove close or descendant exit.
+
+Working pins alone are released before npm. After confirmed child termination,
+the caller rechecks original/protected state and processes. Only full absence or
+a deletion-only subset with the same known file identities/bytes/security can be
+accepted for recovery. New or changed objects remain unknown and untouched, with
+the observed after-tree preserved. A known partial tree may be quarantined before
+original restoration; interrupted or unknown journals are never replayed.
+Wrapper/CLI wiring, persisted recovery reopening, registration migration,
+versioning and the final candidate are still incomplete.
+
 ### Windows hookの保護保存transport（未公開source）
 
 Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。

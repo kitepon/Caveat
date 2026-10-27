@@ -136,7 +136,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
       if (seen.has(canonicalManifest)) return;
       seen.add(canonicalManifest);
       const doc = readGlobalPackageJson(manifest);
-      for (const name of new Set([...dependencyNames(doc.dependencies), ...dependencyNames(doc.optionalDependencies)])) {
+      for (const name of new Set([...dependencyNames(doc.dependencies), ...dependencyNames(doc.optionalDependencies), ...dependencyNames(doc.peerDependencies)])) {
         let directory = dirname(manifest), found: string | undefined;
         for (;;) {
           const candidate = join(directory, 'node_modules', name, 'package.json');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { isAbsolute, parse, relative, sep } from 'node:path';
+import { isAbsolute, join, parse, relative, sep } from 'node:path';
 import { globalFilesystemNativeSpec } from './platform.js';
 import { createPosixGlobalGuard } from './managedPosixGuard.js';
 import { createWindowsGlobalGuard } from './managedWindowsGuard.js';
@@ -140,6 +140,11 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.deepEqual(inspect(parent.ref, name), expected, 'global_journal_name_changed'); checkDirectories();
       const token = Object.freeze({ journal: true as const }); journals.set(token, { ref, directory: parent, name, expected, bytes, failed: false }); return token;
     },
+    moveJournalNoReplace(token: GlobalGuardJournal, path: string, name: string) {
+      guard.readJournal(token); const journal = journals.get(token)!;
+      const entry = Object.freeze({ identity: Object.freeze({ ...journal.expected }) }); entries.set(entry, journal);
+      const result = guard.moveNoReplace(entry, path, name); if (result.status !== 'moved') journal.failed = true; return result;
+    },
     appendJournal(token: GlobalGuardJournal, record: Buffer) {
       active(); const journal = journals.get(token); assert.ok(journal && !journal.failed, 'global_journal_unknown_or_failed_token');
       assert.ok(Buffer.isBuffer(record) && record.length > 0 && record.length <= 65536 && journal.bytes.length + record.length <= 16 * 1024 * 1024, 'global_journal_record_bound');
@@ -171,6 +176,16 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         assert.deepEqual(inspect(parent.ref, name), before, 'global_journal_name_changed');
         assert.deepEqual(driver.snapshot(ref), before, 'global_journal_changed'); checkDirectories(); return bytes;
       } finally { driver.close(ref); }
+    },
+    createPrivateDirectory(path: string, name: string) {
+      leaf(name); checkDirectories(); const parent = directory(path); driver.assertPrivateDirectory(parent.ref);
+      assert.equal(inspect(parent.ref, name), null, 'global_guard_private_directory_exists');
+      const ref = keep(driver.createWorking(parent.ref, name, 'directory')), initial = driver.snapshot(ref);
+      driver.assertPrivateDirectory(ref); driver.finishWorking(ref, true);
+      assert.deepEqual(inspect(parent.ref, name), driver.snapshot(ref), 'global_guard_private_directory_changed');
+      assert.deepEqual(directoryBinding(driver.snapshot(ref)), directoryBinding(initial), 'global_guard_private_directory_changed');
+      const canonical = join(aliases.get(path)!, name);
+      directories.set(canonical, { ref, initial, parent, name }); aliases.set(canonical, canonical); checkDirectories(); return canonical;
     },
     assertPrivateDirectory(path: string) { checkDirectories(); driver.assertPrivateDirectory(directory(path).ref); },
     directoryIdentity(path: string) { checkDirectories(); return driver.snapshot(directory(path).ref); },

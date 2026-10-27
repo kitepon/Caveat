@@ -2,7 +2,7 @@ import type { Stats } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { XMLParser } from 'fast-xml-parser';
 import { createHash } from 'node:crypto';
-import { join, isAbsolute, win32 } from 'node:path';
+import { join, dirname, basename, isAbsolute, win32 } from 'node:path';
 
 /**
  * OS 依存の判定はこのモジュールに集約する。他のファイルで
@@ -12,6 +12,26 @@ import { join, isAbsolute, win32 } from 'node:path';
 
 export function isWindows(platform: NodeJS.Platform = process.platform): boolean {
   return platform === 'win32';
+}
+
+export function globalNpmLayout(globalRoot: string, platform: NodeJS.Platform = process.platform) {
+  if (basename(globalRoot) !== 'node_modules') throw Error('global_npm_layout_invalid');
+  if (platform === 'win32') return { prefix: dirname(globalRoot), binDirectory: dirname(globalRoot) };
+  if (platform === 'linux' || platform === 'darwin') {
+    if (basename(dirname(globalRoot)) !== 'lib') throw Error('global_npm_layout_invalid');
+    const prefix = dirname(dirname(globalRoot)); return { prefix, binDirectory: join(prefix, 'bin') };
+  }
+  throw Error('global_npm_platform_unsupported');
+}
+
+/** The owned npm child inherits no Node options, npm configuration or credentials. */
+export function globalNpmEnvironment(node: string, run: string, platform: NodeJS.Platform = process.platform) {
+  const env: NodeJS.ProcessEnv = { PATH: dirname(node), HOME: run, TMPDIR: run, TMP: run, TEMP: run, LC_ALL: 'C', LANG: 'C', CI: '1', NO_COLOR: '1' };
+  if (platform === 'win32') {
+    if (!process.env.SystemRoot || !win32.isAbsolute(process.env.SystemRoot)) throw Error('global_npm_system_root_required');
+    env.SystemRoot = process.env.SystemRoot; env.USERPROFILE = run; env.APPDATA = run; env.LOCALAPPDATA = run;
+  }
+  return env;
 }
 
 /** Native constants absent from Node's fs.constants; never infer them from another OS. */
