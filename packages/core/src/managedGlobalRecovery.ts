@@ -117,7 +117,7 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
     };
     const planBytes = read('plan.json'); assert.equal(shaGlobalRecoveryValue(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
     const plan = decode(planBytes) as Plan;
-    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories']);
+    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories', ...(Object.hasOwn(plan, 'originalObjects') ? ['originalObjects'] : [])]);
     assert.equal(plan.schema, 'caveat.global_migration_plan.v1', 'global_recovery_plan_invalid');
     assert.equal(plan.root, dirname(runDirectory), 'global_recovery_run_outside_root');
     assert.ok([plan.root, plan.globalRoot, plan.binDirectory, plan.prefix].every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path), 'global_recovery_absolute_scope_required');
@@ -155,6 +155,11 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
       assert.ok(seed.schema === 'caveat.global_original_evidence.v1' && seed.planSha256 === expectedPlanSha256 && seed.runId === journal.header.runId, 'global_recovery_original_binding_invalid');
       assert.ok(Array.isArray(original.objects) && original.objects.length >= 1 && original.objects.length <= 5 && seed.objects.length === original.objects.length, 'global_recovery_object_scope_invalid');
       assert.equal(new Set(original.objects.map(row => row.step)).size, original.objects.length, 'global_recovery_duplicate_step');
+      if (Object.hasOwn(plan, 'originalObjects')) {
+        assert.ok(Array.isArray(plan.originalObjects) && plan.originalObjects.length === original.objects.length, 'global_recovery_plan_originals_required');
+        assert.equal(new Set(plan.originalObjects.map(row => row.step)).size, original.objects.length, 'global_recovery_duplicate_plan_original');
+        for (const row of plan.originalObjects) globalRecoveryKeys(row, ['step', 'role', 'directory', 'name', 'rows']);
+      }
       const expectedSteps = ['package', ...(!plan.baseline.npmManagement.absent ? ['management'] : []), ...plan.leaves.filter(row => row.identity).map(row => row.name.replaceAll('.', '-'))];
       assert.deepEqual(original.objects.map(row => row.step).sort(), expectedSteps.sort(), 'global_recovery_missing_original');
       for (const [index, object] of original.objects.entries()) {
@@ -163,6 +168,11 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
         assert.ok(object.role === 'package' && object.name === 'caveat-cli' && object.step === 'package' && object.backupName === 'original-package' && object.directory === plan.globalRoot
           || object.role === 'npm-management' && object.name === '.package-lock.json' && object.step === 'management' && object.backupName === 'original-management' && object.directory === plan.globalRoot
           || object.role === 'leaf' && plan.leaves.some(row => row.name === object.name && row.identity !== null) && object.step === object.name.replaceAll('.', '-') && object.backupName === 'original-' + object.name && object.directory === plan.binDirectory, 'global_recovery_original_scope_invalid');
+        if (Object.hasOwn(plan, 'originalObjects')) {
+          const anchor = plan.originalObjects.find(row => row.step === object.step); assert.ok(anchor, 'global_recovery_original_anchor_required');
+          for (const key of ['step', 'role', 'directory', 'name'] as const) assert.equal(expected[key], anchor[key], 'global_recovery_original_anchor_scope_changed');
+          globalRecoveryRows(anchor.rows); assert.deepEqual(expected.rows, anchor.rows, 'global_recovery_original_seed_unbound');
+        }
         assert.equal(object.backupDirectory, runDirectory, 'global_recovery_backup_scope_invalid');
         for (const key of ['role', 'step', 'name', 'directory', 'backupDirectory', 'backupName'] as const) assert.equal(object[key], expected[key], 'global_recovery_original_scope_changed');
         assert.ok(['original', 'preserved', 'restored'].includes(object.state), 'global_recovery_original_unknown');

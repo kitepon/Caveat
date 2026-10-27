@@ -129,7 +129,15 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
     // Repeat the complete initial package view immediately before creating any private run state.
     assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_initial_snapshot_changed');
     for (const leaf of leaves) assert.deepEqual(guard.observe(binDirectory, leaf.name), leaf.identity, 'global_migration_initial_leaf_changed');
-    const plan = { schema: 'caveat.global_migration_plan.v1', baseline, leaves, protectedObjects: protectedObjects.map(({ path, rows }) => ({ path, rows })), prefix: canonicalLayout.prefix,
+    const originalTrees = [
+      { step: 'package', role: 'package', directory: realpathSync(globalRoot), name: 'caveat-cli' },
+      ...(!baseline.npmManagement.absent ? [{ step: 'management', role: 'npm-management', directory: realpathSync(globalRoot), name: '.package-lock.json' }] : []),
+      ...leaves.filter(row => row.identity).map(row => ({ step: row.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: row.name })),
+    ].map(row => { const tree = guard.retainTree(row.directory, row.name); return { ...row, tree, rows: guard.readTree(tree) }; });
+    const originalObjects = originalTrees.map(({ tree: _, ...row }) => row);
+    assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_native_original_snapshot_changed');
+    for (const row of originalObjects.filter(value => value.role === 'leaf')) assert.deepEqual(row.rows[0]!.identity, leaves.find(leaf => leaf.name === row.name)!.identity, 'global_migration_native_original_leaf_changed');
+    const plan = { schema: 'caveat.global_migration_plan.v1', baseline, leaves, originalObjects, protectedObjects: protectedObjects.map(({ path, rows }) => ({ path, rows })), prefix: canonicalLayout.prefix,
       root: realpathSync(root), globalRoot: realpathSync(globalRoot), binDirectory, shellPlan, aliases, absences, directories: guard.directoryBindings() };
     const planSha256 = hash(plan);
     let prepared = false;
@@ -140,6 +148,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       try {
         await verify();
         assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_initial_snapshot_changed');
+        for (const row of originalTrees) assert.deepEqual(guard.readTree(row.tree), row.rows, 'global_migration_reviewed_original_changed');
         const runName = 'global-migration-' + randomBytes(16).toString('hex');
         phase = 'private-run-create'; runDirectory = join(root, runName); guard.createPrivateDirectory(root, runName);
         planEvidence = writeGlobalPrivateEvidence(guard, runDirectory, 'plan.json', plan);
@@ -153,6 +162,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
         if (!baseline.npmManagement.absent) objects.push({ step: 'management', role: 'npm-management', directory: globalRoot, name: '.package-lock.json', backupDirectory: runDirectory, backupName: 'original-management' });
         for (const leaf of leaves) if (leaf.identity) objects.push({ step: leaf.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: leaf.name, backupDirectory: runDirectory, backupName: 'original-' + leaf.name });
         const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify);
+        for (const row of engine.manifest().objects) assert.deepEqual(row.rows, originalObjects.find(value => value.step === row.step)!.rows, 'global_migration_original_seed_changed');
         const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
         const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));
         const preparedRun = runDirectory;

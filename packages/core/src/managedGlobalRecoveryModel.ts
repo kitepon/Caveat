@@ -14,6 +14,7 @@ export type RecoveryRecord = { schema: string; sourceEvidenceSha256: string; ste
 
 /** This projection uses only validated migration roles and their fixed names, never a saved recovery path. */
 export function recoveryModelFromMigration(source: GlobalMigrationEvidence, root: string): RecoveryModel {
+  assert.ok(Array.isArray(source.plan.originalObjects), 'global_recovery_chain_reviewed_native_originals_required');
   const location = (directory: string, name: string, rows: GlobalGuardTreeRow[]) => ({ directory, name, rows: structuredClone(rows) });
   return { schema: 'caveat.global_recovery_objects.v1', sourceEvidenceSha256: source.evidenceSha256, confirmed: true,
     objects: source.original.objects.map(object => {

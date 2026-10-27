@@ -736,6 +736,10 @@ separate `global-recover` invocation. The source chain is limited to eight runs,
 private directory. Pending, torn or unknown intents anywhere in the chain stop
 before a new journal is created. Source plan/seed and confirmed transitions derive
 all allowed names and current object locations. A saved path is never authority.
+New migration plans also bind the full native original trees before mutation;
+original seed rows must match that reviewed identity/content/security exactly.
+Legacy evidence remains readable, but a recovery chain without this native plan
+anchor is explicitly refused rather than upgrading its trust from journal hashes.
 The digest binds every source reference, derived state and fresh parent bindings;
 current objects, absences, aliases, protected state and native process/writer gates
 are rechecked independently at execution. Each attempt uses a new private journal.

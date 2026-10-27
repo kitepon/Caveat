@@ -16,7 +16,7 @@ import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPat
 import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platform.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 import type { NativeProcessTables } from '../src/managedProcessNative.js';
-import { inspectGlobalMigrationRecovery } from '../src/managedGlobalRecovery.js';
+import { inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
 import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
 
@@ -749,4 +749,28 @@ it('refuses an unknown ancestor intent despite a confirmed immediate recovery jo
   const before = readdirSync(r.f.paths.root), ancestor = readFileSync(file), unchanged = savedRecoveryFiles(r.attempt);
   const result = await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables());
   expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(before); expect(readFileSync(file)).toEqual(ancestor); unchanged();
+});
+
+it('rechecks a migration-source vacant leaf after the fresh planning probe', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture('backup'), before = readdirSync(r.f.paths.root), leaf = join(r.f.binDirectory, 'caveat'), bytes = Buffer.from('foreign leaf');
+  const result = await planGlobalRecoveryWithCollector(r.session.runDirectory, r.session.planSha256, async () => { writeFileSync(leaf, bytes, { mode: 0o600 }); return tables(); });
+  expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readFileSync(leaf)).toEqual(bytes); expect(readdirSync(r.f.paths.root)).toEqual(before); r.unchanged();
+});
+
+it('binds native original seed identity to the reviewed plan despite self-consistent replacement hashes', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture('backup'), j = parseGlobalMutationJournal(readFileSync(join(r.session.runDirectory, 'journal.jsonl')), r.session.planSha256);
+  const originalName = 'originals-' + j.header.runId + '.json', originalPath = join(r.session.runDirectory, originalName), seed = JSON.parse(readFileSync(originalPath, 'utf8'));
+  seed.objects[0].rows[0].identity.ino = '987654321'; const seedBytes = Buffer.from(JSON.stringify(seed) + '\n'); writeFileSync(originalPath, seedBytes);
+  const changed = new Map<number, string>();
+  for (const row of j.records) if (row.kind === 'result') {
+    const file = join(r.session.runDirectory, 'state-' + j.header.runId + '-' + row.sequence + '.json'), state = JSON.parse(readFileSync(file, 'utf8'));
+    state.manifest.originalEvidence = { name: originalName, bytes: seedBytes.length, sha256: sha(seedBytes) };
+    state.manifest.objects[0].rows[0].identity.ino = '987654321'; state.manifest.objects[0].stateSha256 = sha(Buffer.from(JSON.stringify(state.manifest.objects[0].rows)));
+    const bytes = Buffer.from(JSON.stringify(state) + '\n'); writeFileSync(file, bytes); changed.set(row.sequence, sha(bytes));
+  }
+  let previous = JSON.stringify(j.header) + '\n', encoded = previous;
+  for (const original of j.records) { const row = { ...original, previousSha256: sha(Buffer.from(previous)), ...(changed.has(original.sequence) ? { stateSha256: changed.get(original.sequence) } : {}) }; previous = JSON.stringify(row) + '\n'; encoded += previous; }
+  writeFileSync(join(r.session.runDirectory, 'journal.jsonl'), encoded); const before = readdirSync(r.f.paths.root), sourceBytes = readFileSync(join(r.session.runDirectory, 'journal.jsonl')); let reached = false;
+  await expect(withGlobalMigrationEvidence(r.session.runDirectory, r.session.planSha256, async () => { reached = true; })).rejects.toThrow('original_seed_unbound');
+  expect(reached).toBe(false); expect(readdirSync(r.f.paths.root)).toEqual(before); expect(readFileSync(join(r.session.runDirectory, 'journal.jsonl'))).toEqual(sourceBytes);
 });

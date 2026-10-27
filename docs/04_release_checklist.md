@@ -423,7 +423,9 @@ read-only, use only a new private journal and prove original inode/content/secur
 restoration, known partial states, parent/alias/absence changes, unknown writers,
 interrupted/new/duplicate attempts and post-close readback changes. An observed
 journal is not current-object acceptance or permission to execute. Require fresh binding of known partial recovery-attempt states from the original
-validated plan/seed and a bounded confirmed source chain. Reject pending/torn/unknown
+validated plan/seed and a bounded confirmed source chain. Bind native original
+identity/content/security in the reviewed plan; a self-consistent seed/result hash
+rewrite must not substitute a different original. Reject pending/torn/unknown
 intents, cycles, changed parents/aliases and arbitrary saved-path authority before
 creating a new journal. Keep journal inspection separate from current-object admission.
 The selected Node's shared-runtime proof (or explicit rejection),

@@ -121,7 +121,10 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
     const result = await withGlobalRecoverySourceSnapshot(runDirectory, planSha256, async source => {
       const target = join(source.plan.root, 'global-recovery-' + source.evidenceSha256.slice(0, 32));
       const verify = () => { source.verifyEvidence(); source.verifyProtected(); source.guard.assertCurrent();
-        for (const row of source.bindings.values()) if (row.tree) assert.deepEqual(source.guard.readTree(row.tree), row.rows);
+        for (const row of source.bindings.values()) {
+          if (row.tree) assert.deepEqual(source.guard.readTree(row.tree), row.rows);
+          else assert.equal(source.guard.observe(row.directory, row.name), null, 'global_recovery_plan_vacancy_changed');
+        }
         const occupied = new Set([...source.bindings.values()].filter(row => row.tree).map(row => join(row.directory, row.name)));
         for (const row of source.vacancySlots ?? []) if (!occupied.has(join(row.directory, row.name))) assert.equal(source.guard.observe(row.directory, row.name), null);
         assert.equal(source.guard.observe(source.plan.root, 'installer.lock'), null, 'global_recovery_installer_busy');
