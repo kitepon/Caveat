@@ -20,6 +20,10 @@ const errorSha = (error: unknown) => sha(error instanceof Error ? error.name + '
 export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, input: GlobalPreservationObject[], verifyBeforeMutation: () => Promise<void>) {
   assert.ok(input.length >= 1 && input.length <= 5 && input.filter(row => row.role === 'package').length === 1, 'global_preservation_scope_required');
   const items = structuredClone(input).map(row => ({ ...row, directory: guard.canonicalDirectory(row.directory), backupDirectory: guard.canonicalDirectory(row.backupDirectory) })), steps = new Set<string>(), names = new Set<string>();
+  assert.equal(new Set(items.map(row => row.role + ':' + row.name)).size, items.length, 'global_preservation_duplicate_role');
+  const packageDirectory = items.find(row => row.role === 'package')!.directory;
+  assert.ok(items.filter(row => row.role === 'npm-management').every(row => row.directory === packageDirectory), 'global_preservation_management_scope');
+  items.sort((a, b) => ['package', 'npm-management', 'leaf'].indexOf(a.role) - ['package', 'npm-management', 'leaf'].indexOf(b.role));
   const sources = items.map(row => {
     assert.ok(/^[a-zA-Z0-9._-]{1,56}$/.test(row.step) && !steps.has(row.step), 'global_preservation_step_invalid'); steps.add(row.step);
     assert.ok([row.directory, row.backupDirectory].every(path => isAbsolute(path) && resolve(path) === path), 'global_preservation_absolute_directory_required');
@@ -33,6 +37,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     for (let other = 0; other < sources.length; other++) if (index !== other) assert.ok(!inside(sources[index]!, sources[other]!), 'global_preservation_overlapping_source');
     for (const row of items) assert.ok(!inside(sources[index]!, row.backupDirectory), 'global_preservation_backup_inside_source');
   }
+  for (const directory of new Set(items.map(item => item.backupDirectory))) guard.assertPrivateDirectory(directory);
   const saved = items.map(item => {
     assert.equal(guard.observe(item.backupDirectory, item.backupName), null, 'global_preservation_destination_exists');
     assert.equal(guard.directoryIdentity(item.directory).dev, guard.directoryIdentity(item.backupDirectory).dev, 'global_preservation_cross_volume');
@@ -49,9 +54,26 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     return { item, tree, rows, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
   });
   let stopped = false;
+  const initial = journal.read();
+  assert.equal(initial.status, 'ready', 'global_preservation_fresh_journal_required');
+  assert.equal(initial.records.length, 0, 'global_preservation_fresh_journal_required');
+  const evidenceDirectory = items[0]!.backupDirectory;
+  assert.ok(items.every(item => item.backupDirectory === evidenceDirectory), 'global_preservation_one_private_backup_required');
+  const persist = (name: string, value: unknown) => {
+    const bytes = Buffer.from(JSON.stringify(value) + '\n');
+    assert.ok(bytes.length > 0 && bytes.length <= 16 * 1024 * 1024, 'global_preservation_manifest_bound');
+    const token = guard.createJournal(evidenceDirectory, name, bytes.subarray(0, 65536));
+    for (let offset = 65536; offset < bytes.length; offset += 65536) guard.appendJournal(token, bytes.subarray(offset, offset + 65536));
+    assert.ok(guard.readJournal(token).equals(bytes), 'global_preservation_manifest_readback_changed');
+    return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  };
+  const originalEvidence = persist('originals-' + initial.header.runId + '.json', {
+    schema: 'caveat.global_original_evidence.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
+    objects: saved.map(row => ({ ...row.item, rows: row.rows })),
+  });
   const manifest = () => ({ schema: 'caveat.global_original_objects.v1' as const,
     objects: saved.map(row => ({ ...row.item, state: row.state, rows: structuredClone(row.rows), stateSha256: sha(row.rows) })),
-    originalsReconstructed: false as const, automaticRecovery: false as const });
+    originalEvidence, originalsReconstructed: false as const, automaticRecovery: false as const });
   const move = async (row: typeof saved[number], restore: boolean) => {
     assert.ok(!stopped && row.state === (restore ? 'preserved' : 'original'), 'global_preservation_not_known');
     try {
@@ -70,7 +92,13 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       else { stopped = true; row.state = 'unknown'; }
     } catch (error) { stopped = true; row.state = 'unknown'; errorSha256 = errorSha(error); }
     const outcome = row.state === 'unknown' ? 'unknown' as const : 'confirmed' as const;
-    try { journal.result(step, operation, outcome, sha({ manifest: manifest(), result, errorSha256 })); }
+    try {
+      const evidence = persist('state-' + initial.header.runId + '-' + journal.read().nextSequence + '.json', {
+        schema: 'caveat.global_preservation_state.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
+        step, operation, manifest: manifest(), result, errorSha256,
+      });
+      journal.result(step, operation, outcome, evidence.sha256);
+    }
     catch (error) {
       stopped = true;
       return { status: 'unknown' as const, resultRecorded: false, result, errorSha256: errorSha(error), manifest: manifest() };
@@ -86,6 +114,8 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     },
     async restoreKnown(step: string) {
       const row = saved.find(value => value.item.step === step); assert.ok(row, 'global_preservation_unknown_step');
+      if (row.item.role !== 'package') assert.ok(saved.filter(value => value.item.role === 'package').every(value => value.state === 'restored'), 'global_preservation_package_restore_required');
+      if (row.item.role === 'leaf') assert.ok(saved.filter(value => value.item.role === 'npm-management').every(value => value.state === 'restored'), 'global_preservation_management_restore_required');
       return move(row, true);
     },
   };

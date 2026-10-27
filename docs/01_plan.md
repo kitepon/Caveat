@@ -575,7 +575,10 @@ management file and the known shell leaves. Fresh package/protected-state/proces
 checks remain mandatory caller responsibilities before each mutation; the engine
 has no CLI entry or permission bypass. It records durable intent/result for each
 object, exact partial states and known-only restoration without destination
-overwrite. This component does not yet create working copies, run npm, reopen a
+overwrite. Before the first original move it exclusively creates, flushes and
+reads back a private full original-tree manifest. Before each result record it
+persists the current full state and binds that file digest into the journal.
+The backup directory must already be private; permissions are never repaired. This component does not yet create working copies, run npm, reopen a
 persisted recovery plan or install wrappers. Those integrations, final review and
 candidate validation remain unfinished.
 

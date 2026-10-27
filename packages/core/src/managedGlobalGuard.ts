@@ -16,6 +16,7 @@ export type NativeGuardDriver = {
   openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation' | 'journal-read'): object | null;
   snapshot(ref: object): GlobalGuardIdentity;
   listDirectory(ref: object): string[];
+  assertPrivateDirectory(ref: object): void;
   createJournal(parent: object, name: string): object;
   appendJournal(ref: object, bytes: Buffer): void;
   flushJournal(ref: object): void;
@@ -167,6 +168,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         assert.deepEqual(driver.snapshot(ref), before, 'global_journal_changed'); checkDirectories(); return bytes;
       } finally { driver.close(ref); }
     },
+    assertPrivateDirectory(path: string) { checkDirectories(); driver.assertPrivateDirectory(directory(path).ref); },
     directoryIdentity(path: string) { checkDirectories(); return driver.snapshot(directory(path).ref); },
     canonicalDirectory(path: string) { checkDirectories(); directory(path); return aliases.get(path)!; },
     observe(path: string, name: string) { leaf(name); checkDirectories(); const parent = directory(path); return inspect(parent.ref, name); },

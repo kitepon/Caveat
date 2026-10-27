@@ -33,15 +33,22 @@ describe('held original trees and known-only preservation', () => {
     try {
       const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan);
       const engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => { checks++; });
-      const before = engine.manifest(), result = await engine.preserveAll();
+      const before = engine.manifest(), originalEvidence = readFileSync(join(backup, before.originalEvidence.name));
+      expect(JSON.parse(originalEvidence.toString()).objects[0].rows).toEqual(before.objects[0]!.rows);
+      const result = await engine.preserveAll();
       expect(result.status).toBe('preserved'); expect(checks).toBe(3); expect(journal.read().records).toHaveLength(6);
       for (let index = 0; index < objects.length; index++) {
         expect(existsSync(join(source, objects[index]!.name))).toBe(false);
         expect(result.manifest.objects[index]!.rows.map(row => [row.relativePath, row.identity.dev, row.identity.ino, row.identity.securitySha256, row.identity.contentSha256]))
           .toEqual(before.objects[index]!.rows.map(row => [row.relativePath, row.identity.dev, row.identity.ino, row.identity.securitySha256, row.identity.contentSha256]));
       }
+      await expect(engine.restoreKnown('leaf')).rejects.toThrow('package_restore_required');
       expect((await engine.restoreKnown('package')).status).toBe('confirmed');
+      await expect(engine.restoreKnown('leaf')).rejects.toThrow('management_restore_required');
       expect(readFileSync(join(source, 'caveat-cli/node_modules/dep/index.js'), 'utf8')).toBe('original dependency bytes');
+      const final = journal.read(), last = final.records.at(-1)!;
+      const evidence = readFileSync(join(backup, 'state-' + final.header.runId + '-' + last.sequence + '.json'));
+      expect(JSON.parse(evidence.toString()).manifest.objects[0].state).toBe('restored');
       expect(engine.manifest().objects[0]!.state).toBe('restored'); expect(journal.read().status).toBe('ready');
     } finally { guard.close(); }
   });
@@ -106,6 +113,20 @@ describe('held original trees and known-only preservation', () => {
       const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan);
       expect(() => prepareGlobalObjectPreservation(guard, journal, objects, async () => {})).toThrow('external_package_link');
       expect(existsSync(pkg)).toBe(true); expect(journal.read().records).toHaveLength(0);
+    } finally { guard.close(); }
+  });
+  it('leaves durable intent pending when the post-move state file cannot flush and never retries a mutation', async () => {
+    const { source, backup, objects } = fixture(), driver = await native(), files = new WeakMap<object, string>(); let calls = 0;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver,
+      createJournal(parent, name) { const ref = driver.createJournal(parent, name); files.set(ref, name); return ref; },
+      flushJournal(ref) { if (files.get(ref)?.startsWith('state-')) throw Error('injected state flush failure'); driver.flushJournal(ref); },
+      rename(...args) { calls++; driver.rename(...args); },
+    });
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      const result = await engine.preserveAll(); expect(result.status).toBe('unknown'); expect(calls).toBe(1);
+      expect(journal.read().status).toBe('pending'); expect(engine.manifest().objects.map(row => row.state)).toEqual(['preserved', 'original', 'original']);
+      await expect(engine.preserveAll()).rejects.toThrow('not_fresh'); expect(calls).toBe(1);
     } finally { guard.close(); }
   });
   it('rejects scope expansion to another global package before reading its contents', async () => {

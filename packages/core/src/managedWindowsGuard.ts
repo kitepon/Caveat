@@ -25,7 +25,7 @@ export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: bo
     const mask = bytes.readUInt32LE(offset + 4), sid = decodeGuardSid(bytes.subarray(offset + 8, offset + size));
     // Ancestors may permit creation, but never replacement or security/attribute changes by an ordinary foreign principal.
     const writes = 0x10000000 | 0x40000000 | 0x000d0150 | (mutation ? 0x6 : 0);
-    if (privateOwner && type === 0 && !(flags & 8)) assert.ok(sid === privateOwner, 'global_journal_foreign_acl_reader');
+    if (privateOwner && type === 0) assert.ok(sid === privateOwner, 'global_journal_foreign_acl_reader');
     if (type === 0 && !(flags & 8) && (mask & writes) !== 0) assert.ok(trusted.has(sid), 'global_guard_foreign_acl_writer');
     offset += size;
   }
@@ -159,6 +159,10 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     },
     openChild,
     snapshot,
+    assertPrivateDirectory(value) {
+      assert.equal(snapshot(value).kind, 'directory', 'global_preservation_private_backup_required');
+      assert.equal(descriptor({ ...(value as Ref), mutation: true }, true).owner, currentSid, 'global_preservation_private_backup_required');
+    },
     listDirectory(value) {
       const buffer = Buffer.alloc(65536), status = Buffer.alloc(16), names: string[] = [];
       for (let index = 0; ; index++) {

@@ -118,6 +118,10 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,
+    assertPrivateDirectory(value) {
+      const stat = fstatSync((value as Ref).fd, { bigint: true });
+      assert.ok(stat.isDirectory() && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o077n) === 0n, 'global_preservation_private_backup_required');
+    },
     listDirectory(value) {
       // A fresh description avoids sharing enumeration offsets with the retained directory.
       const fd = Number(openat((value as Ref).fd, '.', flags | constants.O_DIRECTORY));
