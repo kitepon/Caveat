@@ -544,6 +544,23 @@ guard does not verify an entire descendant tree or establish process/writer
 absence; full package preservation and the mutation journal must supply those
 checks before scoped uninstall can be connected.
 
+The native guard can create a new private journal relative to its held directory.
+Only references returned by that creation may append or flush. Original object
+references, read-only journal references, foreign tokens and closed references
+cannot write. POSIX uses exclusive no-follow creation, 0600 files and file/parent
+fsync; Windows supplies a protected current-user security descriptor at exclusive
+creation and flushes its owned write handle. Each append verifies the expected
+file/name/bytes, flushes and reads back before returning. Partial writes, flush
+failure or failed readback poison that writer; no retry or truncation occurs.
+
+The bounded LF JSONL format binds a plan digest and a random run ID, consecutive
+sequence numbers and the previous record hash. Intent must precede a matching
+confirmed/unknown result. An unfinished intent stays pending; unknown and complete
+are terminal, and a partial final record stays torn evidence. Existing journals
+are read-only recovery inputs and are never replayed or appended automatically.
+The journal proves recorded ordering, not completion of the full migration plan;
+the preservation/uninstall/recovery engine still has to verify actual state.
+
 ### Windows hookの保護保存transport（未公開source）
 
 Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。

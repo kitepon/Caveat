@@ -13,12 +13,17 @@ export type GlobalGuardIdentity = {
 };
 export type NativeGuardDriver = {
   openRoot(path: string): object;
-  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation'): object | null;
+  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation' | 'journal-read'): object | null;
   snapshot(ref: object): GlobalGuardIdentity;
+  createJournal(parent: object, name: string): object;
+  appendJournal(ref: object, bytes: Buffer): void;
+  flushJournal(ref: object): void;
+  readJournal(ref: object): Buffer;
   rename(sourceParent: object, sourceName: string, source: object, targetParent: object, targetName: string): void;
   close(ref: object): void;
 };
 export type GlobalGuardEntry = Readonly<{ identity: GlobalGuardIdentity }>;
+export type GlobalGuardJournal = Readonly<{ journal: true }>;
 type Directory = { ref: object; initial: GlobalGuardIdentity; parent?: Directory; name?: string };
 type Entry = { ref: object; directory: Directory; name: string; expected: GlobalGuardIdentity };
 const leaf = (name: string) => assert.ok(typeof name === 'string' && name.length > 0 && name.length <= 255
@@ -37,6 +42,7 @@ export async function openGlobalPathGuard(paths: string[]) {
 /** Driver injection is internal to native fixtures, never exposed by CLI options. */
 export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) {
   const opened: object[] = [], directories = new Map<string, Directory>(), entries = new WeakMap<GlobalGuardEntry, Entry>();
+  const journals = new WeakMap<GlobalGuardJournal, Entry & { bytes: Buffer; failed: boolean }>();
   const aliases = new Map<string, string>(); let closed = false;
   const keep = (ref: object) => { opened.push(ref); return ref; };
   const close = () => {
@@ -90,6 +96,48 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
   return {
     close,
     assertCurrent: checkDirectories,
+    createJournal(path: string, name: string, header: Buffer): GlobalGuardJournal {
+      leaf(name); checkDirectories(); assert.ok(Buffer.isBuffer(header) && header.length > 0 && header.length <= 65536, 'global_journal_record_bound');
+      const parent = directory(path), bytes = Buffer.from(header), ref = keep(driver.createJournal(parent.ref, name));
+      driver.appendJournal(ref, bytes); driver.flushJournal(ref);
+      const expected = driver.snapshot(ref);
+      assert.ok(expected.kind === 'file' && expected.links === '1', 'global_journal_invalid_created_file');
+      assert.deepEqual(driver.readJournal(ref), bytes, 'global_journal_readback_changed');
+      assert.deepEqual(inspect(parent.ref, name), expected, 'global_journal_name_changed'); checkDirectories();
+      const token = Object.freeze({ journal: true as const }); journals.set(token, { ref, directory: parent, name, expected, bytes, failed: false }); return token;
+    },
+    appendJournal(token: GlobalGuardJournal, record: Buffer) {
+      active(); const journal = journals.get(token); assert.ok(journal && !journal.failed, 'global_journal_unknown_or_failed_token');
+      assert.ok(Buffer.isBuffer(record) && record.length > 0 && record.length <= 65536 && journal.bytes.length + record.length <= 16 * 1024 * 1024, 'global_journal_record_bound');
+      checkDirectories(); assert.deepEqual(driver.snapshot(journal.ref), journal.expected, 'global_journal_changed');
+      assert.deepEqual(inspect(journal.directory.ref, journal.name), journal.expected, 'global_journal_name_changed');
+      const bytes = Buffer.concat([journal.bytes, Buffer.from(record)]);
+      journal.failed = true;
+      driver.appendJournal(journal.ref, bytes.subarray(journal.bytes.length)); driver.flushJournal(journal.ref);
+      const after = driver.snapshot(journal.ref);
+      assert.deepEqual(directoryBinding(after), directoryBinding(journal.expected), 'global_journal_identity_changed');
+      assert.equal(after.links, '1', 'global_journal_shared_file');
+      assert.deepEqual(driver.readJournal(journal.ref), bytes, 'global_journal_readback_changed');
+      assert.deepEqual(inspect(journal.directory.ref, journal.name), after, 'global_journal_name_changed'); checkDirectories();
+      journal.bytes = bytes; journal.expected = after; journal.failed = false;
+      return { bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+    },
+    readJournal(token: GlobalGuardJournal) {
+      active(); const journal = journals.get(token); assert.ok(journal && !journal.failed, 'global_journal_unknown_or_failed_token');
+      checkDirectories(); assert.deepEqual(driver.snapshot(journal.ref), journal.expected, 'global_journal_changed');
+      assert.deepEqual(inspect(journal.directory.ref, journal.name), journal.expected, 'global_journal_name_changed');
+      const bytes = driver.readJournal(journal.ref); assert.deepEqual(bytes, journal.bytes, 'global_journal_readback_changed'); return bytes;
+    },
+    readPersistedJournal(path: string, name: string) {
+      leaf(name); checkDirectories(); const parent = directory(path), ref = driver.openChild(parent.ref, name, 'journal-read');
+      assert.ok(ref, 'global_journal_missing');
+      try {
+        const bytes = driver.readJournal(ref), before = driver.snapshot(ref);
+        assert.ok(before.kind === 'file' && before.links === '1' && before.contentSha256 === createHash('sha256').update(bytes).digest('hex'), 'global_journal_changed');
+        assert.deepEqual(inspect(parent.ref, name), before, 'global_journal_name_changed');
+        assert.deepEqual(driver.snapshot(ref), before, 'global_journal_changed'); checkDirectories(); return bytes;
+      } finally { driver.close(ref); }
+    },
     retain(path: string, name: string): GlobalGuardEntry {
       leaf(name); checkDirectories(); const parent = directory(path);
       const ref = driver.openChild(parent.ref, name, 'mutation'); assert.ok(ref, 'global_guard_leaf_missing'); keep(ref);

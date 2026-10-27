@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { closeSync, constants, fstatSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, readSync, writeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
@@ -10,6 +10,15 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
   const open = lib.func('int open(const char *path, int flags)');
   const openat = lib.func('int openat(int dirfd, const char *path, int flags)');
+  const createat = lib.func('int openat(int dirfd, const char *path, int flags, uint32_t mode)');
+  const createdJournals = new WeakSet<object>();
+  const readOnlyJournals = new WeakSet<object>();
+  const journal = (ref: object, write = false) => {
+    assert.ok(createdJournals.has(ref) || !write && readOnlyJournals.has(ref), 'global_journal_owned_creation_required');
+    const stat = fstatSync((ref as Ref).fd, { bigint: true });
+    assert.ok(stat.isFile() && stat.nlink === 1n && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o777n) === 0o600n, 'global_journal_private_file_required');
+    return ref as Ref;
+  };
   const rename = lib.func(`int ${spec.rename}(int fromfd, const char *from, int tofd, const char *to, uint32_t flags)`);
   const list = lib.func(`intptr_t flistxattr(int fd, _Out_ void *buffer, size_t size${spec.xattrListTail.length ? ', int options' : ''})`);
   const get = lib.func(`intptr_t fgetxattr(int fd, const char *name, _Out_ void *buffer, size_t size${spec.xattrGetTail.length ? ', uint32_t position, int options' : ''})`);
@@ -94,14 +103,34 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      return { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
+      const ref = { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
+      if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,
+    createJournal(parent, name) {
+      const stat = fstatSync((parent as Ref).fd, { bigint: true });
+      assert.ok(stat.isDirectory() && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o077n) === 0n, 'global_journal_private_parent_required');
+      const fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 0o600));
+      assert.ok(fd >= 0, 'global_journal_exclusive_create_failed');
+      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdJournals.add(ref); return ref;
+    },
+    appendJournal(ref, bytes) {
+      const value = journal(ref, true); assert.ok(bytes.length <= 65536, 'global_journal_record_bound');
+      assert.equal(writeSync(value.fd, bytes), bytes.length, 'global_journal_partial_write');
+    },
+    flushJournal(ref) { const value = journal(ref, true); fsyncSync(value.fd); fsyncSync(value.parent!.fd); },
+    readJournal(ref) {
+      const value = journal(ref), size = fstatSync(value.fd).size;
+      assert.ok(size <= 16 * 1024 * 1024, 'global_journal_total_bound');
+      const bytes = Buffer.alloc(size); let offset = 0;
+      while (offset < size) { const n = readSync(value.fd, bytes, offset, size - offset, offset); assert.ok(n > 0, 'global_journal_readback_truncated'); offset += n; }
+      return bytes;
+    },
     rename(from, name, source, to, target) {
       if (rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace) !== 0)
         throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: koffi.errno() });
       Object.assign(source, { parent: to, name: target });
     },
-    close(ref) { closeSync((ref as Ref).fd); },
+    close(ref) { createdJournals.delete(ref); readOnlyJournals.delete(ref); closeSync((ref as Ref).fd); },
   };
 }

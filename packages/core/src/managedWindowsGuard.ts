@@ -42,6 +42,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const rename = native.func('int32_t __stdcall NtSetInformationFile(void *handle, _Out_ void *status, const void *buffer, uint32_t size, int kind)');
   const seek = kernel.func('int __stdcall SetFilePointerEx(void *handle, int64_t position, void *result, uint32_t method)');
   const read = kernel.func('int __stdcall ReadFile(void *handle, _Out_ void *buffer, uint32_t size, _Out_ uint32_t *count, void *overlapped)');
+  const write = kernel.func('int __stdcall WriteFile(void *handle, const void *buffer, uint32_t size, _Out_ uint32_t *count, void *overlapped)');
+  const flush = kernel.func('int __stdcall FlushFileBuffers(void *handle)');
   const openRelative = native.func('int32_t __stdcall NtCreateFile(_Out_ void **handle, uint32_t access, const void *attributes, _Out_ void *status, const void *allocation, uint32_t fileAttributes, uint32_t share, uint32_t disposition, uint32_t options, const void *ea, uint32_t eaLength)');
   const getSecurity = security.func('uint32_t __stdcall GetSecurityInfo(void *handle, int type, uint32_t requested, _Out_ void **owner, _Out_ void **group, _Out_ void **dacl, void *sacl, _Out_ void **descriptor)');
   const toString = security.func('int __stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(const void *descriptor, uint32_t revision, uint32_t requested, _Out_ void **text, _Out_ uint32_t *length)');
@@ -55,13 +57,27 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     assert.ok(header[1]! <= 15, 'global_guard_sid_bound'); return decodeGuardSid(bytesAt(pointer, 8 + 4 * header[1]!));
   };
   const own: unknown[] = [null]; assert.notEqual(openToken(currentProcess(), 8, own), 0, 'global_guard_token_unavailable');
-  let currentSid: string;
+  let currentSid: string, currentSidBytes: Buffer;
   try {
     const buffer = Buffer.alloc(256), needed = [0];
     assert.notEqual(tokenInfo(own[0], 1, buffer, buffer.length, needed), 0, 'global_guard_token_unavailable');
-    currentSid = sidAt(koffi.decode(buffer, 'void *'));
+    const pointer = koffi.decode(buffer, 'void *'); currentSid = sidAt(pointer);
+    currentSidBytes = bytesAt(pointer, 8 + 4 * bytesAt(pointer, 8)[1]!);
   } finally { assert.notEqual(close(own[0]), 0, 'global_guard_token_close_failed'); }
   const trusted = new Set([currentSid, ...systemTrustees]);
+  const createdJournals = new WeakSet<object>();
+  const readOnlyJournals = new WeakSet<object>();
+  const journal = (ref: object, write = false) => {
+    assert.ok(createdJournals.has(ref) || !write && readOnlyJournals.has(ref), 'global_journal_owned_creation_required');
+    assert.equal(descriptor({ ...(ref as Ref), mutation: true }).owner, currentSid, 'global_journal_private_file_required'); return ref as Ref;
+  };
+  const journalSecurity = () => {
+    const sid = currentSidBytes, aclSize = 16 + sid.length, bytes = Buffer.alloc(20 + sid.length + aclSize), acl = 20 + sid.length;
+    bytes[0] = 1; bytes.writeUInt16LE(0x9004, 2); bytes.writeUInt32LE(20, 4); bytes.writeUInt32LE(acl, 16); sid.copy(bytes, 20);
+    bytes[acl] = 2; bytes.writeUInt16LE(aclSize, acl + 2); bytes.writeUInt16LE(1, acl + 4);
+    bytes.writeUInt16LE(8 + sid.length, acl + 10); bytes.writeUInt32LE(0x001f01ff, acl + 12); sid.copy(bytes, acl + 16);
+    return bytes;
+  };
   const descriptor = (ref: Ref) => {
     const owner: unknown[] = [null], group: unknown[] = [null], dacl: unknown[] = [null], sd: unknown[] = [null];
     assert.equal(getSecurity(ref.handle, 1, 7, owner, group, dacl, null, sd), 0, 'global_guard_security_unavailable');
@@ -106,6 +122,26 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       kind: standard[21] ? 'directory' : 'file', size: String(standard.readBigInt64LE(8)), links: String(standard.readUInt32LE(16)),
       mtime: String(basic.readBigInt64LE(16)), ctime: String(basic.readBigInt64LE(24)), mode: basic.readUInt32LE(32), ...descriptor(ref), ...(contentSha256 ? { contentSha256 } : {}) };
   };
+  const openChild = (parent: object, name: string, purpose: Parameters<NativeGuardDriver['openChild']>[2], creating = false): Ref | null => {
+    const mutation = purpose === 'mutation';
+    const nameBuffer = Buffer.from(name + '\0', 'utf16le'), unicode = Buffer.alloc(16), attributes = Buffer.alloc(48), status = Buffer.alloc(16), handle: unknown[] = [null];
+    const sd = creating ? journalSecurity() : null;
+    unicode.writeUInt16LE(nameBuffer.length - 2); unicode.writeUInt16LE(nameBuffer.length, 2); unicode.writeBigUInt64LE(koffi.address(nameBuffer), 8);
+    attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
+    if (sd) attributes.writeBigUInt64LE(koffi.address(sd), 32);
+    // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
+    const share = mutation ? 1 : purpose === 'parent' ? 3 : 7;
+    const access = 0x00120081 | (mutation ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
+    const result = Number(openRelative(handle, access, attributes, status, null, creating ? 0x80 : 0, share, creating ? 2 : 1, 0x00200020 | (creating ? 0x40 : 0), null, 0));
+    // Keep nested buffers alive across the native call; raw addresses do not root them for GC.
+    assert.equal(unicode.readUInt16LE(0), nameBuffer.length - 2); assert.equal(nameBuffer.readUInt16LE(nameBuffer.length - 2), 0);
+    if (sd) assert.equal(sd.readUInt16LE(2), 0x9004);
+    if (result !== 0) {
+      if (!creating && (result === -1073741772 || result === -1073741766)) return null;
+      throw Error('global_guard_relative_open_failed_' + (result >>> 0).toString(16));
+    }
+    const ref = { handle: handle[0], mutation }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
+  };
   return {
     openRoot(path) {
       assert.match(path, /^[a-z]:[\\/]$/i, 'global_guard_local_volume_required');
@@ -113,23 +149,29 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       assert.ok(handle && koffi.address(handle) !== 0xffffffffffffffffn, 'global_guard_root_open_failed');
       return { handle, mutation: false };
     },
-    openChild(parent, name, purpose) {
-      const mutation = purpose === 'mutation';
-      const nameBuffer = Buffer.from(name + '\0', 'utf16le'), unicode = Buffer.alloc(16), attributes = Buffer.alloc(48), status = Buffer.alloc(16), handle: unknown[] = [null];
-      unicode.writeUInt16LE(nameBuffer.length - 2); unicode.writeUInt16LE(nameBuffer.length, 2); unicode.writeBigUInt64LE(koffi.address(nameBuffer), 8);
-      attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
-      // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
-      const share = mutation ? 1 : purpose === 'parent' ? 3 : 7;
-      const result = Number(openRelative(handle, 0x00120081 | (mutation ? 0x10000 : 0), attributes, status, null, 0, share, 1, 0x00200020, null, 0));
-      // Keep both nested input buffers alive across the native call; raw pointer addresses do not root them for GC.
-      assert.equal(unicode.readUInt16LE(0), nameBuffer.length - 2); assert.equal(nameBuffer.readUInt16LE(nameBuffer.length - 2), 0);
-      if (result !== 0) {
-        if (result === -1073741772 || result === -1073741766) return null; // STATUS_OBJECT_NAME_NOT_FOUND / PATH_NOT_FOUND
-        throw Error('global_guard_relative_open_failed_' + (result >>> 0).toString(16));
-      }
-      return { handle: handle[0], mutation };
-    },
+    openChild,
     snapshot,
+    createJournal(parent, name) {
+      assert.equal(descriptor({ ...(parent as Ref), mutation: true }).owner, currentSid, 'global_journal_private_parent_required');
+      const ref = openChild(parent, name, 'mutation', true)!; createdJournals.add(ref); return ref;
+    },
+    appendJournal(ref, bytes) {
+      const value = journal(ref, true), count = [0]; assert.ok(bytes.length <= 65536, 'global_journal_record_bound');
+      assert.notEqual(seek(value.handle, 0, null, 2), 0, 'global_journal_seek_failed');
+      assert.notEqual(write(value.handle, bytes, bytes.length, count, null), 0, 'global_journal_write_failed');
+      assert.equal(Number(count[0]), bytes.length, 'global_journal_partial_write');
+    },
+    flushJournal(ref) { assert.notEqual(flush(journal(ref, true).handle), 0, 'global_journal_flush_failed'); },
+    readJournal(ref) {
+      const value = journal(ref), buffer = Buffer.alloc(65536), chunks: Buffer[] = []; let size = 0;
+      assert.notEqual(seek(value.handle, 0, null, 0), 0, 'global_journal_seek_failed');
+      for (;;) {
+        const count = [0]; assert.notEqual(read(value.handle, buffer, buffer.length, count, null), 0, 'global_journal_read_failed');
+        const n = Number(count[0]); assert.ok(n >= 0 && n <= buffer.length, 'global_journal_read_failed'); if (!n) break;
+        size += n; assert.ok(size <= 16 * 1024 * 1024, 'global_journal_total_bound'); chunks.push(Buffer.from(buffer.subarray(0, n)));
+      }
+      return Buffer.concat(chunks);
+    },
     rename(_from, _name, source, to, target) {
       const name = Buffer.from(target, 'utf16le'), buffer = Buffer.alloc(24 + name.length);
       buffer.writeBigUInt64LE(koffi.address((to as Ref).handle), 8); buffer.writeUInt32LE(name.length, 16); name.copy(buffer, 20);
@@ -137,6 +179,6 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       const status = Buffer.alloc(16), result = Number(rename((source as Ref).handle, status, buffer, buffer.length, 10));
       if (result !== 0) throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: result >>> 0 });
     },
-    close(value) { assert.notEqual(close((value as Ref).handle), 0, 'global_guard_handle_close_unconfirmed'); },
+    close(value) { createdJournals.delete(value); readOnlyJournals.delete(value); assert.notEqual(close((value as Ref).handle), 0, 'global_guard_handle_close_unconfirmed'); },
   };
 }
