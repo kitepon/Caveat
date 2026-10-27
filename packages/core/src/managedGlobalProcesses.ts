@@ -4,7 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
-export type GlobalProcessScope = { packageRoot: string; npmRoot: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
+export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
 type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'other-executable';
 export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string };
 const normalized = (value: string, fold: boolean) => {
@@ -15,7 +15,9 @@ const absolute = (value: string) => value.startsWith('/') || /^[a-z]:\//i.test(v
 function validateScope(scope: GlobalProcessScope) {
   assert.ok(!scope.protectedPaths || Array.isArray(scope.protectedPaths) && scope.protectedPaths.length <= 64, 'process_protected_scope_bound');
   assert.ok(!scope.runtimeExecutables || Array.isArray(scope.runtimeExecutables) && scope.runtimeExecutables.length <= 8, 'process_runtime_scope_bound');
-  const paths = [scope.packageRoot, scope.npmRoot, ...scope.binAliases, ...(scope.protectedPaths ?? []), ...(scope.runtimeExecutables ?? [])].map(value => normalized(value, false));
+  assert.ok(typeof scope.packageRoot === 'string' && typeof scope.npmRoot === 'string'
+    || scope.packageRoot === undefined && scope.npmRoot === undefined && scope.protectedPaths?.length, 'process_scope_required');
+  const paths = [...(scope.packageRoot === undefined ? [] : [scope.packageRoot, scope.npmRoot!]), ...scope.binAliases, ...(scope.protectedPaths ?? []), ...(scope.runtimeExecutables ?? [])].map(value => normalized(value, false));
   assert.ok(paths.every(value => absolute(value) && value.length > 1 && !/[\x00-\x1f]/.test(value) && !value.split('/').some(part => part === '.' || part === '..')), 'absolute_process_scope_required');
 }
 function nodeScript(argv: string[]) {
@@ -41,7 +43,7 @@ function hasLiteral(value: string, path: string) {
 export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeProcessTables) {
   validateScope(scope);
   const fold = tables.caseInsensitive, norm = (value: string) => normalized(value, fold);
-  const root = norm(scope.packageRoot), npm = norm(scope.npmRoot), aliases = scope.binAliases.map(norm);
+  const root = scope.packageRoot === undefined ? null : norm(scope.packageRoot), npm = scope.npmRoot === undefined ? null : norm(scope.npmRoot), aliases = scope.binAliases.map(norm);
   const within = (value: string, parent: string) => value === parent || value.startsWith(parent + '/');
   const records: GlobalProcessAssessment[] = [], errors = [...tables.errors];
   const before = new Map(tables.before.map(row => [row.pid, row])), after = new Map(tables.after.map(row => [row.pid, row]));
@@ -65,10 +67,10 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       || (scope.runtimeExecutables ?? []).some(path => norm(path) === image)
       || row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
     const script = isNode && row.argv ? nodeScript(args) : null;
-    if (within(image, npm) || script && within(script, npm)) {
+    if (npm && (within(image, npm) || script && within(script, npm))) {
       result.classification = 'writer'; result.reason = 'bound_npm_executable_or_script'; continue;
     }
-    if (within(image, root) || script && (within(script, root) || aliases.includes(script))) {
+    if (root && within(image, root) || script && (root && within(script, root) || aliases.includes(script))) {
       result.classification = 'consumer'; result.reason = 'bound_old_executable_or_node_script'; continue;
     }
     if (pid === tables.selfPid) {
@@ -77,7 +79,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       } else result.reason = 'current_process_binding_changed';
       continue;
     }
-    if (args.some(value => [root, npm, ...aliases, ...(scope.protectedPaths ?? []).map(norm)].some(path => hasLiteral(value, path)))) {
+    if (args.some(value => [...(root ? [root] : []), ...(npm ? [npm] : []), ...aliases, ...(scope.protectedPaths ?? []).map(norm)].some(path => hasLiteral(value, path)))) {
       result.reason = 'scope_literal_outside_bound_script'; continue;
     }
     // Unknown JS or inline code may import the old global after this observation.

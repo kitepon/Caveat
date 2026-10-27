@@ -21,7 +21,7 @@ function object(value: unknown): value is Record<string, unknown> {
 }
 
 /** TOML tables may have a null prototype. Preserve scalar types and date forms. */
-function sameTomlValue(left: unknown, right: unknown): boolean {
+export function sameTomlValue(left: unknown, right: unknown): boolean {
   if (left instanceof Date || right instanceof Date) {
     return left instanceof Date && right instanceof Date
       && isDeepStrictEqual(left, right) && left.toISOString() === right.toISOString();

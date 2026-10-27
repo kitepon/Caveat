@@ -18,6 +18,11 @@ function tables(...others: NativeProcessRecord[]): NativeProcessTables {
     selfExecutable: self.executable!, caseInsensitive: false };
 }
 describe('global process assessment', () => {
+  it('assesses a configuration-only scope without inventing a package root or excluding its own executable', () => {
+    const scope = { binAliases: [], protectedPaths: ['/profile/.claude.json'], runtimeExecutables: ['/runtime/node'] };
+    expect(assessGlobalProcesses(scope, tables(record(20)))).toMatchObject({ status: 'ready', consumers: 0 });
+    expect(assessGlobalProcesses(scope, tables(record(20, '/usr/bin/editor', ['editor', '/profile/.claude.json'])))).toMatchObject({ status: 'stopped', unknown: 1 });
+  });
   it('binds the current kernel executable and classifies stable outside-scope native processes', () => {
     const result = assessGlobalProcesses(scope, tables(record(20)));
     expect(result.status).toBe('ready');

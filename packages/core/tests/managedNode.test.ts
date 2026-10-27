@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { copyFileSync, chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync, renameSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { resolveManagedNode, resolveManagedNodeWithProbe, parseManagedNodeCapability, managedNodePaths } from '../src/managedNode.js';
 import { assessGlobalProcesses } from '../src/managedGlobalProcesses.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
@@ -23,6 +24,11 @@ describe('ordinary selected Node proof', () => {
     try {
       expect(node.proof.capability.fts5Trigram).toBe(true); expect(node.proof.executable.identity.contentSha256).toMatch(/^[a-f0-9]{64}$/);
       expect(node.proof.terminal).toEqual({ spawned: true, exitObserved: true, closeObserved: true, exitCode: 0 });
+      const shared = process.config.variables.node_shared === true || process.config.variables.node_shared === 'true';
+      expect(node.proof.capability.shared).toBe(shared); expect(node.proof.libraries.length > 0).toBe(shared);
+      process.stdout.write('[caveat.managed_node_fixture] ' + JSON.stringify({ node: node.proof.capability.version, shared,
+        libraryCount: node.proof.libraries.length, sqlite: node.proof.capability.sqlite, terminal: node.proof.terminal,
+        proofSha256: createHash('sha256').update(JSON.stringify(node.proof)).digest('hex') }) + '\n');
       expect(events).toEqual(['issued', 'started', 'completed', 'issued', 'started', 'completed']); node.verify();
     } finally { node.close(); }
   });

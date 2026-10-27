@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.8候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.9候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 
 managed導入のAI案内は、PATHのcommandではなく登録済みの `caveat_get`・`caveat_update`・`caveat_record`・`caveat_sync` を使います。`caveat_sync` は既定remoteへ私有知識をpushし、clientの確認方針を維持します。client timeoutでも進行中のsyncは中断せず、遅れて完了した結果は deployment status の ownSync に残します。runningは成功ではありません。MCP toolが無い場合はglobal CLIや別contextへ戻さず停止します。
 
@@ -371,3 +371,8 @@ Factory private evidence v1は既定OFFの隔離契約候補。このbuildは対
 `caveat deployment stage --json`で検証済みnpm packageを本人専用領域へ並べ、`caveat deployment activate <release-id> --json`で選択します。返された固定launcherを既存Nodeから実行して`init`してください。その後の更新・戻しも同じ入口で版を選ぶため、MCP/hookの登録文字列は変わりません。`caveat deployment status --json`で選択中の内容を検証できます。初回移行ではCodexの正規の定義確認が一度必要です。installerは信用を付与せず、Node/PATHも変えません。詳細は[製品契約](docs/01_plan.md#managed-deployment-and-stable-hook-identity)を参照してください。
 
 private GitHub同期は `~/.caveatrc.json` の任意・非secret設定 `"githubUser": "your-account"` で既認証accountを名指しできる。Git/診断の子processだけへhelperを渡し、`gh auth token --user ... --no-refresh` を使う。共有active切替・資格のrefreshは行わない。user不在・非対応gh・期限切れは型付きで止まり、再認証はOwnerが行う。未設定なら従来挙動を保つ。設定済みで新しい同期repoを初期化する場合はprivate HTTPS GitHub URLを明示する。 名指ししたGit instanceだけで、継承したGit config/protocolの上書きとtraceを除き、既存helper・認証headerを無効にする。利用者のGit設定へは書き込まない。gh入口はLinux `/usr/bin/gh`、Mac `/opt/homebrew/bin/gh`、Windows `C:\Program Files\GitHub CLI\gh.exe` に固定し、PATHへfallbackしない。
+
+未公開の `deployment registration-plan` / `registration-migrate` は、保存済み7 fileの
+15個のNode tokenだけを照合・移行します。元objectは保全し、既知部分の復帰は別journalへ記録します。
+計画やjournal閲覧は実行許可を与えません。詳細は
+[保存登録の契約](docs/01_plan.md#saved-seven-file-registration-node-migration-unreleased-source)を参照してください。

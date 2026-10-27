@@ -437,4 +437,17 @@ bytes or repairing shared runtime permissions. Status alone does not assess
 process/writer absence. These proofs,
 registration-token migration/readback/known rollback,
 versioning and final review remain required before the completed candidate.
+For the saved Main scope, retain exact seven-file/fifteen-pointer fixtures with
+repeated equal command values, strict JSON/TOML semantic equality and token-only
+byte edits; preserve the original native inode/content/security through new private
+files and journals. Exercise confirmed partial migration and recovery chains,
+pending/torn/unknown refusal, forged paths/roles/original seeds, stale digests,
+cyclic or reused journal identities and foreign objects at vacated names.
+Post-close readback must independently reopen every source/new directory and all
+current/protected objects. The saved projection contains no full original config
+bytes and does not establish current Node acceptance or grant live-write approval.
+Bind the exact version/source/tree and immutable fixed entry/runtime hashes in the
+review packet. A local review tarball is not the main-only release acceptance
+artifact; generate and accept the latter through the existing workflow after
+normal source review and landing, before any separately authorized publication.
 Release or machine-operation approval is separate from these source fixtures.

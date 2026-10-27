@@ -123,6 +123,13 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       size: String(stat.size), links: String(stat.nlink), mtime: String(stat.mtimeNs), ctime: String(stat.ctimeNs),
       owner: String(stat.uid), group: String(stat.gid), mode: Number(stat.mode), securitySha256, ...(contentSha256 ? { contentSha256 } : {}), ...(linkTarget !== undefined ? { linkTarget } : {}) };
   };
+  const readFile = (ref: object, limit: number) => {
+    const value = ref as Ref, size = fstatSync(value.fd).size;
+    assert.ok(size <= limit, 'global_journal_total_bound');
+    const bytes = Buffer.alloc(size); let offset = 0;
+    while (offset < size) { const n = readSync(value.fd, bytes, offset, size - offset, offset); assert.ok(n > 0, 'global_journal_readback_truncated'); offset += n; }
+    return bytes;
+  };
   return {
     openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd, parentOnly: true }; },
     openChild(parent, name, purpose) {
@@ -210,13 +217,8 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       assert.equal(writeSync(value.fd, bytes), bytes.length, 'global_journal_partial_write');
     },
     flushJournal(ref) { const value = journal(ref, true); fsyncSync(value.fd); fsyncSync(value.parent!.fd); },
-    readJournal(ref) {
-      const value = journal(ref), size = fstatSync(value.fd).size;
-      assert.ok(size <= 16 * 1024 * 1024, 'global_journal_total_bound');
-      const bytes = Buffer.alloc(size); let offset = 0;
-      while (offset < size) { const n = readSync(value.fd, bytes, offset, size - offset, offset); assert.ok(n > 0, 'global_journal_readback_truncated'); offset += n; }
-      return bytes;
-    },
+    readJournal(ref) { return readFile(journal(ref), 16 * 1024 * 1024); },
+    readFile,
     rename(from, name, source, to, target) {
       if (rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace) !== 0)
         throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: koffi.errno() });

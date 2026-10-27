@@ -522,9 +522,10 @@ are part of preflight.
 The package contains Koffi 3.3.4 and native binaries for Linux, macOS and Windows
 on x64/arm64. The packaged loader uses adjacent binaries only; it never searches
 external node_modules. Loading is lazy and ordinary hooks do not inspect processes
-or load the native bridge. Full preservation, guarded uninstall/recovery, wrapper
-replacement and registration/Node migration remain separate unfinished source
-work. The preflight API does not authorize or perform those mutations.
+or load the native bridge. Full preservation, guarded uninstall/recovery, wrapper replacement and the
+seven-file registration migration are implemented by the separate unreleased
+transaction callers described below. The preflight API does not authorize or
+perform those mutations.
 
 The unreleased path guard retains directory and leaf handles. POSIX uses
 directory-relative exclusive rename; Windows opens children relative to retained
@@ -723,9 +724,9 @@ as unknown rather than silently repaired.
 its bounded journal/result evidence: `currentObjects: not-assessed` and
 `executionPermission: false` are explicit even for a complete journal. Resuming
 from a known partial recovery-attempt requires the separately reviewed fresh
-binding described below; journal inspection does not supply it. Registration migration, versioning and the final
-candidate remain incomplete. These source commands do not grant approval for
-distribution or machine changes.
+binding described below; journal inspection does not supply it. The final
+candidate requires validation of the exact versioned source and packaged artifact.
+These source commands do not grant approval for distribution or machine changes.
 
 Ordinary Node selection uses an explicit absolute executable path, independently
 of the interpreter running Caveat. A bounded owned child uses a restricted
@@ -766,6 +767,60 @@ Old evidence stays read-only, and independent post-close readback covers every
 source directory as well as the new attempt and restored/quarantined objects.
 Journal-only inspection of a recovery run remains `currentObjects: not-assessed`
 and `executionPermission: false`, including completed journals.
+
+### Saved seven-file registration Node migration (unreleased source)
+
+`deployment registration-plan --observation <saved-json> --proposal <saved-json>
+--node-version <exact-version> --json` admits the saved Main projection schemas
+`caveat.main15_readonly_confirmation.v1` and
+`caveat.main15_node_migration_proposal.v1`. Saved paths are assertions against
+seven normal configuration paths derived from the current home, never authority
+for arbitrary files. The plan requires exactly four MCP definitions and eleven
+Claude/Codex/Cursor hook roles. All fifteen exact pointers, original metadata and
+command/argument hashes must agree. The saved Node candidate is independently
+resolved and proven with the ordinary Node/libnode capability described above;
+neither its saved name nor an earlier observation establishes current acceptance.
+The selected binary and its loaded libnode dependencies must also be outside the
+recorded retired dedicated Node root.
+
+`deployment registration-migrate` takes the same inputs plus
+`--expected-plan-sha256 <reviewed-digest>`. Planning creates no run or installer
+lock and returns no execution permission. Execution repeats fresh process/writer,
+native object, parent, alias, protected A pointer/entry/payload and runtime proof
+checks before and after every move. It never reads the retired Node executable,
+changes its permissions, modifies hook trust or changes any existing process.
+The new configuration files are private; each complete original object, including
+its native identity, contents and security, is moved without replacement to the
+new private run before its new file is installed. Unknown names are retained and
+stop the operation. No whole-document serialization or in-place overwrite occurs.
+
+The codec uses strict JSON with duplicate-key rejection and the existing TOML
+parser. JSON AST locations select exact pointer targets, including distinct hooks
+with identical command values; only the encoded leading Node token is replaced.
+TOML accepts a uniquely located single-line command string and refuses ambiguous
+or multiline command targets. Both formats are parsed again and compared against
+the complete expected semantic value. All other source bytes, MCP arguments,
+hook suffixes, entry paths and unrelated values remain unchanged. The saved MCP
+argument hash uses the original comma-space JSON array encoding, not a compact
+reserialization. Missing full original configuration bytes are not reconstructed
+from the saved projection; execution must bind the exact original files.
+
+`deployment registration-recovery-plan <run-id> --plan-sha256 <original-digest>
+--json` derives current placements only from that approved plan, its native seed
+and a finite chain of confirmed moves. It verifies every source privately and
+read-only, current originals/replacements, missing target names, all parents,
+protected state and fresh runtime/process proof. Its full evidence digest binds
+all source references, derived state and current directory bindings.
+`registration-recover` requires that digest through `--evidence-sha256`; each
+attempt creates a separate private journal, quarantines only known installed
+replacements and restores only the held original objects. It never replays a
+saved intent or modifies an ancestor journal. Chains stop at eight runs, 256
+references and 64 MiB; cycles, reused journal identities, redirected directories,
+pending/torn/unknown ancestors and reuse of an existing attempt are refused.
+Independent post-close readback covers every source/new directory, journal,
+protected object and current original/replacement before completion is reported.
+`registration-inspect` reads only bounded saved plan/journal evidence and always
+returns `currentObjects: not-assessed` and `executionPermission: false`.
 
 ### Windows hookの保護保存transport（未公開source）
 

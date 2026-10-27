@@ -26,6 +26,21 @@ function moved(result: ReturnType<Awaited<ReturnType<typeof openGlobalPathGuard>
   expect(result.status, result.status === 'unknown' ? `${result.phase}:${result.nativeCode}` : undefined).toBe('moved');
 }
 describe('retained global filesystem guard', () => {
+  it('reads bounded original bytes through the retained native file before and after an original move', async () => {
+    const { source, backup } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const token = guard.retainTree(source, 'leaf');
+      expect(guard.readRetainedFile(token)).toEqual(Buffer.from('original bytes'));
+      expect(guard.moveTreeNoReplace(token, backup, 'original').status).toBe('moved');
+      expect(guard.readRetainedFile(token)).toEqual(Buffer.from('original bytes'));
+    } finally { guard.close(); }
+  });
+  it('rejects altered native read bytes instead of treating them as the retained configuration', async () => {
+    const { source, backup } = fixture(), driver = await nativeDriver();
+    const guard = bindGlobalPathGuard([source, backup], { ...driver, readFile() { return Buffer.from('foreign bytes'); } });
+    try { expect(() => guard.readRetainedFile(guard.retainTree(source, 'leaf'))).toThrow('retained_file_changed'); }
+    finally { guard.close(); }
+  });
   it('rejects a different native name identity even when its runtime bytes match the held file', async () => {
     const { source, backup } = fixture(); writeFileSync(join(source, 'other'), 'original bytes', { mode: 0o600 });
     if (isWindows()) runWindowsAclPrivateTree(source);

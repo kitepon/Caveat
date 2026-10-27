@@ -69,4 +69,6 @@ export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlob
 export { executeGlobalRecovery, inspectGlobalRecoveryAttempt, type GlobalRecoveryEvent } from './managedGlobalRecoveryExecution.js';
 
 export { planGlobalRecovery } from './managedGlobalRecoveryChain.js';
-export { resolveManagedNode, type ManagedNodeProof } from './managedNode.js';
+export { resolveManagedNode, bindManagedNodeProof, managedNodeDirectories, managedNodePaths, type ManagedNodeProof } from './managedNode.js';
+export { writeGlobalPrivateEvidence } from './managedGlobalPreservation.js';
+export type { NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';

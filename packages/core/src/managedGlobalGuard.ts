@@ -24,6 +24,7 @@ export type NativeGuardDriver = {
   appendJournal(ref: object, bytes: Buffer): void;
   flushJournal(ref: object): void;
   readJournal(ref: object): Buffer;
+  readFile(ref: object, limit: number): Buffer;
   rename(sourceParent: object, sourceName: string, source: object, targetParent: object, targetName: string): void;
   close(ref: object): void;
 };
@@ -263,6 +264,13 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.deepEqual(inspect(entry.directory.ref, entry.name), entry.expected, 'global_guard_tree_root_name_changed');
       const rows = treeInventory(entry.ref, entry.expected.dev);
       assert.deepEqual(rows, tree.rows, 'global_guard_tree_changed'); checkDirectories(); return structuredClone(rows);
+    },
+    readRetainedFile(token: GlobalGuardTree) {
+      const rows = guard.readTree(token);
+      assert.ok(rows.length === 1 && rows[0]!.identity.kind === 'file' && Number(rows[0]!.identity.size) <= 2 * 1024 * 1024, 'global_guard_retained_file_bound');
+      const tree = trees.get(token)!, entry = entries.get(tree.entry)!, bytes = driver.readFile(entry.ref, 2 * 1024 * 1024);
+      assert.equal(createHash('sha256').update(bytes).digest('hex'), rows[0]!.identity.contentSha256, 'global_guard_retained_file_changed');
+      assert.deepEqual(guard.readTree(token), rows, 'global_guard_retained_file_changed'); return bytes;
     },
     copyTreeNoReplace(token: GlobalGuardTree, path: string, name: string, stagingPath: string, stagingName: string) {
       leaf(name); leaf(stagingName); guard.readTree(token);

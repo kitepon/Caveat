@@ -34,6 +34,7 @@ import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDia
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
 import { runGlobalMigrationCommand, runGlobalRecoveryInspection, runGlobalRecoveryPlan, runGlobalRecovery, type GlobalMigrationOptions } from './commands/globalMigration.js';
+import { runRegistrationMigration, runRegistrationRecovery, type RegistrationOptions } from './commands/registrationMigration.js';
 import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock, deploymentShellPlan, deploymentShellManifest } from './commands/deployment.js';
 
 const program = new Command();
@@ -82,6 +83,22 @@ for (const [name, handler] of [['shell-plan', deploymentShellPlan], ['shell-mani
     .requiredOption('--bin-dir <absolute-path>', 'verified bin directory')
     .requiredOption('--json', 'emit JSON without writing any installation')
     .action((opts: { node: string; binDir: string }) => { process.stdout.write(JSON.stringify(handler(opts.node, opts.binDir)) + '\n'); });
+}
+for (const [name, mode] of [['registration-plan', 'plan'], ['registration-migrate', 'execute']] as const) {
+  const command = deployment.command(name).description(mode === 'plan' ? 'Read-only plan for the saved seven-file fifteen-token Node migration' : 'Apply the exact reviewed registration Node plan')
+    .requiredOption('--observation <path>', 'saved seven-file fifteen-definition observation JSON')
+    .requiredOption('--proposal <path>', 'matching saved Node-token proposal JSON')
+    .requiredOption('--node-version <version>', 'expected version of the explicitly selected ordinary Node')
+    .requiredOption('--json', 'emit bounded JSON receipts');
+  if (mode === 'execute') command.requiredOption('--expected-plan-sha256 <digest>', 'exact reviewed registration plan digest');
+  command.action(async (options: RegistrationOptions) => { await runRegistrationMigration(mode, options); });
+}
+for (const [name, mode] of [['registration-recovery-plan', 'plan'], ['registration-recover', 'execute'], ['registration-inspect', 'inspect']] as const) {
+  const command = deployment.command(name + ' <run-id>').description(mode === 'inspect' ? 'Inspect journal only; current objects are not assessed' : 'Fresh known-only registration recovery')
+    .requiredOption('--plan-sha256 <digest>', 'expected original registration plan digest')
+    .requiredOption('--json', 'emit bounded JSON receipts');
+  if (mode === 'execute') command.requiredOption('--evidence-sha256 <digest>', 'exact fresh recovery evidence digest');
+  command.action(async (runId: string, options: { planSha256: string; evidenceSha256?: string }) => { await runRegistrationRecovery(mode, runId, options.planSha256, options.evidenceSha256); });
 }
 for (const [name, mode] of [['global-plan', 'plan'], ['global-migrate', 'execute']] as const) {
   const command = deployment.command(name).description(mode === 'plan' ? 'Read-only global-to-managed migration plan' : 'Execute the exact reviewed global migration plan')

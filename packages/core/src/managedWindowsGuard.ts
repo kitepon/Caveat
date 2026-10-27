@@ -152,6 +152,16 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     }
     const ref = { handle: handle[0], mutation, runtime: purpose === 'runtime' }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
   };
+  const readFile = (ref: object, limit: number) => {
+    const value = ref as Ref, buffer = Buffer.alloc(65536), chunks: Buffer[] = []; let size = 0;
+    assert.notEqual(seek(value.handle, 0, null, 0), 0, 'global_journal_seek_failed');
+    for (;;) {
+      const count = [0]; assert.notEqual(read(value.handle, buffer, buffer.length, count, null), 0, 'global_journal_read_failed');
+      const n = Number(count[0]); assert.ok(n >= 0 && n <= buffer.length, 'global_journal_read_failed'); if (!n) break;
+      size += n; assert.ok(size <= limit, 'global_journal_total_bound'); chunks.push(Buffer.from(buffer.subarray(0, n)));
+    }
+    return Buffer.concat(chunks);
+  };
   return {
     openRoot(path) {
       assert.match(path, /^[a-z]:[\\/]$/i, 'global_guard_local_volume_required');
@@ -220,16 +230,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       assert.equal(Number(count[0]), bytes.length, 'global_journal_partial_write');
     },
     flushJournal(ref) { assert.notEqual(flush(journal(ref, true).handle), 0, 'global_journal_flush_failed'); },
-    readJournal(ref) {
-      const value = journal(ref), buffer = Buffer.alloc(65536), chunks: Buffer[] = []; let size = 0;
-      assert.notEqual(seek(value.handle, 0, null, 0), 0, 'global_journal_seek_failed');
-      for (;;) {
-        const count = [0]; assert.notEqual(read(value.handle, buffer, buffer.length, count, null), 0, 'global_journal_read_failed');
-        const n = Number(count[0]); assert.ok(n >= 0 && n <= buffer.length, 'global_journal_read_failed'); if (!n) break;
-        size += n; assert.ok(size <= 16 * 1024 * 1024, 'global_journal_total_bound'); chunks.push(Buffer.from(buffer.subarray(0, n)));
-      }
-      return Buffer.concat(chunks);
-    },
+    readJournal(ref) { return readFile(journal(ref), 16 * 1024 * 1024); },
+    readFile,
     rename(_from, _name, source, to, target) {
       const name = Buffer.from(target, 'utf16le'), buffer = Buffer.alloc(24 + name.length);
       buffer.writeBigUInt64LE(koffi.address((to as Ref).handle), 8); buffer.writeUInt32LE(name.length, 16); name.copy(buffer, 20);
