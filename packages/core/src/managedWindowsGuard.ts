@@ -139,8 +139,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
     if (sd) attributes.writeBigUInt64LE(koffi.address(sd), 32);
     // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
-    const share = mutation ? 1 : purpose === 'parent' ? 3 : 7;
-    const access = 0x00120081 | (mutation ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
+    const share = creating === 'directory' ? 3 : mutation ? 1 : purpose === 'parent' ? 3 : 7;
+    const access = 0x00120081 | (mutation && creating !== 'directory' ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
     const result = Number(openRelative(handle, access, attributes, status, null, creating === 'directory' ? 0x10 : creating ? 0x80 : 0, share, creating ? 2 : 1, creating === 'directory' ? 0x23 : 0x00200020 | (creating ? 0x42 : 0), null, 0));
     // Keep nested buffers alive across the native call; raw addresses do not root them for GC.
     assert.equal(unicode.readUInt16LE(0), nameBuffer.length - 2); assert.equal(nameBuffer.readUInt16LE(nameBuffer.length - 2), 0);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -79,8 +79,14 @@ describe('product global migration caller', () => {
     finally { session.close(); }
   });
   it('keeps actual npm global uninstall within an isolated prefix and preserves the original and managed deployment', { timeout: 120000 }, async () => {
-    const f = fixture(), npm = isWindows() ? join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js') : join(dirname(dirname(process.execPath)), 'lib/node_modules/npm/bin/npm-cli.js');
-    expect(existsSync(npm), 'the integration fixture requires the Node distribution npm').toBe(true);
+    const f = fixture();
+    const bundled = isWindows() ? join(dirname(process.execPath), 'node_modules/npm/bin/npm-cli.js') : join(dirname(dirname(process.execPath)), 'lib/node_modules/npm/bin/npm-cli.js');
+    let npm = bundled;
+    if (!existsSync(npm)) {
+      const installed = (process.env.PATH ?? '').split(delimiter).map(directory => join(directory, 'npm')).filter(file => existsSync(file)).map(file => realpathSync(file));
+      npm = installed.find(file => basename(file) === 'npm-cli.js') ?? bundled;
+    }
+    expect(existsSync(npm), 'the integration fixture requires the installed npm CLI').toBe(true);
     const control = join(f.root, 'npm-control'); mkdirSync(control, { mode: 0o700 });
     const userConfig = join(control, 'user.npmrc'), globalConfig = join(control, 'global.npmrc'); writeFileSync(userConfig, '\n', { mode: 0o600 }); writeFileSync(globalConfig, '\n', { mode: 0o600 });
     const packageSource = join(f.root, 'legacy-source'); mkdirSync(join(packageSource, 'dist'), { recursive: true, mode: 0o700 });
