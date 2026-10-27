@@ -98,7 +98,8 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     },
     snapshot,
     rename(from, name, source, to, target) {
-      assert.equal(rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace), 0, 'global_guard_native_rename_failed');
+      if (rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace) !== 0)
+        throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: koffi.errno() });
       Object.assign(source, { parent: to, name: target });
     },
     close(ref) { closeSync((ref as Ref).fd); },

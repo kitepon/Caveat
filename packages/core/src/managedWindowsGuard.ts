@@ -38,9 +38,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const kernel = koffi.load('kernel32.dll'), native = koffi.load('ntdll.dll'), security = koffi.load('advapi32.dll');
   const create = kernel.func('void * __stdcall CreateFileW(str16 path, uint32_t access, uint32_t share, void *security, uint32_t disposition, uint32_t flags, void *templateFile)');
   const close = kernel.func('int __stdcall CloseHandle(void *handle)');
-  const lastError = kernel.func('uint32_t __stdcall GetLastError()');
   const info = kernel.func('int __stdcall GetFileInformationByHandleEx(void *handle, int kind, _Out_ void *buffer, uint32_t size)');
-  const rename = kernel.func('int __stdcall SetFileInformationByHandle(void *handle, int kind, const void *buffer, uint32_t size)');
+  const rename = native.func('int32_t __stdcall NtSetInformationFile(void *handle, _Out_ void *status, const void *buffer, uint32_t size, int kind)');
   const seek = kernel.func('int __stdcall SetFilePointerEx(void *handle, int64_t position, void *result, uint32_t method)');
   const read = kernel.func('int __stdcall ReadFile(void *handle, _Out_ void *buffer, uint32_t size, _Out_ uint32_t *count, void *overlapped)');
   const openRelative = native.func('int32_t __stdcall NtCreateFile(_Out_ void **handle, uint32_t access, const void *attributes, _Out_ void *status, const void *allocation, uint32_t fileAttributes, uint32_t share, uint32_t disposition, uint32_t options, const void *ea, uint32_t eaLength)');
@@ -135,7 +134,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       const name = Buffer.from(target, 'utf16le'), buffer = Buffer.alloc(24 + name.length);
       buffer.writeBigUInt64LE(koffi.address((to as Ref).handle), 8); buffer.writeUInt32LE(name.length, 16); name.copy(buffer, 20);
       // ReplaceIfExists remains FALSE. Source and target parent are retained handles.
-      if (!rename((source as Ref).handle, 3, buffer, buffer.length)) throw Error('global_guard_native_rename_failed_' + lastError());
+      const status = Buffer.alloc(16), result = Number(rename((source as Ref).handle, status, buffer, buffer.length, 10));
+      if (result !== 0) throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: result >>> 0 });
     },
     close(value) { assert.notEqual(close((value as Ref).handle), 0, 'global_guard_handle_close_unconfirmed'); },
   };

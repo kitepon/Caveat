@@ -105,13 +105,17 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.deepEqual(inspect(entry.directory.ref, entry.name), entry.expected, 'global_guard_leaf_name_changed');
       assert.equal(inspect(target.ref, name), null, 'global_guard_destination_exists');
       const before = structuredClone(entry.expected);
-      let issued = false;
+      let issued = false, phase = 'native-rename';
       try {
         issued = true; driver.rename(entry.directory.ref, entry.name, entry.ref, target.ref, name);
+        phase = 'held-readback';
         const after = driver.snapshot(entry.ref);
         assert.deepEqual(renamedBinding(after), renamedBinding(before), 'global_guard_renamed_object_changed');
+        phase = 'destination-readback';
         assert.deepEqual(inspect(target.ref, name), after, 'global_guard_destination_unbound');
+        phase = 'source-readback';
         assert.equal(inspect(entry.directory.ref, entry.name), null, 'global_guard_source_reappeared');
+        phase = 'parent-readback';
         checkDirectories();
         entry.directory = target; entry.name = name; entry.expected = after;
         return { status: 'moved' as const, renameIssued: true as const, before, after, automaticRecovery: false as const };
@@ -121,7 +125,9 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
           try { const value = read(); return value ? { state: 'present' as const, identity: value } : { state: 'absent' as const }; }
           catch { return { state: 'unknown' as const }; }
         };
-        return { status: 'unknown' as const, renameIssued: issued, before,
+        const nativeCode = error instanceof Error ? (error as Error & { nativeCode?: number }).nativeCode : undefined;
+        return { status: 'unknown' as const, renameIssued: issued, before, phase,
+          nativeCode: Number.isSafeInteger(nativeCode) && nativeCode! >= 0 && nativeCode! <= 0xffffffff ? nativeCode! : null,
           observations: { held: observe(() => driver.snapshot(entry.ref)), source: observe(() => inspect(entry.directory.ref, entry.name)), destination: observe(() => inspect(target.ref, name)) },
           reason: 'global_guard_move_unconfirmed',
           errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };

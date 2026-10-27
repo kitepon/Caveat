@@ -22,17 +22,20 @@ function fixture() {
 async function nativeDriver(): Promise<NativeGuardDriver> {
   const spec = globalFilesystemNativeSpec(); return spec.windows ? createWindowsGlobalGuard() : createPosixGlobalGuard(spec);
 }
+function moved(result: ReturnType<Awaited<ReturnType<typeof openGlobalPathGuard>>['moveNoReplace']>) {
+  expect(result.status, result.status === 'unknown' ? `${result.phase}:${result.nativeCode}` : undefined).toBe('moved');
+}
 describe('retained global filesystem guard', () => {
   it('moves and restores the original object without replacing inode, bytes or mode', async () => {
     const { source, backup } = fixture(), original = statSync(join(source, 'leaf'), { bigint: true });
     const guard = await openGlobalPathGuard([source, backup]);
     try {
       const entry = guard.retain(source, 'leaf');
-      expect(guard.moveNoReplace(entry, backup, 'retained').status).toBe('moved');
+      moved(guard.moveNoReplace(entry, backup, 'retained'));
       expect(existsSync(join(source, 'leaf'))).toBe(false);
       expect(readFileSync(join(backup, 'retained'), 'utf8')).toBe('original bytes');
       expect(statSync(join(backup, 'retained'), { bigint: true }).ino).toBe(original.ino);
-      expect(guard.moveNoReplace(entry, source, 'leaf').status).toBe('moved');
+      moved(guard.moveNoReplace(entry, source, 'leaf'));
       expect(statSync(join(source, 'leaf')).mode).toBe(Number(original.mode));
     } finally { guard.close(); }
   });
@@ -119,7 +122,7 @@ describe('retained global filesystem guard', () => {
     const { root, source, backup } = fixture(), guard = await openGlobalPathGuard([source, backup]);
     try {
       const entry = guard.retain(source, 'leaf'); mkdirSync(join(root, 'unrelated'), { mode: 0o700 });
-      expect(guard.moveNoReplace(entry, backup, 'retained').status).toBe('moved');
+      moved(guard.moveNoReplace(entry, backup, 'retained'));
     } finally { guard.close(); }
   });
   it('still refuses child-count changes inside the directory being retained as the mutation leaf', async () => {
@@ -137,7 +140,7 @@ describe('retained global filesystem guard', () => {
     const guard = await openGlobalPathGuard([source, backup]);
     try {
       const entry = guard.retain(source, 'link'); expect(entry.identity.kind).toBe('link');
-      expect(guard.moveNoReplace(entry, backup, 'link').status).toBe('moved');
+      moved(guard.moveNoReplace(entry, backup, 'link'));
       expect(readFileSync(join(root, 'outside'), 'utf8')).toBe('untouched');
     } finally { guard.close(); }
   });
@@ -159,7 +162,7 @@ describe('retained global filesystem guard', () => {
     const guard = await openGlobalPathGuard([source, backup]);
     try {
       const entry = guard.retain(source, 'leaf'), result = guard.moveNoReplace(entry, backup, 'retained');
-      expect(result.status).toBe('moved'); expect(JSON.stringify(result)).not.toContain('private-xattr-value');
+      moved(result); expect(JSON.stringify(result)).not.toContain('private-xattr-value');
       if (result.status === 'moved') expect(result.after.securitySha256).toBe(result.before.securitySha256);
       const changed = openSync(join(backup, 'retained'), 'r+');
       try { expect(set(changed, 'user.caveat.guard', Buffer.from('changed'), 7, ...tail)).toBe(0); } finally { closeSync(changed); }
@@ -170,7 +173,7 @@ describe('retained global filesystem guard', () => {
     const { source, backup } = fixture(); writeFileSync(join(source, 'leaf') + ':caveat-guard', 'alternate bytes');
     const guard = await openGlobalPathGuard([source, backup]);
     try {
-      const result = guard.moveNoReplace(guard.retain(source, 'leaf'), backup, 'retained'); expect(result.status).toBe('moved');
+      const result = guard.moveNoReplace(guard.retain(source, 'leaf'), backup, 'retained'); moved(result);
       expect(readFileSync(join(backup, 'retained') + ':caveat-guard', 'utf8')).toBe('alternate bytes');
       if (result.status === 'moved') expect(result.after.securitySha256).toBe(result.before.securitySha256);
     } finally { guard.close(); }
