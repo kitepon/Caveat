@@ -91,7 +91,7 @@ export function managedShellPlan(registrationNode: string, binDir: string, optio
   return { schema, registrationNode, launcher: active.launcher, entrySha256: sha(entry.bytes), runtimeSha256: sha(runtime.bytes), binDir, windows,
     files: renderManagedShellWrappers(registrationNode, active.launcher, windows).map(file => ({ ...file, path: join(binDir, file.name) })) };
 }
-/** Read back already-installed leaves; caller records this in the protected root after host acceptance. */
+/** Read back already-installed leaves; caller records this in the protected root after product-owned acceptance. */
 export function captureManagedShellManifest(plan: ManagedShellPlan): ManagedShellManifest {
   const windows = isWindows();
   if (plan.schema !== schema || plan.windows !== windows) fail('invalid_plan');

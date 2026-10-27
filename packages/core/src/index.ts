@@ -59,3 +59,5 @@ export { prepareGlobalMigration, type GlobalMigrationInput } from './managedGlob
 
 export { usesManagedGuidance } from './managedGuidance.js';
 export { readMcpSyncState, writeMcpSyncState, type McpSyncState } from './mcpSyncState.js';
+
+export { inspectGlobalMigrationRecovery } from './managedGlobalRecovery.js';

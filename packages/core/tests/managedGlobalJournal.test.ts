@@ -157,3 +157,39 @@ describe('journal trust boundary', () => {
     catch (error) { expect(String(error)).not.toContain('private-secret'); expect(String(error)).toContain('json_invalid'); }
   });
 });
+
+
+describe('new private files sealed for publication', () => {
+  it('seals only owned journals, forbids further writes, and publishes an executable file and complete manifest directory', async () => {
+    const { root, dir } = fixture(), guard = await openGlobalPathGuard([root, dir]);
+    try {
+      const original = guard.retain(dir, 'original');
+      expect(() => guard.sealJournalFile(original as never, true)).toThrow('unknown_or_failed_token');
+      const journal = guard.createJournal(dir, 'new-wrapper', Buffer.from('#!/bin/sh\nexit 0\n'));
+      const sealed = guard.sealJournalFile(journal, true); expect(sealed.status, JSON.stringify({ phase: sealed.phase, errorSha256: sealed.errorSha256 })).toBe('sealed');
+      expect(() => guard.appendJournal(journal, Buffer.from('bad'))).toThrow('unknown_or_failed_token');
+      expect(guard.moveTreeNoReplace(sealed.tree!, root, 'wrapper').status).toBe('moved');
+      expect(readFileSync(join(root, 'wrapper'), 'utf8')).toBe('#!/bin/sh\nexit 0\n');
+      if (!isWindows()) expect(statSync(join(root, 'wrapper')).mode & 0o777).toBe(0o700);
+      const staged = guard.createPrivateDirectory(dir, 'new-shell');
+      const file = guard.sealJournalFile(guard.createJournal(staged, 'manifest.json', Buffer.from('{}\n')), false);
+      expect(file.status).toBe('sealed'); guard.releaseWorkingTree(file.tree!);
+      const directory = guard.sealPrivateDirectory(staged); expect(directory.status, JSON.stringify({ phase: directory.phase, errorSha256: directory.errorSha256 })).toBe('sealed');
+      expect(guard.moveTreeNoReplace(directory.tree!, root, 'shell').status).toBe('moved');
+      expect(readFileSync(join(root, 'shell/manifest.json'), 'utf8')).toBe('{}\n');
+      expect(() => guard.sealPrivateDirectory(dir)).toThrow('new_directory_required');
+      expect(readFileSync(join(dir, 'original'), 'utf8')).toBe('protected bytes');
+    } finally { guard.close(); }
+  });
+  it('retains a new file and reports unknown if closing its write handle is unconfirmed', async () => {
+    const { dir } = fixture(), native = await driver(); let fail = false, target: object;
+    const guard = bindGlobalPathGuard([dir], { ...native, createJournal(...args) { target = native.createJournal(...args); return target; },
+      close(ref) { native.close(ref); if (fail && ref === target) { fail = false; throw Error('close unconfirmed'); } } });
+    try {
+      const token = guard.createJournal(dir, 'new-wrapper', Buffer.from('new bytes')); fail = true;
+      expect(guard.sealJournalFile(token, true).status).toBe('unknown');
+      expect(() => guard.readJournal(token)).toThrow('unknown_or_failed_token');
+      expect(readFileSync(join(dir, 'new-wrapper'), 'utf8')).toBe('new bytes');
+    } finally { guard.close(); }
+  });
+});

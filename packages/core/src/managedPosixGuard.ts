@@ -198,7 +198,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       // Darwin ARM64 passes variadic arguments differently from fixed arguments.
       const fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 'int', 0o600));
       assert.ok(fd >= 0, 'global_journal_exclusive_create_failed');
-      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdJournals.add(ref); return ref;
+      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdJournals.add(ref); createdWorking.add(ref); return ref;
     },
     appendJournal(ref, bytes) {
       const value = journal(ref, true); assert.ok(bytes.length <= 65536, 'global_journal_record_bound');

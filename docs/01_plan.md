@@ -632,8 +632,32 @@ a deletion-only subset with the same known file identities/bytes/security can be
 accepted for recovery. New or changed objects remain unknown and untouched, with
 the observed after-tree preserved. A known partial tree may be quarantined before
 original restoration; interrupted or unknown journals are never replayed.
-Wrapper/CLI wiring, persisted recovery reopening, registration migration,
-versioning and the final candidate are still incomplete.
+Generated wrappers now publish exclusively from owned private files. Only a file
+born as this guard's journal may be sealed executable; sealing invalidates its
+write token, closes the write handle once and binds the reopened native identity,
+bytes and security before a relative move. Original/foreign/read-only references
+cannot be sealed. A complete private manifest directory is similarly closed and
+rebound before publication. The v2 shell manifest explicitly uses native guard
+identities; legacy v1 capture/status retains its existing format. The new
+publication path uses no PATH PowerShell reader. Accepted bin aliases are bound;
+redirecting a separate prefix bin outside the canonical layout is refused.
+
+Each wrapper/manifest operation persists intent, exact result and current state.
+Known partial publication can be quarantined after a fresh successful check,
+then originals restored in their required order. Unknown publication retains
+separate destination/stage/quarantine observations and is never replayed or
+removed to make the result appear successful. Original absence is restored too.
+
+Recovery inspection opens private plan/original/state/journal evidence read-only,
+checks canonical JSON, scope, sequence/hash references and current full original,
+working/generated/protected trees plus Node/npm/other globals. Its total evidence
+is limited to 256 files/64MiB; each file remains bounded to16MiB. Evidence is
+rechecked before returning. Pending/torn/unknown stops before replay. A matching
+observation grants no execution permission and starts no child or filesystem
+write. It does not reopen a writer or execute recovery actions.
+
+CLI/native-v2 status wiring, separately journaled persisted recovery execution,
+registration migration, versioning and the final candidate remain incomplete.
 
 ### Windows hookの保護保存transport（未公開source）
 

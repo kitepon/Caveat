@@ -210,7 +210,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     },
     createJournal(parent, name) {
       assert.equal(descriptor({ ...(parent as Ref), mutation: true }).owner, currentSid, 'global_journal_private_parent_required');
-      const ref = openChild(parent, name, 'mutation', 'file')!; createdJournals.add(ref); return ref;
+      const ref = openChild(parent, name, 'mutation', 'file')!; createdJournals.add(ref); createdWorking.add(ref); return ref;
     },
     appendJournal(ref, bytes) {
       const value = journal(ref, true), count = [0]; assert.ok(bytes.length <= 65536, 'global_journal_record_bound');

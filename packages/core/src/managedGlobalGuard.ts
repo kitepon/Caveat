@@ -48,6 +48,7 @@ export async function openGlobalPathGuard(paths: string[]) {
 
 /** Driver injection is internal to native fixtures, never exposed by CLI options. */
 export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) {
+  const newDirectories = new WeakSet<Directory>();
   const retired = new WeakSet<object>(), copiedTrees = new WeakSet<GlobalGuardTree>();
   const opened: object[] = [], directories = new Map<string, Directory>(), entries = new WeakMap<GlobalGuardEntry, Entry>();
   const trees = new WeakMap<GlobalGuardTree, { entry: GlobalGuardEntry; rows: GlobalGuardTreeRow[] }>();
@@ -185,7 +186,47 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.deepEqual(inspect(parent.ref, name), driver.snapshot(ref), 'global_guard_private_directory_changed');
       assert.deepEqual(directoryBinding(driver.snapshot(ref)), directoryBinding(initial), 'global_guard_private_directory_changed');
       const canonical = join(aliases.get(path)!, name);
-      directories.set(canonical, { ref, initial, parent, name }); aliases.set(canonical, canonical); checkDirectories(); return canonical;
+      const created = { ref, initial, parent, name }; newDirectories.add(created);
+      directories.set(canonical, created); aliases.set(canonical, canonical); checkDirectories(); return canonical;
+    },
+    /** Seal only a file born as this guard's private journal; the token can never append again. */
+    sealJournalFile(token: GlobalGuardJournal, executable: boolean) {
+      guard.readJournal(token); const held = journals.get(token)!;
+      let before: GlobalGuardIdentity | null = null, phase = 'finish-created-file';
+      try {
+        driver.finishWorking(held.ref, executable); before = driver.snapshot(held.ref);
+        assert.equal(before.contentSha256, createHash('sha256').update(held.bytes).digest('hex'), 'global_working_seal_content_changed');
+        phase = 'close-created-file'; journals.delete(token); retired.add(held.ref); driver.close(held.ref);
+        phase = 'reopen-created-file';
+        const path = [...directories].find(([, value]) => value === held.directory)![0];
+        const tree = guard.retainTree(path, held.name), rows = guard.readTree(tree);
+        const stable = ({ ctime: _, mtime: __, ...value }: GlobalGuardIdentity) => value;
+        assert.equal(rows.length, 1, 'global_working_seal_kind_changed');
+        assert.deepEqual(stable(rows[0]!.identity), stable(before), 'global_working_seal_identity_changed');
+        copiedTrees.add(tree); return { status: 'sealed' as const, tree, rows };
+      } catch (error) {
+        journals.delete(token);
+        return { status: 'unknown' as const, before, phase, errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
+      }
+    },
+    /** Close a newly created private directory before pinning its completed tree for publication. */
+    sealPrivateDirectory(path: string) {
+      checkDirectories(); const held = directory(path), canonical = aliases.get(path)!;
+      assert.ok(newDirectories.has(held) && ![...directories.values()].some(value => value.parent === held), 'global_working_new_directory_required');
+      driver.assertPrivateDirectory(held.ref);
+      let before: GlobalGuardTreeRow[] | null = null, phase = 'inventory-created-directory';
+      try {
+        before = treeInventory(held.ref, held.initial.dev); phase = 'close-created-directory';
+        newDirectories.delete(held); directories.delete(canonical); aliases.delete(canonical); retired.add(held.ref); driver.close(held.ref);
+        phase = 'reopen-created-directory';
+        const parent = [...directories].find(([, value]) => value === held.parent)![0];
+        const tree = guard.retainTree(parent, held.name!), rows = guard.readTree(tree), expected = structuredClone(before);
+        expected[0]!.identity = { ...expected[0]!.identity, ctime: rows[0]!.identity.ctime, mtime: rows[0]!.identity.mtime };
+        assert.deepEqual(rows, expected, 'global_working_seal_identity_changed');
+        copiedTrees.add(tree); return { status: 'sealed' as const, tree, rows };
+      } catch (error) {
+        return { status: 'unknown' as const, before, phase, errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
+      }
     },
     assertPrivateDirectory(path: string) { checkDirectories(); driver.assertPrivateDirectory(directory(path).ref); },
     directoryIdentity(path: string) { checkDirectories(); return driver.snapshot(directory(path).ref); },

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -9,6 +9,8 @@ import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPat
 import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platform.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 import type { NativeProcessTables } from '../src/managedProcessNative.js';
+import { inspectGlobalMigrationRecovery } from '../src/managedGlobalRecovery.js';
+import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
 
 const roots: string[] = [];
@@ -132,4 +134,133 @@ describe('owned npm child protocol', () => {
     const timeout = await runOwnedGlobalNpm(process.execPath, ['-e', 'setInterval(()=>{},1000)'], tmpdir(), {}, () => {}, 100);
     expect(timeout.status).toBe('unknown'); expect(timeout.terminationRequested).toBe(true); expect(timeout.reason).toBe('global_npm_timeout');
   });
+});
+
+
+async function removeFixtureWorking(session: Awaited<ReturnType<typeof bindGlobalMigration>>) {
+  expect((await session.engine.preserveAll()).status).toBe('preserved');
+  expect((await session.engine.createWorkingCopies()).status).toBe('working');
+  const paths = session.engine.manifest().objects.map(row => join(row.directory, row.name));
+  const result = await session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath,
+    ['-e', "for(const file of process.argv.slice(1))require('node:fs').rmSync(file,{recursive:true})", ...paths],
+    session.runDirectory, {}, () => {}, 5000));
+  expect(result.status).toBe('removed');
+}
+describe('product-owned shell publication and known-only rollback', () => {
+  it('publishes all generated leaves and a native manifest, then quarantines them before restoring originals', { timeout: 120000 }, async () => {
+    const f = fixture(), before = statSync(join(f.binDirectory, 'caveat')).ino, session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      await removeFixtureWorking(session);
+      expect((await session.shell.install()).status).toBe('installed'); expect(session.shell.status().status).toBe('ready');
+      for (const row of session.plan.shellPlan.files) expect(readFileSync(row.path, 'utf8')).toBe(row.content);
+      expect(statSync(join(f.binDirectory, 'caveat')).ino).not.toBe(before);
+      expect(JSON.parse(readFileSync(join(f.paths.root, 'shell/manifest.json'), 'utf8'))).toMatchObject({ schema: 'caveat.managed_shell.v2', registrationNode: realpathSync(process.execPath) });
+      await session.verify(); expect((await session.shell.quarantineKnown()).status).toBe('quarantined');
+      for (const row of session.engine.manifest().objects) expect((await session.engine.restoreKnown(row.step)).status).toBe('confirmed');
+      expect(readFileSync(join(f.binDirectory, 'caveat'), 'utf8')).toBe('fixture old wrapper'); expect(statSync(join(f.binDirectory, 'caveat')).ino).toBe(before);
+      expect(existsSync(join(f.paths.root, 'shell'))).toBe(false); expect(existsSync(join(session.runDirectory, 'used-generated-shell/manifest.json'))).toBe(true);
+    } finally { session.close(); }
+  });
+  it('binds originally absent leaves to only its own new objects and restores the original absence', { timeout: 120000 }, async () => {
+    const f = fixture(); for (const name of isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat']) rmSync(join(f.binDirectory, name));
+    const session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); await session.verify();
+      expect((await session.shell.quarantineKnown()).status).toBe('quarantined');
+      for (const row of session.engine.manifest().objects) expect((await session.engine.restoreKnown(row.step)).status).toBe('confirmed');
+      expect(existsSync(join(f.binDirectory, 'caveat'))).toBe(false);
+      writeFileSync(join(f.binDirectory, 'caveat'), 'new foreign wrapper'); await expect(session.verify()).rejects.toThrow('absent_leaf_appeared');
+    } finally { session.close(); }
+  });
+  it('retains known partial publication when preflight stops before the manifest and permits only a fresh known quarantine', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables()); let calls = 0;
+    try {
+      await removeFixtureWorking(session);
+      const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
+        async () => { if (++calls === session.plan.shellPlan.files.length * 2 + 1) throw Error('fixture stopped before manifest'); await session.verify(); });
+      expect((await shell.install()).status).toBe('stopped'); expect(session.journal.read().status).toBe('ready');
+      expect(shell.snapshot().files.every(row => row.status === 'installed')).toBe(true); expect(existsSync(join(f.paths.root, 'shell'))).toBe(false);
+      expect((await shell.quarantineKnown()).status).toBe('quarantined');
+      for (const row of session.engine.manifest().objects) expect((await session.engine.restoreKnown(row.step)).status).toBe('confirmed');
+    } finally { session.close(); }
+  });
+  it('keeps an uncertain post-rename leaf and exact observations without replaying or overwriting it', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      await removeFixtureWorking(session); const move = session.guard.moveTreeNoReplace; let calls = 0;
+      session.guard.moveTreeNoReplace = (...args) => { const result = move(...args); if (++calls === 1) throw Error('fixture lost publication receipt'); return result; };
+      expect((await session.shell.install()).status).toBe('unknown'); expect(session.journal.read().status).toBe('unknown');
+      expect(readFileSync(join(f.binDirectory, 'caveat'), 'utf8')).toBe(session.plan.shellPlan.files[0]!.content);
+      const last = session.journal.read().records.at(-1)!;
+      const state = JSON.parse(readFileSync(join(session.runDirectory, 'state-' + session.journal.read().header.runId + '-' + last.sequence + '.json'), 'utf8'));
+      expect(state.result.observations).toMatchObject({ destination: { state: 'present' }, stage: { state: 'absent' } });
+      await expect(session.shell.quarantineKnown()).rejects.toThrow('uncertain_or_interrupted'); expect(calls).toBe(1);
+      expect((await session.engine.restoreKnown('package')).status).toBe('stopped'); expect(existsSync(f.packageRoot)).toBe(false); expect(session.shell.status().status).toBe('unknown');
+    } finally { session.close(); }
+  });
+  it('refuses an existing shell ownership directory before any private run is created', { timeout: 60000 }, async () => {
+    const f = fixture(); mkdirSync(join(f.paths.root, 'shell')); writeFileSync(join(f.paths.root, 'shell/keep'), 'existing product state');
+    const before = readdirSync(f.paths.root);
+    await expect(bindGlobalMigration(f.input, () => {}, async () => tables())).rejects.toThrow('shell_already_installed');
+    expect(readdirSync(f.paths.root)).toEqual(before); expect(readFileSync(join(f.paths.root, 'shell/keep'), 'utf8')).toBe('existing product state');
+  });
+});
+
+
+describe('persisted global migration recovery inspection', () => {
+  it('opens installed shell/original evidence read-only with no execution permission', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try { await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); } finally { session.close(); }
+    const before = readdirSync(session.runDirectory), journal = readFileSync(join(session.runDirectory, 'journal.jsonl'));
+    const result = await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256);
+    expect(result).toMatchObject({ status: 'observed', reason: 'recorded_state_matches', filesystemWrites: 0, childProcesses: 0, executionPermission: false, automaticRecovery: false });
+    expect(result.observations.every(row => ['known', 'absent'].includes(row.state))).toBe(true);
+    expect(readdirSync(session.runDirectory)).toEqual(before); expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(journal);
+  });
+  it.each(['pending', 'unknown', 'torn'] as const)('stops on a %s journal without replay or writes', { timeout: 60000 }, async kind => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      expect((await session.engine.preserveAll()).status).toBe('preserved');
+      if (kind !== 'torn') session.journal.intent('interruption', 'wrapper', 'a'.repeat(64));
+      if (kind === 'unknown') session.journal.result('interruption', 'wrapper', 'unknown', null);
+    } finally { session.close(); }
+    if (kind === 'torn') appendFileSync(join(session.runDirectory, 'journal.jsonl'), '{incomplete');
+    const before = readFileSync(join(session.runDirectory, 'journal.jsonl'));
+    expect(await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256)).toMatchObject({ status: 'stopped', reason: 'interrupted_or_unknown', journalStatus: kind, filesystemWrites: 0 });
+    expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(before); expect(existsSync(f.packageRoot)).toBe(false);
+  });
+  it('refuses a changed state file and wrong plan hash without changing originals', { timeout: 60000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables()); let name: string;
+    try { await session.engine.preserveAll(); const current = session.journal.read(); name = 'state-' + current.header.runId + '-' + current.records.at(-1)!.sequence + '.json'; } finally { session.close(); }
+    await expect(inspectGlobalMigrationRecovery(session.runDirectory, '0'.repeat(64))).rejects.toThrow('plan_hash_changed');
+    const file = join(session.runDirectory, name!), bytes = readFileSync(file); writeFileSync(file, Buffer.concat([bytes, Buffer.from(' ')]));
+    await expect(inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256)).rejects.toThrow('state_hash_changed');
+    expect(existsSync(join(session.runDirectory, 'original-package/package.json'))).toBe(true); expect(existsSync(f.packageRoot)).toBe(false);
+  });
+  it('keeps a changed original and reports its current state unknown rather than restoring or reconstructing it', { timeout: 60000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try { await session.engine.preserveAll(); } finally { session.close(); }
+    const file = join(session.runDirectory, 'original-package/dist/caveat.js'); writeFileSync(file, 'changed original');
+    const result = await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256);
+    expect(result.status).toBe('stopped'); expect(result.observations).toContainEqual({ step: 'original.package', state: 'unknown' });
+    expect(readFileSync(file, 'utf8')).toBe('changed original'); expect(existsSync(f.packageRoot)).toBe(false);
+  });
+});
+
+
+it('binds an accepted bin alias and stops if it changes before preservation', { timeout: 60000 }, async () => {
+  const f = fixture(), alias = join(f.root, 'bin-alias'), other = join(f.root, 'other-bin'); mkdirSync(other, { mode: 0o700 });
+  symlinkSync(f.binDirectory, alias, isWindows() ? 'junction' : 'dir'); f.input.binDirectory = alias;
+  const session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+  const journalBefore = readFileSync(join(session.runDirectory, 'journal.jsonl'));
+  try {
+    rmSync(alias); symlinkSync(other, alias, isWindows() ? 'junction' : 'dir');
+    expect((await session.engine.preserveAll()).status).toBe('stopped'); expect(() => session.journal.read()).toThrow('alias_changed'); expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(journalBefore); expect(existsSync(f.packageRoot)).toBe(true);
+  } finally { expect(() => session.close()).toThrow('alias_changed'); expect(existsSync(f.paths.lock)).toBe(true); }
+});
+it.skipIf(isWindows())('rejects a redirected prefix bin before creating private run state', { timeout: 60000 }, async () => {
+  const f = fixture(), moved = join(f.root, 'redirected-bin'); renameSync(f.binDirectory, moved); symlinkSync(moved, f.binDirectory, 'dir');
+  const before = readdirSync(f.paths.root);
+  await expect(bindGlobalMigration(f.input, () => {}, async () => tables())).rejects.toThrow('bin_redirect');
+  expect(readdirSync(f.paths.root)).toEqual(before); expect(readFileSync(join(moved, 'caveat'), 'utf8')).toBe('fixture old wrapper');
 });
