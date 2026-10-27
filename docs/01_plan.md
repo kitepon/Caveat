@@ -694,7 +694,7 @@ results are preserved; there is no automatic replay, unlink or overwrite.
 inspects bounded saved migration evidence read-only and returns its full evidence
 digest. It grants no execution permission and does not open a writer.
 
-`deployment global-recover <migration-run-id> --plan-sha256 <digest>
+`deployment global-recover <migration-or-recovery-run-id> --plan-sha256 <digest>
 --evidence-sha256 <digest> --json` separately restores independently proved original
 objects. It requires matching plan and full evidence digests, holds old evidence
 read-only, and rebinds current original/working/generated objects, protected
@@ -722,11 +722,27 @@ as unknown rather than silently repaired.
 `global-inspect-recovery` also accepts a recovery-attempt id. This only verifies
 its bounded journal/result evidence: `currentObjects: not-assessed` and
 `executionPermission: false` are explicit even for a complete journal. Resuming
-from a known partial recovery-attempt state still needs a separately reviewed
-fresh binding; it is not implemented by that journal inspection. Ordinary Node
+from a known partial recovery-attempt requires the separately reviewed fresh
+binding described below; journal inspection does not supply it. Ordinary Node
 selection/shared-runtime proof, registration migration, versioning and the final
-candidate also remain incomplete. These source commands do not grant approval
-for distribution or machine changes.
+candidate remain incomplete. These source commands do not grant approval for
+distribution or machine changes.
+
+Confirmed partial recovery journals may be planned with `deployment global-recovery-plan
+<run-id> --plan-sha256 <original-digest> --json`. This is read-only: no run, lock or
+execution permission. A successful result supplies a full evidence digest for a
+separate `global-recover` invocation. The source chain is limited to eight runs,
+256 referenced files and 64 MiB in total; every run must have its exact canonical
+private directory. Pending, torn or unknown intents anywhere in the chain stop
+before a new journal is created. Source plan/seed and confirmed transitions derive
+all allowed names and current object locations. A saved path is never authority.
+The digest binds every source reference, derived state and fresh parent bindings;
+current objects, absences, aliases, protected state and native process/writer gates
+are rechecked independently at execution. Each attempt uses a new private journal.
+Old evidence stays read-only, and independent post-close readback covers every
+source directory as well as the new attempt and restored/quarantined objects.
+Journal-only inspection of a recovery run remains `currentObjects: not-assessed`
+and `executionPermission: false`, including completed journals.
 
 ### Windows hookの保護保存transport（未公開source）
 

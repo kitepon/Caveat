@@ -422,8 +422,11 @@ proof and exact checkpoint journal. Persisted recovery must keep old evidence
 read-only, use only a new private journal and prove original inode/content/security
 restoration, known partial states, parent/alias/absence changes, unknown writers,
 interrupted/new/duplicate attempts and post-close readback changes. An observed
-journal is not current-object acceptance or permission to execute. Fresh binding
-of known partial recovery-attempt states, the selected Node's shared-runtime
-proof (or explicit rejection), registration-token migration/readback/known rollback,
+journal is not current-object acceptance or permission to execute. Require fresh binding of known partial recovery-attempt states from the original
+validated plan/seed and a bounded confirmed source chain. Reject pending/torn/unknown
+intents, cycles, changed parents/aliases and arbitrary saved-path authority before
+creating a new journal. Keep journal inspection separate from current-object admission.
+The selected Node's shared-runtime proof (or explicit rejection),
+registration-token migration/readback/known rollback,
 versioning and final review remain required before the completed candidate.
 Release or machine-operation approval is separate from these source fixtures.

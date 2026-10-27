@@ -11,17 +11,17 @@ import type { bindGlobalMigration } from './managedGlobalMigration.js';
 type Plan = Awaited<ReturnType<typeof bindGlobalMigration>>['plan'];
 type OriginalManifest = ReturnType<Awaited<ReturnType<typeof bindGlobalMigration>>['engine']['manifest']>;
 type ShellState = ReturnType<Awaited<ReturnType<typeof bindGlobalMigration>>['shell']['snapshot']>;
-const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
-const sha = (value: unknown) => digest(Buffer.from(JSON.stringify(value)));
-const keys = (value: unknown, expected: string[]) => {
+export const digestGlobalRecoveryBytes = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+export const shaGlobalRecoveryValue = (value: unknown) => digestGlobalRecoveryBytes(Buffer.from(JSON.stringify(value)));
+export const globalRecoveryKeys = (value: unknown, expected: string[]) => {
   assert.ok(value && typeof value === 'object' && !Array.isArray(value), 'global_recovery_object_required');
   assert.deepEqual(Object.keys(value).sort(), [...expected].sort(), 'global_recovery_fields_invalid');
 };
-function rows(value: unknown): asserts value is GlobalGuardTreeRow[] {
+export function globalRecoveryRows(value: unknown): asserts value is GlobalGuardTreeRow[] {
   assert.ok(Array.isArray(value) && value.length > 0 && value.length <= 100000, 'global_recovery_rows_bound');
   const names = new Set<string>();
   for (const row of value) {
-    keys(row, ['relativePath', 'identity']);
+    globalRecoveryKeys(row, ['relativePath', 'identity']);
     assert.ok(typeof row.relativePath === 'string' && !names.has(row.relativePath) && row.relativePath.length <= 32768
       && !/[\\\x00-\x1f:]/.test(row.relativePath) && (row.relativePath === '' || row.relativePath.split('/').every((part: string) => part && part !== '.' && part !== '..')), 'global_recovery_row_path_invalid');
     names.add(row.relativePath); const id = row.identity;
@@ -36,7 +36,7 @@ function rows(value: unknown): asserts value is GlobalGuardTreeRow[] {
 type Binding = { directory: string; name: string; rows: GlobalGuardTreeRow[] | null; tree: GlobalGuardTree | null };
 export type GlobalRecoverySnapshot = { plan: Plan; original: OriginalManifest; shell: ShellState | undefined;
   guard: Awaited<ReturnType<typeof openGlobalPathGuard>>; bindings: Map<string, Binding>; evidenceSha256: string; journalSha256: string;
-  verifyEvidence: () => void; verifyProtected: () => void };
+  verifyEvidence: () => void; verifyProtected: () => void; admission?: unknown; sourceRoots?: string[]; vacancySlots?: { directory: string; name: string }[] };
 
 export function globalRecoveryGuardPaths(plan: Plan, runDirectory: string) {
   return [...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory, dirname(plan.baseline.node.canonical),
@@ -94,25 +94,30 @@ export function inspectGlobalMigrationRecovery(runDirectory: string, expectedPla
   return withGlobalRecoverySnapshot(runDirectory, expectedPlanSha256);
 }
 
-/** Internal scoped lease: old evidence stays read-only and native objects remain held until use returns. */
-export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expectedPlanSha256: string, use?: (snapshot: GlobalRecoverySnapshot) => Promise<T>) {
+export type GlobalRecoveryBudget = { files: number; bytes: number };
+export type GlobalMigrationEvidence = Omit<GlobalRecoverySnapshot, 'guard' | 'bindings' | 'verifyProtected'> & { journalStatus: 'ready' | 'complete'; references: { run: string; name: string; bytes: number; sha256: string }[] };
+
+/** Decode source history without pretending that old object names still contain the objects. */
+export async function withGlobalMigrationEvidence<T>(runDirectory: string, expectedPlanSha256: string, use: (source: GlobalMigrationEvidence) => Promise<T>, budget: GlobalRecoveryBudget = { files: 0, bytes: 0 }) {
   assert.ok(isAbsolute(runDirectory) && resolve(runDirectory) === runDirectory && /^global-migration-[a-f0-9]{32}$/.test(basename(runDirectory)), 'global_recovery_run_path_invalid');
+  assert.equal(realpathSync(runDirectory), runDirectory, 'global_recovery_source_alias_forbidden');
   const evidence = await openGlobalPathGuard([runDirectory]);
   try {
-    evidence.assertPrivateDirectory(runDirectory);
+    evidence.assertPrivateDirectory(runDirectory); assert.equal(realpathSync(runDirectory), runDirectory, 'global_recovery_source_alias_forbidden');
     const cached = new Map<string, Buffer>(); let totalBytes = 0;
     const read = (name: string) => {
       const known = cached.get(name); if (known) return known;
-      const bytes = evidence.readPersistedJournal(runDirectory, name); totalBytes += bytes.length;
+      const bytes = evidence.readPersistedJournal(runDirectory, name); totalBytes += bytes.length; budget.files++; budget.bytes += bytes.length;
+      assert.ok(budget.files <= 256 && budget.bytes <= 64 * 1024 * 1024, 'global_recovery_chain_evidence_bound');
       assert.ok(cached.size < 256 && totalBytes <= 64 * 1024 * 1024, 'global_recovery_total_evidence_bound'); cached.set(name, bytes); return bytes;
     };
     const decode = (bytes: Buffer) => {
       const value: unknown = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(bytes));
       assert.equal(Buffer.from(JSON.stringify(value) + '\n').compare(bytes), 0, 'global_recovery_noncanonical_json'); return value;
     };
-    const planBytes = read('plan.json'); assert.equal(sha(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
+    const planBytes = read('plan.json'); assert.equal(shaGlobalRecoveryValue(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
     const plan = decode(planBytes) as Plan;
-    keys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories']);
+    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories']);
     assert.equal(plan.schema, 'caveat.global_migration_plan.v1', 'global_recovery_plan_invalid');
     assert.equal(plan.root, dirname(runDirectory), 'global_recovery_run_outside_root');
     assert.ok([plan.root, plan.globalRoot, plan.binDirectory, plan.prefix].every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path), 'global_recovery_absolute_scope_required');
@@ -121,7 +126,7 @@ export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string
     assert.ok(Array.isArray(plan.leaves) && plan.leaves.length >= 1 && plan.leaves.length <= 3
       && new Set(plan.leaves.map(row => row.name)).size === plan.leaves.length
       && plan.leaves.every(row => ['caveat', 'caveat.cmd', 'caveat.ps1'].includes(row.name)), 'global_recovery_leaf_scope_invalid');
-    for (const leaf of plan.leaves) { keys(leaf, ['name', 'identity']); if (leaf.identity !== null) rows([{ relativePath: '', identity: leaf.identity }]); }
+    for (const leaf of plan.leaves) { globalRecoveryKeys(leaf, ['name', 'identity']); if (leaf.identity !== null) globalRecoveryRows([{ relativePath: '', identity: leaf.identity }]); }
     assert.ok(Array.isArray(plan.aliases) && plan.aliases.length <= 32 && plan.aliases.every(row => typeof row.path === 'string' && isAbsolute(row.path) && typeof row.canonical === 'string' && isAbsolute(row.canonical)), 'global_recovery_alias_scope_invalid');
     assert.ok(Array.isArray(plan.absences) && plan.absences.length <= 16 && plan.absences.every(row => typeof row.path === 'string' && isAbsolute(row.path) && typeof row.parent === 'string' && isAbsolute(row.parent)), 'global_recovery_absence_invalid');
     assert.ok(Array.isArray(plan.directories) && plan.directories.length <= 512, 'global_recovery_directory_bound');
@@ -134,18 +139,18 @@ export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string
     let original: OriginalManifest | undefined, shell: ShellState | undefined;
     for (const result of results) {
       const bytes = read('state-' + journal.header.runId + '-' + result.sequence + '.json');
-      assert.equal(digest(bytes), result.stateSha256, 'global_recovery_state_hash_changed');
+      assert.equal(digestGlobalRecoveryBytes(bytes), result.stateSha256, 'global_recovery_state_hash_changed');
       const value = decode(bytes) as { schema: string; planSha256: string; runId: string; step: string; operation: string; manifest: OriginalManifest; shell?: ShellState };
       assert.ok(['caveat.global_preservation_state.v1', 'caveat.global_shell_operation.v1'].includes(value.schema)
         && value.planSha256 === expectedPlanSha256 && value.runId === journal.header.runId && value.step === result.step && value.operation === result.operation, 'global_recovery_state_binding_invalid');
       original = value.manifest;
       assert.equal(original.schema, 'caveat.global_original_objects.v1', 'global_recovery_originals_invalid');
-      keys(original, ['schema', 'objects', 'originalEvidence', 'originalsReconstructed', 'automaticRecovery']);
+      globalRecoveryKeys(original, ['schema', 'objects', 'originalEvidence', 'originalsReconstructed', 'automaticRecovery']);
       assert.ok(original.originalsReconstructed === false && original.automaticRecovery === false, 'global_recovery_reconstruction_forbidden');
-      const reference = original.originalEvidence; keys(reference, ['name', 'bytes', 'sha256']);
+      const reference = original.originalEvidence; globalRecoveryKeys(reference, ['name', 'bytes', 'sha256']);
       assert.equal(reference.name, 'originals-' + journal.header.runId + '.json', 'global_recovery_original_reference_invalid');
       const originals = read(reference.name); assert.equal(originals.length, reference.bytes, 'global_recovery_original_size_changed');
-      assert.equal(digest(originals), reference.sha256, 'global_recovery_original_hash_changed');
+      assert.equal(digestGlobalRecoveryBytes(originals), reference.sha256, 'global_recovery_original_hash_changed');
       const seed = decode(originals) as { schema: string; planSha256: string; runId: string; objects: OriginalManifest['objects'] };
       assert.ok(seed.schema === 'caveat.global_original_evidence.v1' && seed.planSha256 === expectedPlanSha256 && seed.runId === journal.header.runId, 'global_recovery_original_binding_invalid');
       assert.ok(Array.isArray(original.objects) && original.objects.length >= 1 && original.objects.length <= 5 && seed.objects.length === original.objects.length, 'global_recovery_object_scope_invalid');
@@ -153,22 +158,22 @@ export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string
       const expectedSteps = ['package', ...(!plan.baseline.npmManagement.absent ? ['management'] : []), ...plan.leaves.filter(row => row.identity).map(row => row.name.replaceAll('.', '-'))];
       assert.deepEqual(original.objects.map(row => row.step).sort(), expectedSteps.sort(), 'global_recovery_missing_original');
       for (const [index, object] of original.objects.entries()) {
-        keys(object, ['step', 'role', 'directory', 'name', 'backupDirectory', 'backupName', 'state', 'working', 'rows', 'stateSha256']);
-        const expected = seed.objects[index]!; keys(expected, ['step', 'role', 'directory', 'name', 'backupDirectory', 'backupName', 'rows']);
+        globalRecoveryKeys(object, ['step', 'role', 'directory', 'name', 'backupDirectory', 'backupName', 'state', 'working', 'rows', 'stateSha256']);
+        const expected = seed.objects[index]!; globalRecoveryKeys(expected, ['step', 'role', 'directory', 'name', 'backupDirectory', 'backupName', 'rows']);
         assert.ok(object.role === 'package' && object.name === 'caveat-cli' && object.step === 'package' && object.backupName === 'original-package' && object.directory === plan.globalRoot
           || object.role === 'npm-management' && object.name === '.package-lock.json' && object.step === 'management' && object.backupName === 'original-management' && object.directory === plan.globalRoot
           || object.role === 'leaf' && plan.leaves.some(row => row.name === object.name && row.identity !== null) && object.step === object.name.replaceAll('.', '-') && object.backupName === 'original-' + object.name && object.directory === plan.binDirectory, 'global_recovery_original_scope_invalid');
         assert.equal(object.backupDirectory, runDirectory, 'global_recovery_backup_scope_invalid');
         for (const key of ['role', 'step', 'name', 'directory', 'backupDirectory', 'backupName'] as const) assert.equal(object[key], expected[key], 'global_recovery_original_scope_changed');
         assert.ok(['original', 'preserved', 'restored'].includes(object.state), 'global_recovery_original_unknown');
-        rows(object.rows); rows(expected.rows); assert.equal(sha(object.rows), object.stateSha256, 'global_recovery_original_rows_changed');
+        globalRecoveryRows(object.rows); globalRecoveryRows(expected.rows); assert.equal(shaGlobalRecoveryValue(object.rows), object.stateSha256, 'global_recovery_original_rows_changed');
         const known = structuredClone(expected.rows); known[0]!.identity.ctime = object.rows[0]!.identity.ctime;
         assert.deepEqual(object.rows, known, 'global_recovery_original_identity_changed');
         if (object.working) {
-          keys(object.working, ['status', 'rows', 'stagingName']);
+          globalRecoveryKeys(object.working, ['status', 'rows', 'stagingName']);
           assert.ok(['known', 'after-known', 'absent', 'quarantined'].includes(object.working.status)
             && object.working.stagingName === 'work-' + journal.header.runId + '-' + object.step, 'global_recovery_working_unknown');
-          if (object.working.rows !== null) rows(object.working.rows);
+          if (object.working.rows !== null) globalRecoveryRows(object.working.rows);
           else assert.equal(object.working.status, 'absent', 'global_recovery_working_rows_required');
         }
       }
@@ -179,13 +184,26 @@ export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string
           assert.equal(object.name, index < shell.files.length ? plan.leaves[index]!.name : 'shell', 'global_recovery_shell_scope_invalid');
           assert.equal(object.backupName, index < shell.files.length ? 'generated-' + index : 'generated-shell', 'global_recovery_shell_backup_invalid');
           assert.ok(['absent', 'installed', 'quarantined'].includes(object.status), 'global_recovery_shell_unknown');
-          if (object.status === 'absent') assert.equal(object.rows, null, 'global_recovery_shell_rows_invalid'); else rows(object.rows);
+          if (object.status === 'absent') assert.equal(object.rows, null, 'global_recovery_shell_rows_invalid'); else globalRecoveryRows(object.rows);
         }
       }
     }
     assert.ok(original, 'global_recovery_originals_required');
     assert.ok(Array.isArray(plan.protectedObjects) && plan.protectedObjects.length <= 16, 'global_recovery_protected_bound');
-    for (const object of plan.protectedObjects) { assert.ok(isAbsolute(object.path) && resolve(object.path) === object.path, 'global_recovery_protected_path_invalid'); rows(object.rows); }
+    for (const object of plan.protectedObjects) { assert.ok(isAbsolute(object.path) && resolve(object.path) === object.path, 'global_recovery_protected_path_invalid'); globalRecoveryRows(object.rows); }
+    const verifyEvidence = () => { assert.equal(realpathSync(runDirectory), runDirectory, 'global_recovery_source_alias_forbidden'); for (const [name, bytes] of cached) assert.ok(evidence.readPersistedJournal(runDirectory, name).equals(bytes), 'global_recovery_evidence_changed_during_read'); };
+    verifyEvidence();
+    const evidenceSha256 = shaGlobalRecoveryValue([...cached].map(([name, bytes]) => ({ name, sha256: digestGlobalRecoveryBytes(bytes) })).sort((a, b) => a.name.localeCompare(b.name)));
+    return await use({ plan, original, shell, evidenceSha256, journalSha256: journal.bytesSha256, verifyEvidence,
+      journalStatus: journal.status as 'ready' | 'complete', references: [...cached].map(([name, bytes]) => ({ run: basename(runDirectory), name, bytes: bytes.length, sha256: digestGlobalRecoveryBytes(bytes) })) });
+
+  } finally { evidence.close(); }
+}
+
+/** Internal scoped lease: all source files are read-only; native objects stay held while use runs. */
+export function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expectedPlanSha256: string, use?: (snapshot: GlobalRecoverySnapshot) => Promise<T>) {
+  return withGlobalMigrationEvidence(runDirectory, expectedPlanSha256, async source => {
+    const { plan, original, shell, evidenceSha256, journalSha256, journalStatus, verifyEvidence } = source;
     const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(plan, runDirectory));
     try {
       guard.assertPrivateDirectory(runDirectory);
@@ -215,13 +233,11 @@ export async function withGlobalRecoverySnapshot<T = never>(runDirectory: string
       const protectedState = bindGlobalRecoveryProtected(plan, guard);
       observations.push(...protectedState.observe());
       // A concurrent edit of any previously read evidence invalidates this entire inspection.
-      const verifyEvidence = () => { for (const [name, bytes] of cached) assert.ok(evidence.readPersistedJournal(runDirectory, name).equals(bytes), 'global_recovery_evidence_changed_during_read'); };
       verifyEvidence();
-      const evidenceSha256 = sha([...cached].map(([name, bytes]) => ({ name, sha256: digest(bytes) })).sort((a, b) => a.name.localeCompare(b.name)));
       const changed = observations.some(row => row.state === 'changed' || row.state === 'unknown');
-      if (use && !changed) return await use({ plan, original, shell, guard, bindings, evidenceSha256, journalSha256: journal.bytesSha256, verifyEvidence,
+      if (use && !changed) return await use({ plan, original, shell, guard, bindings, evidenceSha256, journalSha256, verifyEvidence,
         verifyProtected: protectedState.verify });
-      return { ...base, evidenceSha256, status: changed ? 'stopped' as const : 'observed' as const, reason: changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations };
+      return { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus, journalSha256, filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const, evidenceSha256, status: changed ? 'stopped' as const : 'observed' as const, reason: changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations };
     } finally { guard.close(); }
-  } finally { evidence.close(); }
+  });
 }

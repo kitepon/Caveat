@@ -67,3 +67,5 @@ export { managedShellStatusCurrent } from './managedGlobalShellStatus.js';
 export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlobalCoordinator.js';
 
 export { executeGlobalRecovery, inspectGlobalRecoveryAttempt, type GlobalRecoveryEvent } from './managedGlobalRecoveryExecution.js';
+
+export { planGlobalRecovery } from './managedGlobalRecoveryChain.js';

@@ -33,7 +33,7 @@ import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installSh
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
-import { runGlobalMigrationCommand, runGlobalRecoveryInspection, runGlobalRecovery, type GlobalMigrationOptions } from './commands/globalMigration.js';
+import { runGlobalMigrationCommand, runGlobalRecoveryInspection, runGlobalRecoveryPlan, runGlobalRecovery, type GlobalMigrationOptions } from './commands/globalMigration.js';
 import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock, deploymentShellPlan, deploymentShellManifest } from './commands/deployment.js';
 
 const program = new Command();
@@ -94,9 +94,12 @@ for (const [name, mode] of [['global-plan', 'plan'], ['global-migrate', 'execute
 deployment.command('global-inspect-recovery <run-id>').description('Read-only inspection; never replays journal actions')
   .requiredOption('--plan-sha256 <digest>', 'expected saved plan digest').requiredOption('--json', 'emit observations only')
   .action(async (runId: string, options: { planSha256: string }) => { await runGlobalRecoveryInspection(runId, options.planSha256); });
+deployment.command('global-recovery-plan <run-id>').description('Read-only fresh current-object and source-chain recovery plan')
+  .requiredOption('--plan-sha256 <digest>', 'expected original migration plan digest').requiredOption('--json', 'emit bounded plan result')
+  .action(async (runId: string, options: { planSha256: string }) => { await runGlobalRecoveryPlan(runId, options.planSha256); });
 deployment.command('global-recover <run-id>').description('Restore independently proved originals through a new private recovery journal')
   .requiredOption('--plan-sha256 <digest>', 'exact original migration plan digest')
-  .requiredOption('--evidence-sha256 <digest>', 'exact full evidence digest from read-only inspection')
+  .requiredOption('--evidence-sha256 <digest>', 'exact full digest returned by global-recovery-plan')
   .requiredOption('--json', 'emit ordered bounded recovery receipts')
   .action(async (runId: string, options: { planSha256: string; evidenceSha256: string }) => { await runGlobalRecovery(runId, options.planSha256, options.evidenceSha256); });
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');

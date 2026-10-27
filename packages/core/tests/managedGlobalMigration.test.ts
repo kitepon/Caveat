@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { recoverGlobalMigration, inspectGlobalRecoveryAttempt } from '../src/managedGlobalRecoveryExecution.js';
+import { withGlobalRecoveryAttemptEvidence } from '../src/managedGlobalRecoveryAttempt.js';
+import { planGlobalRecoveryWithCollector } from '../src/managedGlobalRecoveryChain.js';
 import { parseGlobalMutationJournal } from '../src/managedGlobalJournal.js';
 import { coordinateGlobalMigration } from '../src/managedGlobalCoordinator.js';
 import { managedShellStatusCurrent } from '../src/managedGlobalShellStatus.js';
@@ -578,4 +580,173 @@ it('refuses a recovery-directory alias substituted after close', { timeout: 1200
     const directory = join(r.f.paths.root, event.runId!), relocated = directory + '.relocated'; renameSync(directory, relocated); symlinkSync(relocated, directory, isWindows() ? 'junction' : 'dir');
   }, async () => tables());
   expect(result).toMatchObject({ status: 'unknown', phase: 'readback' }); r.unchanged(); expect(statSync(join(r.f.packageRoot, 'package.json')).ino).toBe(r.original);
+});
+
+async function partialRecovery(mode: Parameters<typeof recoveryFixture>[0] = 'backup', stopPhase = 'restore-package') {
+  const r = await recoveryFixture(mode); let blocked = false;
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
+    if (event.phase === stopPhase && event.event === 'completed') blocked = true;
+  }, async () => tables(blocked));
+  expect(result.status).toBe('unknown'); const attempt = join(r.f.paths.root, result.runId!);
+  const journal = parseGlobalMutationJournal(readFileSync(join(attempt, 'journal.jsonl')), r.session.planSha256); expect(journal.status).toBe('ready');
+  return { ...r, attempt, journal };
+}
+function savedRecoveryFiles(directory: string) {
+  const files = readdirSync(directory).filter(name => /^(source\.json|journal\.jsonl|state-|installer-lock\.json)/.test(name))
+    .map(name => ({ name, bytes: readFileSync(join(directory, name)) }));
+  return () => { for (const row of files) expect(readFileSync(join(directory, row.name))).toEqual(row.bytes); };
+}
+async function freshRecoveryPlan(r: Awaited<ReturnType<typeof partialRecovery>>) {
+  const before = readdirSync(r.f.paths.root), unchanged = savedRecoveryFiles(r.attempt);
+  const plan = await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables());
+  expect(plan).toMatchObject({ status: 'ready', currentObjects: 'confirmed', executionPermission: false, filesystemWrites: 0 });
+  assertRecoveryEvidence(plan); expect(readdirSync(r.f.paths.root)).toEqual(before); unchanged(); r.unchanged(); return plan;
+}
+describe('fresh recovery from confirmed partial attempts', () => {
+  for (const [mode, stop] of [['backup', 'restore-package'], ['working', 'quarantine-working'], ['installed', 'quarantine-generated'], ['partial', 'quarantine-generated'], ['failed-known', 'quarantine-working']] as const)
+    it('rebinds a ' + mode + ' partial attempt and restores through a separate journal', { timeout: 180000 }, async () => {
+      const r = await partialRecovery(mode, stop);
+      if (mode === 'backup') { const file = join(r.attempt, 'source.json'), header = JSON.parse(readFileSync(file, 'utf8')); header.schema = 'caveat.global_recovery_source.v1'; delete header.admission; writeFileSync(file, JSON.stringify(header) + '\n'); }
+      const unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
+      expect((await freshRecoveryPlan(r)).evidenceSha256).toBe(plan.evidenceSha256);
+      const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables());
+      expect(result).toMatchObject({ status: 'restored', existingProcessOperations: 0, privilegeElevation: false }); expect(result.runId).not.toBe(basename(r.attempt));
+      expect(statSync(join(r.f.packageRoot, 'package.json')).ino).toBe(r.original); expect(readFileSync(join(r.f.binDirectory, 'caveat'))).toEqual(r.oldLeaf);
+      expect(existsSync(join(r.f.paths.root, 'shell'))).toBe(false); unchanged(); r.unchanged();
+      const second = join(r.f.paths.root, result.runId!);
+      expect(await inspectGlobalRecoveryAttempt(second, r.session.planSha256)).toMatchObject({ currentObjects: 'not-assessed', executionPermission: false, journalStatus: 'complete' });
+      const current = await planGlobalRecoveryWithCollector(second, r.session.planSha256, async () => tables()); expect(current.status).toBe('ready');
+      const dirs = readdirSync(r.f.paths.root), repeated = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables());
+      expect(repeated).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(dirs); unchanged(); r.unchanged();
+    });
+  for (const changed of ['current', 'source', 'protected', 'absent', 'writer', 'alias-parent'] as const) it('rejects a fresh plan after changed ' + changed, { timeout: 180000 }, async () => {
+    const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
+    if (changed === 'current') appendFileSync(join(r.f.packageRoot, 'package.json'), 'changed');
+    if (changed === 'source') appendFileSync(join(r.attempt, 'source.json'), ' ');
+    if (changed === 'protected') appendFileSync(r.f.config, ' ');
+    if (changed === 'absent') writeFileSync(join(r.f.binDirectory, 'caveat'), 'foreign object', { mode: 0o600 });
+    if (changed === 'alias-parent') { const moved = r.attempt + '.moved'; renameSync(r.attempt, moved); symlinkSync(moved, r.attempt, isWindows() ? 'junction' : 'dir'); }
+    const before = readdirSync(r.f.paths.root), result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables(changed === 'writer'));
+    expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(before); r.unchanged();
+    if (changed !== 'source') unchanged();
+    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables(changed === 'writer'))).status).toBe('stopped');
+  });
+  for (const kind of ['pending', 'torn', 'unknown'] as const) it('never resumes an attempt with a ' + kind + ' intent', { timeout: 180000 }, async () => {
+    const r = await partialRecovery(), file = join(r.attempt, 'journal.jsonl'), j = r.journal;
+    const intent = JSON.stringify({ sequence: j.nextSequence, previousSha256: j.lastSha256, kind: 'intent', step: 'interrupted', operation: 'restore', stateSha256: 'a'.repeat(64) }) + '\n';
+    appendFileSync(file, intent); if (kind === 'torn') appendFileSync(file, '{torn');
+    if (kind === 'unknown') appendFileSync(file, JSON.stringify({ sequence: j.nextSequence + 1, previousSha256: sha(Buffer.from(intent)), kind: 'result', step: 'interrupted', operation: 'restore', stateSha256: null, outcome: 'unknown' }) + '\n');
+    const before = readdirSync(r.f.paths.root), unchanged = savedRecoveryFiles(r.attempt);
+    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables())).status).toBe('stopped');
+    const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, 'a'.repeat(64), () => {}, async () => tables());
+    expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(before); unchanged(); r.unchanged();
+  });
+  it('rejects a source cycle without creating an attempt or rewriting the chain', { timeout: 180000 }, async () => {
+    const r = await partialRecovery(), file = join(r.attempt, 'source.json'), source = JSON.parse(readFileSync(file, 'utf8')); source.sourceRun = basename(r.attempt);
+    writeFileSync(file, JSON.stringify(source) + '\n'); const before = readdirSync(r.f.paths.root), unchanged = savedRecoveryFiles(r.attempt);
+    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables())).status).toBe('stopped');
+    expect(readdirSync(r.f.paths.root)).toEqual(before); unchanged(); r.unchanged();
+  });
+});
+
+it('continues through two confirmed partial journals without reusing either attempt', { timeout: 240000 }, async () => {
+  const r = await partialRecovery('installed', 'quarantine-generated'), firstUnchanged = savedRecoveryFiles(r.attempt), first = await freshRecoveryPlan(r); let blocked = false;
+  const second = await recoverGlobalMigration(r.attempt, r.session.planSha256, first.evidenceSha256, event => { if (event.phase === 'quarantine-generated' && event.event === 'completed') blocked = true; }, async () => tables(blocked));
+  expect(second.status).toBe('unknown'); const attempt = join(r.f.paths.root, second.runId!), secondUnchanged = savedRecoveryFiles(attempt);
+  const plan = await freshRecoveryPlan({ ...r, attempt });
+  const last = await recoverGlobalMigration(attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables());
+  expect(last.status).toBe('restored'); expect(new Set([basename(r.attempt), second.runId, last.runId]).size).toBe(3);
+  expect(statSync(join(r.f.packageRoot, 'package.json')).ino).toBe(r.original); firstUnchanged(); secondUnchanged(); r.unchanged();
+  const finalSource = join(r.f.paths.root, last.runId!, 'source.json'), source = JSON.parse(readFileSync(finalSource, 'utf8'));
+  source.admission.sourceDataSha256 = 'f'.repeat(64); writeFileSync(finalSource, JSON.stringify(source) + '\n');
+  const before = readdirSync(r.f.paths.root); expect((await planGlobalRecoveryWithCollector(join(r.f.paths.root, last.runId!), r.session.planSha256, async () => tables())).status).toBe('stopped');
+  expect(readdirSync(r.f.paths.root)).toEqual(before); firstUnchanged(); secondUnchanged(); r.unchanged();
+});
+
+it('derives scope from the original seed even when forged result files and journal hashes agree', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), sourcePath = join(r.attempt, 'source.json'), sourceBytes = readFileSync(sourcePath), journalPath = join(r.attempt, 'journal.jsonl');
+  const journalBytes = readFileSync(journalPath), row = r.journal.records.find(value => value.kind === 'result')!;
+  const file = join(r.attempt, 'state-' + r.journal.header.runId + '-' + row.sequence + '.json'), bytes = readFileSync(file), dirs = readdirSync(r.f.paths.root);
+  for (const changed of ['path', 'order', 'inode', 'content', 'rename', 'source-digest', 'source-journal', 'admission'] as const) {
+    const record = JSON.parse(bytes.toString()), source = JSON.parse(sourceBytes.toString());
+    if (changed === 'path') record.state.objects[0].original.directory = r.f.profile;
+    if (changed === 'order') record.step = 'restore.caveat';
+    if (changed === 'inode') record.result.treeAfter[0].identity.ino = '123456';
+    if (changed === 'content') record.result.treeAfter.find((value: { identity: { kind: string } }) => value.identity.kind === 'file').identity.contentSha256 = 'b'.repeat(64);
+    if (changed === 'rename') record.renameIssued = false;
+    if (changed === 'source-digest') source.evidenceSha256 = 'b'.repeat(64);
+    if (changed === 'source-journal') source.journalSha256 = 'b'.repeat(64);
+    if (changed === 'admission') source.admission = { directories: [r.f.profile] };
+    writeFileSync(sourcePath, JSON.stringify(source) + '\n'); const data = Buffer.from(JSON.stringify(record) + '\n'); writeFileSync(file, data);
+    const lines = journalBytes.toString().trim().split('\n').map(line => JSON.parse(line)); let encoded = JSON.stringify(lines[0]) + '\n';
+    for (const event of lines.slice(1)) { event.previousSha256 = sha(Buffer.from(encoded.slice(encoded.lastIndexOf('\n', encoded.length - 2) + 1))); if (event.sequence === row.sequence) event.stateSha256 = sha(data); encoded += JSON.stringify(event) + '\n'; }
+    writeFileSync(journalPath, encoded); const unchanged = savedRecoveryFiles(r.attempt);
+    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables())).status, changed).toBe('stopped');
+    const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, 'a'.repeat(64), () => {}, async () => tables());
+    expect(result, changed).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(dirs); unchanged(); r.unchanged();
+  }
+});
+
+it('bounds source-chain depth before current-object admission', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), header = readFileSync(join(r.attempt, 'journal.jsonl'), 'utf8').split('\n')[0] + '\n'; let parent = basename(r.session.runDirectory);
+  for (let i = 0; i < 9; i++) {
+    const evidenceSha256 = createHash('sha256').update('bounded synthetic history ' + i).digest('hex'), name = 'global-recovery-' + evidenceSha256.slice(0, 32), directory = join(r.f.paths.root, name);
+    mkdirSync(directory, { mode: 0o700 }); writeFileSync(join(directory, 'source.json'), JSON.stringify({ schema: 'caveat.global_recovery_source.v2', admission: null,
+      sourceRun: parent, planSha256: r.session.planSha256, evidenceSha256, journalSha256: 'a'.repeat(64) }) + '\n', { mode: 0o600 });
+    writeFileSync(join(directory, 'journal.jsonl'), header, { mode: 0o600 }); if (isWindows()) runWindowsAclPrivateTree(directory); parent = name;
+  }
+  const before = readdirSync(r.f.paths.root), result = await planGlobalRecoveryWithCollector(join(r.f.paths.root, parent), r.session.planSha256, async () => tables());
+  expect(result.status).toBe('stopped'); expect(readdirSync(r.f.paths.root)).toEqual(before); r.unchanged();
+});
+
+it('keeps chain source files unchanged across a new pending intent and refuses to plan from it', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
+  const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, event => { if (event.event === 'intent-persisted') throw Error('fixture lost observer'); }, async () => tables());
+  expect(result.status).toBe('unknown'); const next = join(r.f.paths.root, result.runId!);
+  expect(await inspectGlobalRecoveryAttempt(next, r.session.planSha256)).toMatchObject({ journalStatus: 'pending', currentObjects: 'not-assessed', executionPermission: false });
+  expect((await planGlobalRecoveryWithCollector(next, r.session.planSha256, async () => tables())).status).toBe('stopped'); unchanged(); r.unchanged();
+});
+
+it('independently reopens every source directory after chain recovery closes', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
+  const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, event => {
+    if (event.phase === 'readback' && event.event === 'issued') { const moved = r.attempt + '.moved'; renameSync(r.attempt, moved); symlinkSync(moved, r.attempt, isWindows() ? 'junction' : 'dir'); }
+  }, async () => tables());
+  expect(result).toMatchObject({ status: 'unknown', phase: 'readback' }); unchanged(); r.unchanged(); expect(statSync(join(r.f.packageRoot, 'package.json')).ino).toBe(r.original);
+});
+
+it('uses the built read-only recovery plan CLI with its real native collector', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), cli = fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url));
+  const env = { ...process.env, HOME: r.f.profile, USERPROFILE: r.f.profile, CAVEAT_HOME: join(r.f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' };
+  const before = readdirSync(r.f.paths.root), result = spawnSync(process.execPath, [cli, 'deployment', 'global-recovery-plan', basename(r.attempt), '--plan-sha256', r.session.planSha256, '--json'], { env, encoding: 'utf8', timeout: 60000 });
+  expect(result.status, result.stderr).toBe(1); const events = result.stdout.trim().split('\n').map(line => JSON.parse(line));
+  expect(events[0]).toMatchObject({ phase: 'input', event: 'issued', sequence: 1 }); expect(events.map(row => row.sequence)).toEqual(events.map((_, i) => i + 1));
+  expect(events.at(-1)).toMatchObject({ schema: 'caveat.global_recovery_plan.v1', status: 'stopped', executionPermission: false, filesystemWrites: 0 });
+  expect(result.stdout).not.toContain(r.f.root); expect(readdirSync(r.f.paths.root)).toEqual(before); unchanged(); r.unchanged();
+});
+
+it('rechecks absent installer lock after the planning process probe without removing a new lock', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), before = readdirSync(r.f.paths.root), lock = Buffer.from('foreign installer');
+  const result = await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => { writeFileSync(r.f.paths.lock, lock, { mode: 0o600 }); return tables(); });
+  expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readFileSync(r.f.paths.lock)).toEqual(lock);
+  expect(readdirSync(r.f.paths.root).filter(name => name !== 'installer.lock')).toEqual(before); unchanged(); r.unchanged();
+});
+
+it('shares bounded file and byte budgets across recovery source reads', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), before = readdirSync(r.f.paths.root), unchanged = savedRecoveryFiles(r.attempt);
+  for (const budget of [{ files: 256, bytes: 0 }, { files: 0, bytes: 64 * 1024 * 1024 }]) {
+    let reached = false;
+    await expect(withGlobalRecoveryAttemptEvidence(r.attempt, r.session.planSha256, async () => { reached = true; }, budget)).rejects.toThrow('chain_evidence_bound');
+    expect(reached).toBe(false);
+  }
+  expect(readdirSync(r.f.paths.root)).toEqual(before); unchanged(); r.unchanged();
+});
+
+it('refuses an unknown ancestor intent despite a confirmed immediate recovery journal', { timeout: 180000 }, async () => {
+  const r = await partialRecovery(), file = join(r.session.runDirectory, 'journal.jsonl'), j = parseGlobalMutationJournal(readFileSync(file), r.session.planSha256);
+  const intent = JSON.stringify({ sequence: j.nextSequence, previousSha256: j.lastSha256, kind: 'intent', step: 'interrupted', operation: 'restore', stateSha256: 'a'.repeat(64) }) + '\n';
+  appendFileSync(file, intent); appendFileSync(file, JSON.stringify({ sequence: j.nextSequence + 1, previousSha256: sha(Buffer.from(intent)), kind: 'result', step: 'interrupted', operation: 'restore', stateSha256: null, outcome: 'unknown' }) + '\n');
+  const before = readdirSync(r.f.paths.root), ancestor = readFileSync(file), unchanged = savedRecoveryFiles(r.attempt);
+  const result = await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables());
+  expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(before); expect(readFileSync(file)).toEqual(ancestor); unchanged();
 });

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, withGlobalRecoverySnapshot } from './managedGlobalRecovery.js';
+import { basename, join } from 'node:path';
+import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths } from './managedGlobalRecovery.js';
 import { openGlobalPathGuard, type GlobalGuardTree, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
-import { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
+import { createGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
 import { assertGlobalRestoreOrder, writeGlobalPrivateEvidence } from './managedGlobalPreservation.js';
-import { preflightGlobalProcesses } from './managedGlobalProcesses.js';
+import { checkGlobalRecoveryProcesses, withGlobalRecoverySourceSnapshot } from './managedGlobalRecoveryChain.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
 
 type Entry = { directory: string; name: string; rows: GlobalGuardTreeRow[]; tree: GlobalGuardTree };
@@ -28,7 +28,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
     runId: recoveryDirectory ? basename(recoveryDirectory) : null, ...(pid ? { pid } : {}) });
   try {
     event('issued'); assert.ok(/^[a-f0-9]{64}$/.test(planSha256) && /^[a-f0-9]{64}$/.test(evidenceSha256), 'global_recovery_expected_digests_required');
-    const result = await withGlobalRecoverySnapshot(runDirectory, planSha256, async source => {
+    const result = await withGlobalRecoverySourceSnapshot(runDirectory, planSha256, async source => {
       assert.equal(source.evidenceSha256, evidenceSha256, 'global_recovery_expected_evidence_changed');
       const { plan, guard } = source, target = join(plan.root, 'global-recovery-' + evidenceSha256.slice(0, 32));
       const entry = (key: string): Entry => {
@@ -55,6 +55,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
       for (const leaf of plan.leaves) slot(plan.binDirectory, leaf.name);
       slot(plan.root, 'shell'); if (plan.baseline.npmManagement.absent) slot(plan.globalRoot, '.package-lock.json');
       for (const row of generated) slot(runDirectory, 'used-' + row.backupName);
+      for (const row of source.vacancySlots ?? []) slot(row.directory, row.name);
       const entries = () => [...objects.flatMap(row => [row.original, ...(row.workingEntry ? [row.workingEntry] : [])]), ...generated.flatMap(row => row.entry ? [row.entry] : [])];
       const verifyObjects = () => {
         const occupied = new Set<string>();
@@ -65,13 +66,9 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
         for (const [path, place] of slots) if (!occupied.has(path)) assert.equal(guard.observe(place.directory, place.name), null, 'global_recovery_unknown_name_appeared');
       };
       const processCheck = async () => {
-        const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)),
-          binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)),
-          protectedPaths: [...new Set([plan.baseline.node.canonical, runDirectory, target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
-        const result = await preflightGlobalProcesses(scope, (probe: ProcessProbeEvent) => {
+        await checkGlobalRecoveryProcesses(source, runDirectory, target, (probe: ProcessProbeEvent) => {
           const saved = phase; phase = 'process-preflight'; try { event(probe.event, probe.pid); } finally { phase = saved; }
         }, collect);
-        assert.equal(result.status, 'ready', 'global_recovery_process_preflight_stopped');
       };
       const verifyImmutable = () => { source.verifyEvidence(); source.verifyProtected(); verifyObjects(); };
       const verifyCurrent = async () => { verifyImmutable(); await processCheck(); verifyImmutable(); };
@@ -81,7 +78,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
       phase = 'private-run'; event('issued'); writes = true; recoveryDirectory = target;
       guard.createPrivateDirectory(plan.root, basename(target));
       const references: ReturnType<typeof writeGlobalPrivateEvidence>[] = [];
-      references.push(writeGlobalPrivateEvidence(guard, target, 'source.json', { schema: 'caveat.global_recovery_source.v1', sourceRun: basename(runDirectory), planSha256,
+      references.push(writeGlobalPrivateEvidence(guard, target, 'source.json', { schema: 'caveat.global_recovery_source.v2', admission: source.admission ?? null, sourceRun: basename(runDirectory), planSha256,
         evidenceSha256, journalSha256: source.journalSha256 }));
       const lock = guard.createJournal(target, 'installer-lock.json', Buffer.from(JSON.stringify({ schema: 1, pid: process.pid, startedAt: new Date().toISOString() }) + '\n'));
       const acquired = guard.moveJournalNoReplace(lock, plan.root, 'installer.lock'); assert.equal(acquired.status, 'moved', 'global_recovery_lock_acquire_unknown');
@@ -126,7 +123,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
         const archived = guard.moveJournalNoReplace(lock, target, 'installer-lock.json'); assert.equal(archived.status, 'moved', 'global_recovery_lock_archive_unknown'); lockAtRoot = false;
         const directoryBindings = guard.directoryBindings();
         guard.close(); event('completed'); phase = 'readback'; event('issued');
-        const reader = await openGlobalPathGuard([...globalRecoveryGuardPaths(plan, runDirectory), target]);
+        const reader = await openGlobalPathGuard([...globalRecoveryGuardPaths(plan, runDirectory), ...(source.sourceRoots ?? []), target]);
         try {
           const directories = reader.directoryBindings();
           for (const binding of directoryBindings) assert.deepEqual(directories.find(row => row.path === binding.path), binding, 'global_recovery_readback_directory_changed');
@@ -157,38 +154,4 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
 
 const withoutToken = ({ directory, name, rows }: Entry) => ({ directory, name, rows: structuredClone(rows) });
 
-/** Journal inspection never assesses current object identities or authorizes another execution. */
-export async function inspectGlobalRecoveryAttempt(runDirectory: string, planSha256: string) {
-  assert.ok(isAbsolute(runDirectory) && resolve(runDirectory) === runDirectory && /^global-recovery-[a-f0-9]{32}$/.test(basename(runDirectory)), 'global_recovery_attempt_path_invalid');
-  const guard = await openGlobalPathGuard([runDirectory]);
-  try {
-    guard.assertPrivateDirectory(runDirectory); const cached = new Map<string, Buffer>(); let totalBytes = 0;
-    const read = (name: string) => {
-      const bytes = guard.readPersistedJournal(runDirectory, name); totalBytes += bytes.length;
-      assert.ok(cached.size < 256 && totalBytes <= 64 * 1024 * 1024, 'global_recovery_attempt_evidence_bound'); cached.set(name, bytes); return bytes;
-    };
-    const decode = (bytes: Buffer) => { const value = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(bytes));
-      assert.ok(Buffer.from(JSON.stringify(value) + '\n').equals(bytes), 'global_recovery_attempt_noncanonical'); return value; };
-    const source = decode(read('source.json'));
-    assert.deepEqual(Object.keys(source).sort(), ['schema', 'sourceRun', 'planSha256', 'evidenceSha256', 'journalSha256'].sort(), 'global_recovery_attempt_source_fields');
-    assert.ok(source.schema === 'caveat.global_recovery_source.v1' && source.planSha256 === planSha256
-      && /^global-migration-[a-f0-9]{32}$/.test(source.sourceRun)
-      && [source.planSha256, source.evidenceSha256, source.journalSha256].every(value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)), 'global_recovery_attempt_source_invalid');
-    assert.equal(basename(runDirectory), 'global-recovery-' + source.evidenceSha256.slice(0, 32), 'global_recovery_attempt_name_unbound');
-    const journal = parseGlobalMutationJournal(read('journal.jsonl'), planSha256);
-    for (const row of journal.records) if (row.kind === 'result' && row.stateSha256) {
-      const bytes = read('state-' + journal.header.runId + '-' + row.sequence + '.json');
-      assert.equal(createHash('sha256').update(bytes).digest('hex'), row.stateSha256, 'global_recovery_attempt_state_changed');
-      const state = decode(bytes);
-      assert.ok(state.schema === 'caveat.global_recovery_state.v1' && state.sourceEvidenceSha256 === source.evidenceSha256
-        && state.step === row.step && state.operation === row.operation && state.state.schema === 'caveat.global_recovery_objects.v1'
-        && state.state.sourceEvidenceSha256 === source.evidenceSha256
-        && Array.isArray(state.state.objects) && state.state.objects.length >= 1 && state.state.objects.length <= 5
-        && Array.isArray(state.state.generated) && state.state.generated.length >= 2 && state.state.generated.length <= 4, 'global_recovery_attempt_state_invalid');
-    }
-    for (const [name, bytes] of cached) assert.ok(guard.readPersistedJournal(runDirectory, name).equals(bytes), 'global_recovery_attempt_changed_during_read');
-    return { schema: 'caveat.global_recovery_attempt_inspection.v1' as const, status: ['ready', 'complete'].includes(journal.status) ? 'observed' as const : 'stopped' as const,
-      journalStatus: journal.status, journalSha256: journal.bytesSha256, sourceEvidenceSha256: source.evidenceSha256 as string,
-      currentObjects: 'not-assessed' as const, executionPermission: false as const, filesystemWrites: 0, childProcesses: 0 };
-  } finally { guard.close(); }
-}
+export { inspectGlobalRecoveryAttempt } from './managedGlobalRecoveryAttempt.js';
