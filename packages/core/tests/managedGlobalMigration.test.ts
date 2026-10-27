@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, chmodSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -92,6 +92,7 @@ describe('product global migration caller', () => {
       npm = installed.find(file => basename(file) === 'npm-cli.js') ?? bundled;
     }
     expect(existsSync(npm), 'the integration fixture requires the installed npm CLI').toBe(true);
+    const privateNpm = join(f.root, 'ordinary-npm'); cpSync(dirname(dirname(npm)), privateNpm, { recursive: true }); npm = join(privateNpm, 'bin/npm-cli.js');
     const control = join(f.root, 'npm-control'); mkdirSync(control, { mode: 0o700 });
     const userConfig = join(control, 'user.npmrc'), globalConfig = join(control, 'global.npmrc'); writeFileSync(userConfig, '\n', { mode: 0o600 }); writeFileSync(globalConfig, '\n', { mode: 0o600 });
     const packageSource = join(f.root, 'legacy-source'); mkdirSync(join(packageSource, 'dist'), { recursive: true, mode: 0o700 });
@@ -304,6 +305,11 @@ describe('read-only admission and native-v2 independent status', () => {
     const alternate = join(f.paths.root, 'other.json'); writeFileSync(alternate, readFileSync(f.paths.pointer)); f.input.snapshot.pointer = alternate;
     await expect(bindGlobalAdmission(f.input, () => {}, async () => tables())).rejects.toThrow('active_pointer_required');
     expect(existsSync(f.paths.lock)).toBe(false);
+  });
+  it.skipIf(isWindows())('rejects a writable npm parent before creating private run state', { timeout: 60000 }, async () => {
+    const f = fixture(), before = readdirSync(f.paths.root); chmodSync(dirname(dirname(f.input.snapshot.npmAlias)), 0o770);
+    await expect(bindGlobalAdmission(f.input, () => {}, async () => tables())).rejects.toThrow('global_guard_writable_parent');
+    expect(readdirSync(f.paths.root)).toEqual(before); expect(existsSync(f.paths.lock)).toBe(false); expect(existsSync(f.packageRoot)).toBe(true);
   });
   it('binds absent settings and their nearest existing parent before mutation', { timeout: 60000 }, async () => {
     const f = fixture(), absent = join(f.profile, 'new-client', 'settings.json'), input = { ...f.input, protectedAbsent: [absent] };

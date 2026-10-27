@@ -33,7 +33,9 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
     assert.equal(selected.windows, isWindows(), 'native_shell_platform_invalid');
     assert.ok(typeof selected.binDir === 'string' && isAbsolute(selected.binDir) && resolve(selected.binDir) === selected.binDir
       && realpathSync(selected.binDir) === selected.binDir, 'native_shell_bin_invalid');
-    const active = readManagedDeploymentAtRoot(root), guard = await openGlobalPathGuard([root, directory, selected.binDir, dirname(active.packageRoot)]);
+    assert.ok(selected.node && typeof selected.node === 'object' && 'canonical' in selected.node
+      && typeof selected.node.canonical === 'string' && isAbsolute(selected.node.canonical), 'native_shell_node_invalid');
+    const active = readManagedDeploymentAtRoot(root), guard = await openGlobalPathGuard([root, directory, selected.binDir, dirname(selected.node.canonical), dirname(active.packageRoot)]);
     try {
       guard.assertPrivateDirectory(directory);
       const bytes = guard.readPersistedJournal(directory, 'manifest.json'); assert.ok(bytes.length <= 65536, 'native_shell_manifest_bound');

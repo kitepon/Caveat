@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "node tests/run.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
