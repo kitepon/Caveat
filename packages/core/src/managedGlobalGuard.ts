@@ -252,7 +252,11 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         phase = 'stage-readback';
         const working = guard.retainTree(stagingPath, stagingName), rows = guard.readTree(working);
         assert.equal(rows.length, originals.length, 'global_working_tree_changed');
+        const createdByPath = new Map(evidence.map(row => [row.relativePath, row.identity]));
+        // Windows may finalize new write timestamps on close; identity, bytes and security must still match creation.
+        const createdBinding = ({ ctime: _, mtime: __, ...value }: GlobalGuardIdentity) => value;
         for (const row of rows) {
+          assert.deepEqual(createdBinding(row.identity), createdBinding(createdByPath.get(row.relativePath)!), 'global_working_created_identity_changed');
           const original = expected.get(row.relativePath)!;
           assert.ok(original && row.identity.kind === original.kind && row.identity.contentSha256 === original.contentSha256
             && row.identity.linkTarget === original.linkTarget && row.identity.ino !== original.ino, 'global_working_tree_changed');

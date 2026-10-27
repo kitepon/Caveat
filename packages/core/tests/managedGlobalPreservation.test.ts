@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, linkSync, statSync, readlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, linkSync, statSync, readlinkSync, renameSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bindGlobalPathGuard, openGlobalPathGuard, type NativeGuardDriver } from '../src/managedGlobalGuard.js';
@@ -227,6 +227,21 @@ describe('private working copies from retained originals', () => {
       if (result.status !== 'copied') throw Error('copy_unconfirmed');
       expect(() => driver.finishWorking(closedCopy!, true)).toThrow('owned_creation_required'); guard.releaseWorkingTree(result.tree);
       expect(() => guard.readTree(result.tree)).toThrow('foreign_tree'); expect(guard.readTree(tree)[0]!.identity.kind).toBe('directory');
+    } finally { guard.close(); }
+  });
+  it('rejects a substituted staging tree even when its content matches the created copy', async () => {
+    const { source, backup } = fixture(), driver = await native(); let stageRoot: object | null = null;
+    const guard = bindGlobalPathGuard([source, backup], { ...driver,
+      createWorking(parent, name, kind, target) { const ref = driver.createWorking(parent, name, kind, target); if (name === 'private-stage') stageRoot = ref; return ref; },
+      close(ref) {
+        driver.close(ref);
+        if (ref === stageRoot) { stageRoot = null; renameSync(join(backup, 'private-stage'), join(backup, 'created-stage')); cpSync(join(backup, 'created-stage'), join(backup, 'private-stage'), { recursive: true }); }
+      },
+    });
+    try {
+      const tree = guard.retainTree(source, 'caveat-cli'), result = guard.copyTreeNoReplace(tree, source, 'new-copy', backup, 'private-stage');
+      expect(result.status).toBe('unknown'); expect(existsSync(join(source, 'new-copy'))).toBe(false);
+      expect(existsSync(join(backup, 'created-stage'))).toBe(true); expect(existsSync(join(backup, 'private-stage'))).toBe(true);
     } finally { guard.close(); }
   });
   it.skipIf(isWindows())('copies relative internal symlink objects without following their targets', async () => {
