@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
   xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; aclType?: number };
-type Ref = { fd: number; mutation?: boolean; parent?: Ref; name?: string };
+type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
 
 export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
@@ -81,18 +81,20 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     }
     const securitySha256 = attributes(value as Ref, stat.isSymbolicLink());
     const final = fstatSync((value as Ref).fd, { bigint: true });
-    for (const key of ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs'] as const) assert.equal(final[key], stat[key], 'global_guard_metadata_changed_during_read');
+    const stable = (value as Ref).parentOnly ? ['dev', 'ino', 'uid', 'gid', 'mode'] as const
+      : ['dev', 'ino', 'uid', 'gid', 'mode', 'nlink', 'size', 'mtimeNs', 'ctimeNs'] as const;
+    for (const key of stable) assert.equal(final[key], stat[key], 'global_guard_metadata_changed_during_read');
     return { dev: String(stat.dev), ino: String(stat.ino), kind: stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'link' : 'file',
       size: String(stat.size), links: String(stat.nlink), mtime: String(stat.mtimeNs), ctime: String(stat.ctimeNs),
       owner: String(stat.uid), group: String(stat.gid), mode: Number(stat.mode), securitySha256, ...(contentSha256 ? { contentSha256 } : {}) };
   };
   return {
-    openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd }; },
-    openChild(parent, name, mutation) {
+    openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd, parentOnly: true }; },
+    openChild(parent, name, purpose) {
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      return { fd, mutation, parent: parent as Ref, name };
+      return { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent', parent: parent as Ref, name };
     },
     snapshot,
     rename(from, name, source, to, target) {

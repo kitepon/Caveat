@@ -7,7 +7,7 @@ import { globalFilesystemNativeSpec, isWindows } from '../src/platform.js';
 import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
 import { createWindowsGlobalGuard } from '../src/managedWindowsGuard.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
-import { decodeGuardSid, verifyGuardAcl } from '../src/managedWindowsGuard.js';
+import { decodeGuardSid, isGuardTrustedOwner, verifyGuardAcl } from '../src/managedWindowsGuard.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const path of roots.splice(0)) rmSync(path, { recursive: true, force: true }); });
@@ -115,6 +115,23 @@ describe('retained global filesystem guard', () => {
     const guard = await openGlobalPathGuard([source, backup]);
     try { expect(() => guard.retain(source, 'leaf')).toThrow('shared_leaf'); } finally { guard.close(); }
   });
+  it('allows unrelated child-count changes in a held ancestor while retaining the target leaf', async () => {
+    const { root, source, backup } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const entry = guard.retain(source, 'leaf'); mkdirSync(join(root, 'unrelated'), { mode: 0o700 });
+      expect(guard.moveNoReplace(entry, backup, 'retained').status).toBe('moved');
+    } finally { guard.close(); }
+  });
+  it('still refuses child-count changes inside the directory being retained as the mutation leaf', async () => {
+    const { source, backup } = fixture(); mkdirSync(join(source, 'package'), { mode: 0o700 });
+    if (isWindows()) runWindowsAclPrivateTree(join(source, 'package'));
+    const guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const entry = guard.retain(source, 'package'); mkdirSync(join(source, 'package/changed'), { mode: 0o700 });
+      expect(() => guard.moveNoReplace(entry, backup, 'package')).toThrow('changed');
+      expect(existsSync(join(source, 'package/changed'))).toBe(true);
+    } finally { guard.close(); }
+  });
   it.skipIf(isWindows())('holds the symlink object itself and never opens or modifies its target', async () => {
     const { source, backup, root } = fixture(); symlinkSync('../outside', join(source, 'link')); writeFileSync(join(root, 'outside'), 'untouched');
     const guard = await openGlobalPathGuard([source, backup]);
@@ -170,6 +187,13 @@ describe('Windows native security layouts', () => {
     expect(decodeGuardSid(sid)).toBe('S-1-5-18');
     expect(() => decodeGuardSid(sid.subarray(0, 8))).toThrow('invalid_sid');
     expect(() => verifyGuardAcl(acl(2, 5), new Set(), true)).toThrow('unsupported_ace');
+  });
+  it('recognizes the fixed Windows resource-protection owner only for ancestors, never for mutation leaves', () => {
+    const installer = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464';
+    expect(isGuardTrustedOwner(installer, 'S-1-5-21-1234', false)).toBe(true);
+    expect(isGuardTrustedOwner(installer, 'S-1-5-21-1234', true)).toBe(false);
+    expect(isGuardTrustedOwner('S-1-5-80-1234', 'S-1-5-21-1234', false)).toBe(false);
+    expect(isGuardTrustedOwner('S-1-5-21-9876', 'S-1-5-21-1234', false)).toBe(false);
   });
   it('rejects foreign writers while allowing only creation at an independently bound ancestor', () => {
     expect(() => verifyGuardAcl(acl(2), new Set(), true)).toThrow('foreign_acl_writer');

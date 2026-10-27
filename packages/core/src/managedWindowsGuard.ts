@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 
+const systemTrustees = ['S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'];
+export function isGuardTrustedOwner(owner: string, current: string, mutation: boolean) {
+  return owner === current || !mutation && systemTrustees.includes(owner);
+}
+
 /** SID and ACL buffers are bounded before any native pointer is decoded beyond their headers. */
 export function decodeGuardSid(bytes: Buffer) {
   assert.ok(bytes.length >= 8 && bytes[0] === 1 && bytes[1]! <= 15 && bytes.length === 8 + 4 * bytes[1]!, 'global_guard_invalid_sid');
@@ -57,13 +62,13 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     assert.notEqual(tokenInfo(own[0], 1, buffer, buffer.length, needed), 0, 'global_guard_token_unavailable');
     currentSid = sidAt(koffi.decode(buffer, 'void *'));
   } finally { assert.notEqual(close(own[0]), 0, 'global_guard_token_close_failed'); }
-  const trusted = new Set([currentSid, 'S-1-5-18', 'S-1-5-32-544']);
+  const trusted = new Set([currentSid, ...systemTrustees]);
   const descriptor = (ref: Ref) => {
     const owner: unknown[] = [null], group: unknown[] = [null], dacl: unknown[] = [null], sd: unknown[] = [null];
     assert.equal(getSecurity(ref.handle, 1, 7, owner, group, dacl, null, sd), 0, 'global_guard_security_unavailable');
     try {
       const ownerSid = sidAt(owner[0]), groupSid = sidAt(group[0]);
-      assert.ok(ref.mutation ? ownerSid === currentSid : trusted.has(ownerSid), 'global_guard_foreign_owner');
+      assert.ok(isGuardTrustedOwner(ownerSid, currentSid, ref.mutation), 'global_guard_foreign_owner');
       assert.ok(dacl[0], 'global_guard_null_dacl');
       const header = bytesAt(dacl[0], 8), size = header.readUInt16LE(2);
       assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation);
@@ -109,7 +114,8 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       assert.ok(handle && koffi.address(handle) !== 0xffffffffffffffffn, 'global_guard_root_open_failed');
       return { handle, mutation: false };
     },
-    openChild(parent, name, mutation) {
+    openChild(parent, name, purpose) {
+      const mutation = purpose === 'mutation';
       const nameBuffer = Buffer.from(name + '\0', 'utf16le'), unicode = Buffer.alloc(16), attributes = Buffer.alloc(48), status = Buffer.alloc(16), handle: unknown[] = [null];
       unicode.writeUInt16LE(nameBuffer.length - 2); unicode.writeUInt16LE(nameBuffer.length, 2); unicode.writeBigUInt64LE(koffi.address(nameBuffer), 8);
       attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);

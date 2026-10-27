@@ -13,7 +13,7 @@ export type GlobalGuardIdentity = {
 };
 export type NativeGuardDriver = {
   openRoot(path: string): object;
-  openChild(parent: object, name: string, mutation: boolean): object | null;
+  openChild(parent: object, name: string, purpose: 'parent' | 'observe' | 'mutation'): object | null;
   snapshot(ref: object): GlobalGuardIdentity;
   rename(sourceParent: object, sourceName: string, source: object, targetParent: object, targetName: string): void;
   close(ref: object): void;
@@ -46,8 +46,8 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     if (errors.length) throw new AggregateError(errors, 'global_guard_close_unconfirmed');
   };
   const active = () => assert.ok(!closed, 'global_guard_closed');
-  const inspect = (parent: object, name: string) => {
-    const ref = driver.openChild(parent, name, false); if (!ref) return null;
+  const inspect = (parent: object, name: string, purpose: 'parent' | 'observe' = 'observe') => {
+    const ref = driver.openChild(parent, name, purpose); if (!ref) return null;
     try { return driver.snapshot(ref); } finally { driver.close(ref); }
   };
   const checkDirectories = () => {
@@ -55,7 +55,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     for (const [alias, canonical] of aliases) assert.equal(realpathSync(alias), canonical, 'global_guard_alias_changed');
     for (const directory of directories.values()) {
       assert.deepEqual(directoryBinding(driver.snapshot(directory.ref)), directoryBinding(directory.initial), 'global_guard_parent_changed');
-      if (directory.parent) assert.deepEqual(directoryBinding(inspect(directory.parent.ref, directory.name!)!), directoryBinding(directory.initial), 'global_guard_parent_name_changed');
+      if (directory.parent) assert.deepEqual(directoryBinding(inspect(directory.parent.ref, directory.name!, 'parent')!), directoryBinding(directory.initial), 'global_guard_parent_name_changed');
     }
   };
   try {
@@ -72,7 +72,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         leaf(name); key += (key.endsWith(sep) ? '' : sep) + name;
         let next = directories.get(key);
         if (!next) {
-          const ref = driver.openChild(current.ref, name, false); assert.ok(ref, 'global_guard_parent_missing'); keep(ref);
+          const ref = driver.openChild(current.ref, name, 'parent'); assert.ok(ref, 'global_guard_parent_missing'); keep(ref);
           next = { ref, initial: driver.snapshot(ref), parent: current, name };
           assert.equal(next.initial.kind, 'directory', 'global_guard_parent_redirect'); directories.set(key, next);
         }
@@ -92,7 +92,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     assertCurrent: checkDirectories,
     retain(path: string, name: string): GlobalGuardEntry {
       leaf(name); checkDirectories(); const parent = directory(path);
-      const ref = driver.openChild(parent.ref, name, true); assert.ok(ref, 'global_guard_leaf_missing'); keep(ref);
+      const ref = driver.openChild(parent.ref, name, 'mutation'); assert.ok(ref, 'global_guard_leaf_missing'); keep(ref);
       const expected = driver.snapshot(ref); assert.ok(expected.kind === 'directory' || expected.links === '1', 'global_guard_shared_leaf');
       assert.deepEqual(inspect(parent.ref, name), expected, 'global_guard_leaf_changed');
       const token = Object.freeze({ identity: Object.freeze({ ...expected }) }); entries.set(token, { ref, directory: parent, name, expected });
