@@ -29,6 +29,18 @@ function fixture() {
 }
 async function native(): Promise<NativeGuardDriver> { const spec = globalFilesystemNativeSpec(); return spec.windows ? createWindowsGlobalGuard() : createPosixGlobalGuard(spec); }
 describe('held original trees and known-only preservation', () => {
+  it('uses the same reviewed native pins for preservation without opening conflicting mutation handles', async () => {
+    const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const reviewed = new Map(objects.map(item => [item.step, guard.retainTree(item.directory, item.name)]));
+      const before = objects.map(item => guard.readTree(reviewed.get(item.step)!));
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan);
+      const engine = prepareGlobalObjectPreservation({ ...guard, retainTree() { throw Error('duplicate native pin'); } }, journal, objects, async () => {}, reviewed);
+      expect(engine.manifest().objects.map(row => row.rows)).toEqual(before);
+      expect((await engine.preserveAll()).status).toBe('preserved');
+      for (const item of objects) expect((await engine.restoreKnown(item.step)).status).toBe('confirmed');
+    } finally { guard.close(); }
+  });
   it('retains every original object with durable ordered evidence and restores the known tree without reconstruction', async () => {
     const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]); let checks = 0;
     try {

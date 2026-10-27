@@ -161,7 +161,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
         const objects: GlobalPreservationObject[] = [{ step: 'package', role: 'package', directory: globalRoot, name: 'caveat-cli', backupDirectory: runDirectory, backupName: 'original-package' }];
         if (!baseline.npmManagement.absent) objects.push({ step: 'management', role: 'npm-management', directory: globalRoot, name: '.package-lock.json', backupDirectory: runDirectory, backupName: 'original-management' });
         for (const leaf of leaves) if (leaf.identity) objects.push({ step: leaf.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: leaf.name, backupDirectory: runDirectory, backupName: 'original-' + leaf.name });
-        const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify);
+        const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify, new Map(originalTrees.map(row => [row.step, row.tree])));
         for (const row of engine.manifest().objects) assert.deepEqual(row.rows, originalObjects.find(value => value.step === row.step)!.rows, 'global_migration_original_seed_changed');
         const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
         const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));

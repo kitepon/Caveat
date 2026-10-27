@@ -35,7 +35,7 @@ export function writeGlobalPrivateEvidence(guard: Guard, directory: string, name
 }
 
 /** Internal engine: the caller must bind fresh package/protected-state/process checks; no CLI bypass exists. */
-export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, input: GlobalPreservationObject[], verifyBeforeMutation: () => Promise<void>) {
+export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, input: GlobalPreservationObject[], verifyBeforeMutation: () => Promise<void>, reviewedTrees: ReadonlyMap<string, GlobalGuardTree> = new Map()) {
   assert.ok(input.length >= 1 && input.length <= 5 && input.filter(row => row.role === 'package').length === 1, 'global_preservation_scope_required');
   const items = structuredClone(input).map(row => ({ ...row, directory: guard.canonicalDirectory(row.directory), backupDirectory: guard.canonicalDirectory(row.backupDirectory) })), steps = new Set<string>(), names = new Set<string>();
   assert.equal(new Set(items.map(row => row.role + ':' + row.name)).size, items.length, 'global_preservation_duplicate_role');
@@ -59,7 +59,8 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
   const saved = items.map(item => {
     assert.equal(guard.observe(item.backupDirectory, item.backupName), null, 'global_preservation_destination_exists');
     assert.equal(guard.directoryIdentity(item.directory).dev, guard.directoryIdentity(item.backupDirectory).dev, 'global_preservation_cross_volume');
-    const tree = guard.retainTree(item.directory, item.name), rows = guard.readTree(tree);
+    // Reuse the reviewed native pin: a second DELETE handle conflicts with Windows deny-delete sharing.
+    const tree = reviewedTrees.get(item.step) ?? guard.retainTree(item.directory, item.name), rows = guard.readTree(tree);
     assert.ok(rows[0]!.identity.kind === (item.role === 'package' ? 'directory' : item.role === 'npm-management' ? 'file' : rows[0]!.identity.kind), 'global_preservation_kind_invalid');
     assert.ok(item.role !== 'leaf' || rows.length === 1 && ['file', 'link'].includes(rows[0]!.identity.kind), 'global_preservation_leaf_invalid');
     if (item.role === 'package') {
