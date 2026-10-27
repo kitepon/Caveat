@@ -14,7 +14,7 @@ export function decodeGuardSid(bytes: Buffer) {
   for (let index = 8; index < bytes.length; index += 4) parts.push(bytes.readUInt32LE(index));
   return 'S-1-' + authority + (parts.length ? '-' + parts.join('-') : '');
 }
-export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: boolean) {
+export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: boolean, privateOwner?: string) {
   assert.ok(bytes.length >= 8 && bytes.length <= 65535 && bytes.readUInt16LE(2) === bytes.length, 'global_guard_invalid_acl');
   assert.ok(bytes[0] === 2 || bytes[0] === 4, 'global_guard_unsupported_acl_revision');
   let offset = 8;
@@ -25,6 +25,7 @@ export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: bo
     const mask = bytes.readUInt32LE(offset + 4), sid = decodeGuardSid(bytes.subarray(offset + 8, offset + size));
     // Ancestors may permit creation, but never replacement or security/attribute changes by an ordinary foreign principal.
     const writes = 0x10000000 | 0x40000000 | 0x000d0150 | (mutation ? 0x6 : 0);
+    if (privateOwner && type === 0 && !(flags & 8)) assert.ok(sid === privateOwner, 'global_journal_foreign_acl_reader');
     if (type === 0 && !(flags & 8) && (mask & writes) !== 0) assert.ok(trusted.has(sid), 'global_guard_foreign_acl_writer');
     offset += size;
   }
@@ -46,6 +47,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const flush = kernel.func('int __stdcall FlushFileBuffers(void *handle)');
   const openRelative = native.func('int32_t __stdcall NtCreateFile(_Out_ void **handle, uint32_t access, const void *attributes, _Out_ void *status, const void *allocation, uint32_t fileAttributes, uint32_t share, uint32_t disposition, uint32_t options, const void *ea, uint32_t eaLength)');
   const getSecurity = security.func('uint32_t __stdcall GetSecurityInfo(void *handle, int type, uint32_t requested, _Out_ void **owner, _Out_ void **group, _Out_ void **dacl, void *sacl, _Out_ void **descriptor)');
+  const descriptorControl = security.func('int __stdcall GetSecurityDescriptorControl(const void *descriptor, _Out_ uint16_t *control, _Out_ uint32_t *revision)');
   const toString = security.func('int __stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(const void *descriptor, uint32_t revision, uint32_t requested, _Out_ void **text, _Out_ uint32_t *length)');
   const localFree = kernel.func('void * __stdcall LocalFree(void *memory)');
   const currentProcess = kernel.func('void * __stdcall GetCurrentProcess()');
@@ -69,7 +71,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const readOnlyJournals = new WeakSet<object>();
   const journal = (ref: object, write = false) => {
     assert.ok(createdJournals.has(ref) || !write && readOnlyJournals.has(ref), 'global_journal_owned_creation_required');
-    assert.equal(descriptor({ ...(ref as Ref), mutation: true }).owner, currentSid, 'global_journal_private_file_required'); return ref as Ref;
+    assert.equal(descriptor({ ...(ref as Ref), mutation: true }, true).owner, currentSid, 'global_journal_private_file_required'); return ref as Ref;
   };
   const journalSecurity = () => {
     const sid = currentSidBytes, aclSize = 16 + sid.length, bytes = Buffer.alloc(20 + sid.length + aclSize), acl = 20 + sid.length;
@@ -78,15 +80,20 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     bytes.writeUInt16LE(8 + sid.length, acl + 10); bytes.writeUInt32LE(0x001f01ff, acl + 12); sid.copy(bytes, acl + 16);
     return bytes;
   };
-  const descriptor = (ref: Ref) => {
+  const descriptor = (ref: Ref, privateFile = createdJournals.has(ref) || readOnlyJournals.has(ref)) => {
     const owner: unknown[] = [null], group: unknown[] = [null], dacl: unknown[] = [null], sd: unknown[] = [null];
     assert.equal(getSecurity(ref.handle, 1, 7, owner, group, dacl, null, sd), 0, 'global_guard_security_unavailable');
     try {
       const ownerSid = sidAt(owner[0]), groupSid = sidAt(group[0]);
       assert.ok(isGuardTrustedOwner(ownerSid, currentSid, ref.mutation), 'global_guard_foreign_owner');
       assert.ok(dacl[0], 'global_guard_null_dacl');
+      if (privateFile) {
+        const control = [0], revision = [0];
+        assert.notEqual(descriptorControl(sd[0], control, revision), 0, 'global_journal_security_unavailable');
+        assert.ok((Number(control[0]) & 0x1000) !== 0, 'global_journal_dacl_unprotected');
+      }
       const header = bytesAt(dacl[0], 8), size = header.readUInt16LE(2);
-      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation);
+      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation, privateFile ? currentSid : undefined);
       const text: unknown[] = [null], length = [0];
       assert.notEqual(toString(sd[0], 1, 7, text, length), 0, 'global_guard_security_unavailable');
       try {

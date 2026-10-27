@@ -10,7 +10,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
   const open = lib.func('int open(const char *path, int flags)');
   const openat = lib.func('int openat(int dirfd, const char *path, int flags)');
-  const createat = lib.func('int openat(int dirfd, const char *path, int flags, uint32_t mode)');
+  const createat = lib.func('int openat(int dirfd, const char *path, int flags, ...)');
   const createdJournals = new WeakSet<object>();
   const readOnlyJournals = new WeakSet<object>();
   const journal = (ref: object, write = false) => {
@@ -110,7 +110,8 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     createJournal(parent, name) {
       const stat = fstatSync((parent as Ref).fd, { bigint: true });
       assert.ok(stat.isDirectory() && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o077n) === 0n, 'global_journal_private_parent_required');
-      const fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 0o600));
+      // Darwin ARM64 passes variadic arguments differently from fixed arguments.
+      const fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 'int', 0o600));
       assert.ok(fd >= 0, 'global_journal_exclusive_create_failed');
       const ref = { fd, mutation: true, parent: parent as Ref, name }; createdJournals.add(ref); return ref;
     },

@@ -203,5 +203,6 @@ describe('Windows native security layouts', () => {
     expect(() => verifyGuardAcl(acl(2), new Set(), false)).not.toThrow();
     expect(() => verifyGuardAcl(acl(0x40), new Set(), false)).toThrow('foreign_acl_writer');
     expect(() => verifyGuardAcl(acl(0x40000000), new Set(['S-1-5-18']), true)).not.toThrow();
+    expect(() => verifyGuardAcl(acl(1), new Set(['S-1-5-18']), true, 'S-1-5-21-1234')).toThrow('foreign_acl_reader');
   });
 });
