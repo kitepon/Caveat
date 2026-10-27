@@ -45,7 +45,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "node ../../packages/core/tests/run.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "node ../../scripts/verify-release-commit.mjs"

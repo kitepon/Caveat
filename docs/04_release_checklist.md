@@ -400,7 +400,7 @@ Before the next managed release is published, retain an acceptance result from e
 
 Hosted の文書・candidate pack・公開 job は、`.github/ci-toolchain.json` の Node 24.22.1 と pnpm 10.0.0 を使う。pnpm は root の `packageManager` とも一致させ、実行時に実版を照合する。workflow の完全版指定と共有 contract の一致は文書・release smoke の両 gate で検査する。
 
-3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。core の移行試験は同じ実行 binary（共有 libnode 版は隣接 library も）を私有 fixture へコピーして起動し、製品の runtime 親保護条件を保つ。共有 runtime の権限は変更しない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
+3 OS の full CI は host の Node を使い、完全版の固定や host の更新は行わない。core と CLI の移行試験は同じ既存 runner で実行 binary（共有 libnode 版は隣接 library も）を私有 fixture へコピーして起動し、製品の runtime 親保護条件を保つ。共有 runtime の権限は変更しない。実 Node・execPath・SQLite を proof に記録し、package の engines、製品の実 FTS5・trigram probe、共有 contract の既知影響版拒否を通す。将来の host 更新も、これらを満たせば許容する。
 
 影響版の出典は contract に記録する。Realm lifetime の範囲は [Lattice PR32](https://github.com/kitepon/Lattice/pull/32) と同じ [Node upstream repair](https://github.com/nodejs/node/pull/65778) を使い、24.x の修理は [24.22.0](https://nodejs.org/en/blog/release/v24.22.0) に収載されている。選定した 24.22.1 は、さらに [2026-10-21 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases) の修正版である。これは記録した既知範囲の検査であり、将来の未知の欠陥や host 全体の trust を保証するものではない。
 
