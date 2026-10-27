@@ -561,6 +561,24 @@ are read-only recovery inputs and are never replayed or appended automatically.
 The journal proves recorded ordering, not completion of the full migration plan;
 the preservation/uninstall/recovery engine still has to verify actual state.
 
+The unreleased preservation engine inventories descendants relative to retained
+native directories, with entry/depth/byte bounds and no link traversal. It checks
+every descendant's owner, link count, identity, contents and observable security,
+then repeats the inventory before and after the root-object move. A same-volume
+rename retains the original object, including unprojected attributes and Windows
+alternate streams; the inventory never substitutes for that original. A changed
+or unreadable descendant after a move yields unknown with the observed root
+placement and any completed tree observation. POSIX moves also fsync both parents.
+
+The internal engine limits original-object moves to the Caveat package, npm's
+management file and the known shell leaves. Fresh package/protected-state/process
+checks remain mandatory caller responsibilities before each mutation; the engine
+has no CLI entry or permission bypass. It records durable intent/result for each
+object, exact partial states and known-only restoration without destination
+overwrite. This component does not yet create working copies, run npm, reopen a
+persisted recovery plan or install wrappers. Those integrations, final review and
+candidate validation remain unfinished.
+
 ### Windows hookの保護保存transport（未公開source）
 
 Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。

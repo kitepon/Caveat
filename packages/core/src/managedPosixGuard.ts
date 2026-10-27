@@ -3,7 +3,7 @@ import { closeSync, constants, fstatSync, fsyncSync, readSync, writeSync } from 
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
-  xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; aclType?: number };
+  directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; aclType?: number };
 type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
 
 export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
@@ -11,6 +11,10 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
   const open = lib.func('int open(const char *path, int flags)');
   const openat = lib.func('int openat(int dirfd, const char *path, int flags)');
   const createat = lib.func('int openat(int dirfd, const char *path, int flags, ...)');
+  const directoryOpen = lib.func('void *fdopendir(int fd)');
+  const directoryRead = lib.func('void *' + spec.directoryRead + '(void *directory)');
+  const directoryClose = lib.func('int closedir(void *directory)');
+  const linkRead = lib.func('intptr_t readlinkat(int directory, const char *name, _Out_ void *buffer, size_t size)');
   const createdJournals = new WeakSet<object>();
   const readOnlyJournals = new WeakSet<object>();
   const journal = (ref: object, write = false) => {
@@ -88,6 +92,13 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       for (const key of ['dev', 'ino', 'size', 'uid', 'gid', 'mode', 'nlink', 'mtimeNs', 'ctimeNs'] as const) assert.equal(after[key], stat[key], 'global_guard_file_changed_during_read');
       assert.equal(BigInt(offset), stat.size, 'global_guard_file_changed_during_read'); contentSha256 = hash.digest('hex');
     }
+    let linkTarget: string | undefined;
+    if (stat.isSymbolicLink()) {
+      const ref = value as Ref, bytes = Buffer.alloc(65537);
+      const length = Number(linkRead(ref.parent!.fd, ref.name!, bytes, bytes.length));
+      assert.ok(length > 0 && length < bytes.length, 'global_guard_link_target_unavailable');
+      linkTarget = new TextDecoder('utf8', { fatal: true }).decode(bytes.subarray(0, length));
+    }
     const securitySha256 = attributes(value as Ref, stat.isSymbolicLink());
     const final = fstatSync((value as Ref).fd, { bigint: true });
     const stable = (value as Ref).parentOnly ? ['dev', 'ino', 'uid', 'gid', 'mode'] as const
@@ -95,7 +106,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     for (const key of stable) assert.equal(final[key], stat[key], 'global_guard_metadata_changed_during_read');
     return { dev: String(stat.dev), ino: String(stat.ino), kind: stat.isDirectory() ? 'directory' : stat.isSymbolicLink() ? 'link' : 'file',
       size: String(stat.size), links: String(stat.nlink), mtime: String(stat.mtimeNs), ctime: String(stat.ctimeNs),
-      owner: String(stat.uid), group: String(stat.gid), mode: Number(stat.mode), securitySha256, ...(contentSha256 ? { contentSha256 } : {}) };
+      owner: String(stat.uid), group: String(stat.gid), mode: Number(stat.mode), securitySha256, ...(contentSha256 ? { contentSha256 } : {}), ...(linkTarget !== undefined ? { linkTarget } : {}) };
   };
   return {
     openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd, parentOnly: true }; },
@@ -107,6 +118,30 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,
+    listDirectory(value) {
+      // A fresh description avoids sharing enumeration offsets with the retained directory.
+      const fd = Number(openat((value as Ref).fd, '.', flags | constants.O_DIRECTORY));
+      assert.ok(fd >= 0, 'global_guard_directory_open_failed');
+      const stream = directoryOpen(fd);
+      if (!stream) { closeSync(fd); throw Error('global_guard_directory_stream_failed'); }
+      const names: string[] = []; let count = 0;
+      try {
+        for (;;) {
+          koffi.errno(0); const entry = directoryRead(stream);
+          if (!entry) { assert.equal(koffi.errno(), 0, 'global_guard_directory_read_failed'); break; }
+          assert.ok(++count <= 100002, 'global_guard_tree_entry_bound');
+          const header = Buffer.from(koffi.decode(entry, 'uint8_t', spec.directoryNameOffset));
+          const length = header.readUInt16LE(16);
+          assert.ok(length > spec.directoryNameOffset && length <= 4096, 'global_guard_directory_record_bound');
+          const bytes = Buffer.from(koffi.decode(entry, 'uint8_t', length)).subarray(spec.directoryNameOffset);
+          const end = bytes.indexOf(0); assert.ok(end > 0, 'global_guard_directory_name_invalid');
+          const name = new TextDecoder('utf8', { fatal: true }).decode(bytes.subarray(0, end));
+          if (name !== '.' && name !== '..') names.push(name);
+          assert.ok(names.length <= 100000, 'global_guard_tree_entry_bound');
+        }
+        return names;
+      } finally { assert.equal(directoryClose(stream), 0, 'global_guard_directory_close_failed'); }
+    },
     createJournal(parent, name) {
       const stat = fstatSync((parent as Ref).fd, { bigint: true });
       assert.ok(stat.isDirectory() && Number(stat.uid) === process.getuid?.() && (stat.mode & 0o077n) === 0n, 'global_journal_private_parent_required');
@@ -131,6 +166,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       if (rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace) !== 0)
         throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: koffi.errno() });
       Object.assign(source, { parent: to, name: target });
+      fsyncSync((from as Ref).fd); fsyncSync((to as Ref).fd);
     },
     close(ref) { createdJournals.delete(ref); readOnlyJournals.delete(ref); closeSync((ref as Ref).fd); },
   };

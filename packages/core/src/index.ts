@@ -53,7 +53,7 @@ export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, ass
 export * from './managedShell.js';
 export { snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
 export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
-export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardIdentity } from './managedGlobalGuard.js';
+export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardTree, type GlobalGuardTreeRow, type GlobalGuardIdentity } from './managedGlobalGuard.js';
 export { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
 
 export { usesManagedGuidance } from './managedGuidance.js';

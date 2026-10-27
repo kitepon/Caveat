@@ -46,6 +46,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const write = kernel.func('int __stdcall WriteFile(void *handle, const void *buffer, uint32_t size, _Out_ uint32_t *count, void *overlapped)');
   const flush = kernel.func('int __stdcall FlushFileBuffers(void *handle)');
   const openRelative = native.func('int32_t __stdcall NtCreateFile(_Out_ void **handle, uint32_t access, const void *attributes, _Out_ void *status, const void *allocation, uint32_t fileAttributes, uint32_t share, uint32_t disposition, uint32_t options, const void *ea, uint32_t eaLength)');
+  const queryDirectory = native.func('int32_t __stdcall NtQueryDirectoryFile(void *handle, void *event, void *routine, void *context, _Out_ void *status, _Out_ void *buffer, uint32_t length, int kind, uint8_t single, void *pattern, uint8_t restart)');
   const getSecurity = security.func('uint32_t __stdcall GetSecurityInfo(void *handle, int type, uint32_t requested, _Out_ void **owner, _Out_ void **group, _Out_ void **dacl, void *sacl, _Out_ void **descriptor)');
   const descriptorControl = security.func('int __stdcall GetSecurityDescriptorControl(const void *descriptor, _Out_ uint16_t *control, _Out_ uint32_t *revision)');
   const toString = security.func('int __stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(const void *descriptor, uint32_t revision, uint32_t requested, _Out_ void **text, _Out_ uint32_t *length)');
@@ -158,6 +159,22 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     },
     openChild,
     snapshot,
+    listDirectory(value) {
+      const buffer = Buffer.alloc(65536), status = Buffer.alloc(16), names: string[] = [];
+      for (let index = 0; ; index++) {
+        const result = Number(queryDirectory((value as Ref).handle, null, null, null, status, buffer, buffer.length, 12, 1, null, index === 0 ? 1 : 0));
+        if ((result >>> 0) === 0x80000006) break;
+        assert.equal(result, 0, 'global_guard_directory_read_failed');
+        const size = Number(status.readBigUInt64LE(8));
+        assert.ok(size >= 12 && size <= buffer.length && buffer.readUInt32LE(0) === 0, 'global_guard_directory_record_bound');
+        const length = buffer.readUInt32LE(8);
+        assert.ok(length > 0 && length % 2 === 0 && length + 12 <= size, 'global_guard_directory_name_invalid');
+        const name = new TextDecoder('utf-16le', { fatal: true }).decode(buffer.subarray(12, 12 + length));
+        if (name !== '.' && name !== '..') names.push(name);
+        assert.ok(index <= 100002 && names.length <= 100000, 'global_guard_tree_entry_bound');
+      }
+      return names;
+    },
     createJournal(parent, name) {
       assert.equal(descriptor({ ...(parent as Ref), mutation: true }).owner, currentSid, 'global_journal_private_parent_required');
       const ref = openChild(parent, name, 'mutation', true)!; createdJournals.add(ref); return ref;
