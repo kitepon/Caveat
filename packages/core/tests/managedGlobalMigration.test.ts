@@ -27,7 +27,7 @@ const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
 function tables(unknown = false): NativeProcessTables {
   const stat = statSync(process.execPath, { bigint: true }), executable = { path: realpathSync(process.execPath), dev: String(stat.dev), ino: String(stat.ino) };
   const self = { pid: process.pid, ppid: process.ppid, birth: 'fixture-birth', uid: 1000, executable, argv: [process.execPath, 'fixture-managed-entry'], state: 'S' };
-  const rows = unknown ? [self, { ...self, pid: process.pid + 123, birth: 'fixture-other', argv: [process.execPath, '-e', 'unknown code'] }] : [self];
+  const rows = unknown ? [self, { ...self, pid: process.pid + 123, birth: 'fixture-other', executable: null, argv: null }] : [self];
   return { before: rows, after: structuredClone(rows), errors: [], selfPid: process.pid, selfExecutable: executable, caseInsensitive: isWindows() };
 }
 function fixture() {
@@ -120,6 +120,29 @@ describe('product global migration caller', () => {
       expect(readFileSync(join(f.packageRoot, 'package.json'))).toEqual(before); expect(readFileSync(f.paths.pointer)).toEqual(pointer);
     } finally { session.close(); }
   });
+});
+
+it('stops after a newly observed bound consumer without poisoning the confirmed package-retain journal', { timeout: 120000 }, async () => {
+  const f = fixture(); let session: Awaited<ReturnType<typeof bindGlobalMigration>> | undefined;
+  const collect = async () => {
+    const value = tables();
+    if (session?.engine.manifest().objects[0]?.state === 'preserved') {
+      const row = { ...value.before[0]!, pid: process.pid + 123, birth: 'new-consumer', argv: [process.execPath, join(f.packageRoot, 'dist/caveat.js')] };
+      value.before.push(row); value.after.push(structuredClone(row));
+    }
+    return value;
+  };
+  session = await bindGlobalMigration(f.input, () => {}, collect);
+  const run = session.runDirectory, digest = session.planSha256;
+  try {
+    const stopped = await session.engine.preserveAll();
+    expect(stopped).toMatchObject({ status: 'stopped', recovery: 'fresh-known-only-plan-required' });
+    expect(session.journal.read()).toMatchObject({ status: 'ready', records: [{ kind: 'intent' }, { kind: 'result', outcome: 'confirmed' }] });
+  } finally { session.close(); }
+  const fresh = await planGlobalRecoveryWithCollector(run, digest, async () => tables());
+  expect(fresh.status).toBe('ready');
+  expect((await recoverGlobalMigration(run, digest, fresh.evidenceSha256!, () => {}, async () => tables())).status).toBe('restored');
+  expect(existsSync(f.packageRoot)).toBe(true);
 });
 
 describe('owned npm child protocol', () => {
@@ -780,4 +803,55 @@ it('binds native original seed identity to the reviewed plan despite self-consis
   writeFileSync(join(r.session.runDirectory, 'journal.jsonl'), encoded); const before = readdirSync(r.f.paths.root), sourceBytes = readFileSync(join(r.session.runDirectory, 'journal.jsonl')); let reached = false;
   await expect(withGlobalMigrationEvidence(r.session.runDirectory, r.session.planSha256, async () => { reached = true; })).rejects.toThrow('original_seed_unbound');
   expect(reached).toBe(false); expect(readdirSync(r.f.paths.root)).toEqual(before); expect(readFileSync(join(r.session.runDirectory, 'journal.jsonl'))).toEqual(sourceBytes);
+});
+
+for (const kind of ['working', 'wrapper'] as const) it('rejects self-consistent ' + kind + ' content hashes not bound to the approved source', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture(kind === 'working' ? 'working' : 'installed');
+  const journalPath = join(r.session.runDirectory, 'journal.jsonl'), j = parseGlobalMutationJournal(readFileSync(journalPath), r.session.planSha256);
+  const changed = new Map<number, string>();
+  for (const row of j.records) if (row.kind === 'result') {
+    const file = join(r.session.runDirectory, 'state-' + j.header.runId + '-' + row.sequence + '.json'), state = JSON.parse(readFileSync(file, 'utf8'));
+    const target = kind === 'working' ? state.manifest.objects.flatMap((object: any) => object.working?.rows ?? []).find((entry: any) => entry.identity.kind === 'file')
+      : state.shell?.files[0]?.rows?.[0];
+    if (!target) continue;
+    target.identity.contentSha256 = '1'.repeat(64);
+    const bytes = Buffer.from(JSON.stringify(state) + '\n'); writeFileSync(file, bytes); changed.set(row.sequence, sha(bytes));
+  }
+  expect(changed.size).toBeGreaterThan(0);
+  let previous = JSON.stringify(j.header) + '\n', encoded = previous;
+  for (const original of j.records) {
+    const row = { ...original, previousSha256: sha(Buffer.from(previous)), ...(changed.has(original.sequence) ? { stateSha256: changed.get(original.sequence) } : {}) };
+    previous = JSON.stringify(row) + '\n'; encoded += previous;
+  }
+  writeFileSync(journalPath, encoded); const before = readdirSync(r.f.paths.root); let reached = false;
+  await expect(withGlobalMigrationEvidence(r.session.runDirectory, r.session.planSha256, async () => { reached = true; })).rejects.toThrow(kind === 'working' ? 'working_content_unbound' : 'wrapper_content_unbound');
+  expect(reached).toBe(false); expect(readdirSync(r.f.paths.root)).toEqual(before); expect(readFileSync(journalPath, 'utf8')).toBe(encoded);
+});
+
+it('keeps confirmed npm-after state recoverable when a bound consumer appears after child close', { timeout: 180000 }, async () => {
+  const f = fixture(); let closed = false;
+  const collect = async () => {
+    const value = tables();
+    if (closed) {
+      const row = { ...value.before[0]!, pid: process.pid + 123, birth: 'after-npm-consumer', argv: [process.execPath, join(f.packageRoot, 'dist/caveat.js')] };
+      value.before.push(row); value.after.push(structuredClone(row));
+    }
+    return value;
+  };
+  const session = await bindGlobalMigration(f.input, () => {}, collect), run = session.runDirectory, digest = session.planSha256;
+  try {
+    expect((await session.engine.preserveAll()).status).toBe('preserved');
+    expect((await session.engine.createWorkingCopies()).status).toBe('working');
+    const result = await session.engine.uninstallWorking(async () => {
+      const receipt = await runOwnedGlobalNpm(process.execPath, ['-e', 'for(const p of process.argv.slice(1))require("node:fs").rmSync(p,{recursive:true})',
+        ...session.engine.manifest().objects.map(row => join(row.directory, row.name))], run, {}, () => {}, 5000);
+      closed = true; return receipt;
+    });
+    expect(result).toMatchObject({ status: 'stopped', recovery: 'fresh-known-only-plan-required' });
+    expect(session.journal.read().status).toBe('ready');
+    expect(session.journal.read().records.at(-1)).toMatchObject({ kind: 'result', step: 'npm-uninstall', outcome: 'confirmed' });
+  } finally { session.close(); }
+  const fresh = await planGlobalRecoveryWithCollector(run, digest, async () => tables());
+  expect(fresh.status).toBe('ready');
+  expect((await recoverGlobalMigration(run, digest, fresh.evidenceSha256!, () => {}, async () => tables())).status).toBe('restored');
 });

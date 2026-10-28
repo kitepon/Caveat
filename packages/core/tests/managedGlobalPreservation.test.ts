@@ -61,7 +61,7 @@ describe('held original trees and known-only preservation', () => {
       const before = engine.manifest(), originalEvidence = readFileSync(join(backup, before.originalEvidence.name));
       expect(JSON.parse(originalEvidence.toString()).objects[0].rows).toEqual(before.objects[0]!.rows);
       const result = await engine.preserveAll();
-      expect(result.status).toBe('preserved'); expect(checks).toBe(3); expect(journal.read().records).toHaveLength(6);
+      expect(result.status).toBe('preserved'); expect(checks).toBe(6); expect(journal.read().records).toHaveLength(6);
       for (let index = 0; index < objects.length; index++) {
         expect(existsSync(join(source, objects[index]!.name))).toBe(false);
         expect(result.manifest.objects[index]!.rows.map(row => [row.relativePath, row.identity.dev, row.identity.ino, row.identity.securitySha256, row.identity.contentSha256]))

@@ -48,7 +48,7 @@ export function registrationFixture() {
   if (isWindows()) runWindowsAclPrivateTree(root);
   const files = [...documents.keys()].map(file => { const bytes = readFileSync(file), stat = statSync(file, { bigint: true }); return { file, status: 'observed', sha256: sha(bytes), bytes: bytes.length,
     uid: Number(stat.uid), gid: Number(stat.gid), mode: '0o' + (stat.mode & 0o777n).toString(8), dev: String(stat.dev), ino: String(stat.ino) }; });
-  const input: RegistrationInput = { userHome: home, nodeVersion: process.version, source: {
+  const input: RegistrationInput = { userHome: home, nodeVersion: process.version, clientsClosed: true, source: {
     observation: { schema: 'caveat.main15_readonly_confirmation.v1', expectedDedicatedNode: old, files, definitions },
     proposal: { schema: 'caveat.main15_node_migration_proposal.v1', selectedNodeCandidate: node, originalConfigFiles: structuredClone(files), changes },
   } };

@@ -55,7 +55,7 @@ export { readGlobalPackageJson, snapshotGlobalPackage, snapshotGlobalTree, type 
 export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
 export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardTree, type GlobalGuardTreeRow, type GlobalGuardIdentity } from './managedGlobalGuard.js';
 export { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
-export { prepareGlobalMigration, planGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
+export { planGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
 
 export { usesManagedGuidance } from './managedGuidance.js';
 export { readMcpSyncState, writeMcpSyncState, type McpSyncState } from './mcpSyncState.js';

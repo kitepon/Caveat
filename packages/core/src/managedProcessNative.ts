@@ -8,8 +8,8 @@ import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
 export type NativeProcessRecord = {
-  pid: number; ppid: number | null; birth: string | null; uid: number | null;
-  executable: ProcessExecutable | null; argv: string[] | null; state?: string; reason?: string;
+  pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
+  executable: ProcessExecutable | null; argv: string[] | null; state?: string; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
@@ -134,34 +134,35 @@ export function parseLinuxProcessStat(text: string) {
   assert.ok(Number.isSafeInteger(pid) && pid > 0 && fields.length >= 20, 'invalid_process_stat');
   const ppid = Number(fields[1]), birth = fields[19]!;
   assert.ok(Number.isSafeInteger(ppid) && ppid >= 0 && /^\d+$/.test(birth), 'invalid_process_stat');
-  return { pid, ppid, birth, state: fields[0]! };
+  assert.match(fields[6]!, /^\d+$/, 'invalid_process_flags');
+  return { pid, ppid, birth, state: fields[0]!, ...(BigInt(fields[6]!) & 0x00200000n ? { kernel: 'linux-pf-kthread' as const } : {}) };
 }
 
 function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
   const root = join(procRoot, String(pid));
+  let row: NativeProcessRecord = { pid, ppid: null, birth: null, uid: null, executable: null, argv: null };
   try {
     const first = parseLinuxProcessStat(bounded(join(root, 'stat'), 65536).toString('utf8'));
-    assert.equal(first.pid, pid);
+    assert.equal(first.pid, pid); row = { ...row, ...first };
     const uidText = bounded(join(root, 'status'), 65536).toString('utf8').match(/^Uid:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$/m);
-    assert.ok(uidText, 'process_uid_missing');
-    const uid = Number(uidText[2]);
-    if (first.state === 'Z') {
-      const last = parseLinuxProcessStat(bounded(join(root, 'stat'), 65536).toString('utf8'));
-      assert.deepEqual(last, first, 'process_identity_changed');
-      return { ...first, uid, executable: null, argv: null };
+    assert.ok(uidText, 'process_uid_missing'); row.uid = Number(uidText[2]);
+    if (!first.kernel && first.state !== 'Z') {
+      const command = () => {
+        const bytes = bounded(join(root, 'cmdline'), 1024 * 1024);
+        assert.ok(bytes.length > 0 && bytes.at(-1) === 0, 'process_argv_unavailable');
+        return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, -1)).split('\0');
+      };
+      try { row.argv = command(); } catch { /* Preserve owner/birth independently from unreadable argv. */ }
+      const exe = () => executable(join(root, 'exe'), readlinkSync(join(root, 'exe')));
+      try { row.executable = exe(); } catch { /* A foreign uid can deny exe while retaining readable argv. */ }
+      if (row.argv) assert.deepEqual(command(), row.argv, 'process_arguments_changed');
+      if (row.executable) assert.deepEqual(exe(), row.executable, 'process_executable_changed');
     }
-    const exeFile = join(root, 'exe'), image = executable(exeFile, readlinkSync(exeFile));
-    const command = bounded(join(root, 'cmdline'), 1024 * 1024);
-    assert.ok(command.length > 0 && command.at(-1) === 0, 'process_argv_unavailable');
-    const argv = new TextDecoder('utf-8', { fatal: true }).decode(command.subarray(0, -1)).split('\0');
     const last = parseLinuxProcessStat(bounded(join(root, 'stat'), 65536).toString('utf8'));
     assert.deepEqual({ ...last, state: first.state }, first, 'process_identity_changed');
-    assert.deepEqual(executable(exeFile, readlinkSync(exeFile)), image, 'process_executable_changed');
-    assert.deepEqual(bounded(join(root, 'cmdline'), 1024 * 1024), command, 'process_arguments_changed');
-    return { ...first, uid, executable: image, argv };
+    return row;
   } catch (error) {
-    return { pid, ppid: null, birth: null, uid: null, executable: null, argv: null,
-      reason: (error as NodeJS.ErrnoException).code ?? 'process_metadata_unverified' };
+    return { ...row, reason: (error as NodeJS.ErrnoException).code ?? 'process_metadata_unverified' };
   }
 }
 
@@ -254,13 +255,13 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
     catch { errors.push('owned_probe_identity_changed'); }
   }
   const convert = (rows: NativeProcessRecord[], images: Map<number, ProcessExecutable[]>) => {
-    const filtered = rows.filter(row => !owned.has(row.pid)), ids = new Set(filtered.map(row => row.pid));
-    if ([...images.keys()].some(pid => !owned.has(pid) && !ids.has(pid))) errors.push('process_projection_pid_set_changed');
+    // lsof corroborates executable identity; the two kernel tables define the observation scope.
+    const filtered = rows.filter(row => !owned.has(row.pid));
     return filtered.map(row => {
-      if (row.reason || row.state === 'Z') return row;
+      if (row.reason || row.state === 'Z' || row.kernel) return row;
       const image = row.executable;
       if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
-        return { ...row, executable: null, reason: 'kernel_text_image_unbound' };
+        return { ...row, executable: null, ...(row.uid === before.find(value => value.pid === process.pid)?.uid ? { reason: 'kernel_text_image_unbound' } : {}) };
       }
       return row;
     });
@@ -276,11 +277,33 @@ export const WINDOWS_PROCESS_PROBE = String.raw`$ErrorActionPreference='Stop'
 Import-Module CimCmdlets -ErrorAction Stop
 $current=[Diagnostics.Process]::GetCurrentProcess()
 $ownStart=$current.StartTime.ToUniversalTime().ToString('O')
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class CaveatProcessOwner {
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr handle, out long created, out long exited, out long kernel, out long user);
+  [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  public static string Read(int pid, long expectedBirth) {
+    IntPtr process = OpenProcess(0x1000, false, pid), token = IntPtr.Zero;
+    if (process == IntPtr.Zero) return null;
+    try {
+      long created, exited, kernel, user;
+      if (!GetProcessTimes(process, out created, out exited, out kernel, out user) || Math.Abs(created - expectedBirth) > 9 || !OpenProcessToken(process, 8, out token)) return null;
+      using (WindowsIdentity identity = new WindowsIdentity(token)) { return identity.User.Value; }
+    } catch { return null; }
+    finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
+  }
+}
+'@
 $tables=@()
 foreach($phase in @('before','after')){
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"started","count":0}')
   $rows=@(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine -ErrorAction Stop | ForEach-Object {
-    @{pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
+    $owner=if($null -eq $_.CreationDate){$null}else{[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())}
+    @{uid=$owner;pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
   })
   $tables+=,@($rows)
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"completed","count":'+$rows.Count+'}')
@@ -288,7 +311,7 @@ foreach($phase in @('before','after')){
 $value=@{before=$tables[0];after=$tables[1];probePid=$PID;probeBirth=$ownStart}
 [Console]::Out.Write((ConvertTo-Json -InputObject $value -Depth 6 -Compress))`;
 
-type WindowsRow = { pid: number; ppid: number; birth: string | null; exe: string | null; command: string | null };
+type WindowsRow = { uid: string | null; pid: number; ppid: number; birth: string | null; exe: string | null; command: string | null };
 export function decodeWindowsProcessTables(text: string, ownedPid: number): { before: WindowsRow[]; after: WindowsRow[]; probeBirth: string } {
   const lines = text.trim().split(/\r?\n/);
   assert.equal(lines.length, 6, 'process_probe_frame_count');
@@ -307,6 +330,7 @@ export function decodeWindowsProcessTables(text: string, ownedPid: number): { be
       assert.ok(Number.isSafeInteger(row.pid) && row.pid >= 0 && !ids.has(row.pid), 'invalid_process_pid'); ids.add(row.pid);
       assert.ok(Number.isSafeInteger(row.ppid) && row.ppid >= 0, 'invalid_process_parent');
       assert.ok(row.birth === null || typeof row.birth === 'string' && !Number.isNaN(Date.parse(row.birth)), 'invalid_process_birth');
+      assert.ok(row.uid === null || typeof row.uid === 'string' && /^S-1-(?:\d+-)*\d+$/.test(row.uid), 'invalid_process_owner');
       assert.ok(row.exe === null || typeof row.exe === 'string', 'invalid_process_executable');
       assert.ok(row.command === null || typeof row.command === 'string', 'invalid_process_command');
     }
@@ -322,10 +346,14 @@ export async function readWindowsProcessTables(command: string, run: ProcessProb
   const result = await run(command, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROCESS_PROBE, 'utf16le').toString('base64')], 'cim', Date.now() + 20000);
   const tables = decodeWindowsProcessTables(result.stdout, result.pid);
   const convert = (rows: WindowsRow[]): NativeProcessRecord[] => rows.filter(row => row.pid !== result.pid).map(row => {
-    const base = { pid: row.pid, ppid: row.ppid, birth: row.birth, uid: null, executable: null, argv: null };
-    if (!row.exe || !row.birth || !row.command) return { ...base, reason: 'process_metadata_unavailable' };
-    try { return { ...base, executable: executable(row.exe), argv: parseWindowsProcessArguments(row.command) }; }
-    catch { return { ...base, reason: 'process_metadata_unverified' }; }
+    const base: NativeProcessRecord = { pid: row.pid, ppid: row.ppid, birth: row.birth, uid: row.uid, executable: null, argv: null };
+    // Windows reserves these process IDs for kernel work; never infer this from the image name.
+    if ((row.pid === 0 || row.pid === 4) && row.ppid === 0 && !row.exe && !row.command) {
+      return { ...base, birth: row.birth ?? 'windows-idle-boot', kernel: 'windows-kernel-process' };
+    }
+    if (row.command) try { base.argv = parseWindowsProcessArguments(row.command); } catch { return { ...base, reason: 'process_arguments_unverified' }; }
+    if (row.exe) try { base.executable = executable(row.exe); } catch { /* Preserve readable owner/argv for foreign-user assessment. */ }
+    return base;
   });
   const before = convert(tables.before), after = convert(tables.after);
   for (const row of before) {

@@ -28,9 +28,38 @@ describe('seven-file fifteen-token native registration migration', () => {
     }
     const plan = await planRegistrationRecovery(f.home, result.runId!, admission.planSha256, () => {}, preflight);
     expect(plan.status).toBe('ready');
-    const recovery = await executeRegistrationRecovery(f.home, result.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight);
+    const recovery = await executeRegistrationRecovery(f.home, result.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight, true);
     expect(recovery).toMatchObject({ status: 'restored' });
     for (const [path, bytes] of f.original) { expect(readFileSync(path)).toEqual(bytes); expect(String(statSync(path, { bigint: true }).ino)).toBe(f.input.source.observation.files.find((row: any) => row.file === path).ino); }
+  });
+  it('requires explicit closure of all seven-file config writers before creating an attempt', { timeout: 60000 }, async () => {
+    const f = fixture(); f.input.clientsClosed = false;
+    const admission = await bindRegistrationAdmission(f.input, () => {}, preflight), before = readdirSync(f.paths.root);
+    expect(admission.plan.clientsToClose.map(row => row.client)).toEqual(['claude', 'codex', 'grok', 'cursor']);
+    expect(admission.plan.clientsToClose.flatMap(row => row.files)).toHaveLength(7);
+    expect(await executeRegistrationAdmission(admission, admission.planSha256)).toMatchObject({ status: 'stopped', runId: null });
+    expect(readdirSync(f.paths.root)).toEqual(before);
+  });
+  it('keeps process probes and queued callbacks outside both same-file rename pairs', { timeout: 180000 }, async () => {
+    const f = fixture(); let vacant = false;
+    const checked = (scope: Parameters<typeof preflight>[0], emit: Parameters<typeof preflight>[1]) => {
+      for (const path of f.original.keys()) expect(existsSync(path)).toBe(true);
+      return preflight(scope, emit);
+    };
+    const admission = await bindRegistrationAdmission(f.input, () => {}, checked);
+    const observer = (event: { phase: string; event: string }) => {
+      if (/^(retain|quarantine)\./.test(event.phase) && event.event === 'completed') {
+        queueMicrotask(() => { if ([...f.original.keys()].some(path => !existsSync(path))) vacant = true; });
+      }
+    };
+    const migrated = await executeRegistrationAdmission(admission, admission.planSha256, observer);
+    expect(migrated.status).toBe('completed'); expect(vacant).toBe(false);
+    const plan = await planRegistrationRecovery(f.home, migrated.runId!, admission.planSha256, () => {}, checked);
+    const before = readdirSync(f.paths.root);
+    expect(await executeRegistrationRecovery(f.home, migrated.runId!, admission.planSha256, plan.evidenceSha256, observer, checked)).toMatchObject({ status: 'stopped', runId: null });
+    expect(readdirSync(f.paths.root)).toEqual(before);
+    expect((await executeRegistrationRecovery(f.home, migrated.runId!, admission.planSha256, plan.evidenceSha256, observer, checked, true)).status).toBe('restored');
+    expect(vacant).toBe(false);
   });
   it('rejects an edited saved path or role instead of granting authority to that path', { timeout: 60000 }, () => {
     const f = fixture(), altered = structuredClone(f.input.source);
@@ -56,7 +85,7 @@ describe('seven-file fifteen-token native registration migration', () => {
     expect(result.status).toBe('unknown');
     const dir = join(f.paths.root, result.runId!), source = new Map(readdirSync(dir).filter(name => /^(?:plan|seed|journal|state-)/.test(name)).map(name => [name, readFileSync(join(dir, name))]));
     const plan = await planRegistrationRecovery(f.home, result.runId!, admission.planSha256, () => {}, preflight);
-    const restored = await executeRegistrationRecovery(f.home, result.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight);
+    const restored = await executeRegistrationRecovery(f.home, result.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight, true);
     expect(restored.status).toBe('restored');
     for (const [name, bytes] of source) expect(readFileSync(join(dir, name))).toEqual(bytes);
     for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
@@ -75,7 +104,7 @@ describe('seven-file fifteen-token native registration migration', () => {
     const applied = await executeRegistrationAdmission(admission, admission.planSha256);
     const plan = await planRegistrationRecovery(f.home, applied.runId!, admission.planSha256, () => {}, preflight);
     const partial = await executeRegistrationRecovery(f.home, applied.runId!, admission.planSha256, plan.evidenceSha256,
-      event => { if (event.phase === 'restore.0' && event.event === 'completed') throw Error('fixture confirmed recovery stop'); }, preflight);
+      event => { if (event.phase === 'restore.0' && event.event === 'completed') throw Error('fixture confirmed recovery stop'); }, preflight, true);
     expect(partial.status).toBe('unknown');
     const seedPath = join(f.paths.root, partial.runId!, 'seed.json'), seedBytes = readFileSync(seedPath), cyclic = JSON.parse(seedBytes.toString());
     cyclic.source.run = partial.runId; writeFileSync(seedPath, JSON.stringify(cyclic) + '\n');
@@ -87,10 +116,10 @@ describe('seven-file fifteen-token native registration migration', () => {
     writeFileSync(journalPath, lines.map(row => JSON.stringify(row)).join('\n') + '\n');
     await expect(planRegistrationRecovery(f.home, partial.runId!, admission.planSha256, () => {}, preflight)).rejects.toThrow('reused_source_journal');
     writeFileSync(journalPath, journalBytes);
-    const stale = await executeRegistrationRecovery(f.home, applied.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight);
+    const stale = await executeRegistrationRecovery(f.home, applied.runId!, admission.planSha256, plan.evidenceSha256, () => {}, preflight, true);
     expect(stale.status).toBe('stopped');
     const fresh = await planRegistrationRecovery(f.home, partial.runId!, admission.planSha256, () => {}, preflight);
-    const final = await executeRegistrationRecovery(f.home, partial.runId!, admission.planSha256, fresh.evidenceSha256, () => {}, preflight);
+    const final = await executeRegistrationRecovery(f.home, partial.runId!, admission.planSha256, fresh.evidenceSha256, () => {}, preflight, true);
     expect(final.status).toBe('restored');
     for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
   });
@@ -125,15 +154,16 @@ describe('seven-file fifteen-token native registration migration', () => {
     await expect(planRegistrationRecovery(f.home, result.runId!, admission.planSha256, () => {}, preflight)).rejects.toThrow('unknown_stage_appeared');
   });
 
-  it('records an unknown post-move writer state and never grants replay', { timeout: 120000 }, async () => {
+  it('stops between complete file pairs and permits fresh known-only recovery after writers close', { timeout: 120000 }, async () => {
     const f = fixture(); let probes = 0;
     const changing = (scope: Parameters<typeof preflight>[0], emit: Parameters<typeof preflight>[1]) => ++probes === 5
       ? Promise.resolve({ status: 'stopped' as const } as Awaited<ReturnType<typeof preflightGlobalProcesses>>) : preflight(scope, emit);
     const admission = await bindRegistrationAdmission(f.input, () => {}, changing);
     const result = await executeRegistrationAdmission(admission, admission.planSha256);
     expect(result.status).toBe('unknown');
-    expect(await inspectRegistrationJournal(f.home, result.runId!, admission.planSha256)).toMatchObject({ journalStatus: 'unknown', executionPermission: false });
-    await expect(planRegistrationRecovery(f.home, result.runId!, admission.planSha256, () => {}, preflight)).rejects.toThrow('pending_torn_or_unknown');
+    expect(await inspectRegistrationJournal(f.home, result.runId!, admission.planSha256)).toMatchObject({ journalStatus: 'ready', executionPermission: false });
+    const fresh = await planRegistrationRecovery(f.home, result.runId!, admission.planSha256, () => {}, preflight);
+    expect((await executeRegistrationRecovery(f.home, result.runId!, admission.planSha256, fresh.evidenceSha256, () => {}, preflight, true)).status).toBe('restored');
   });
   it('refuses a torn journal and a forged native original seed even if the seed is valid JSON', { timeout: 120000 }, async () => {
     const f = fixture(), admission = await bindRegistrationAdmission(f.input, () => {}, preflight);

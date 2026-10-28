@@ -11,18 +11,13 @@ import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProc
 import { readManagedDeploymentAtRoot } from './managedDeploymentRuntime.js';
 import { runGlobalNpmUninstall, type GlobalNpmEvent } from './managedGlobalNpm.js';
 import { globalNpmLayout, isWindows } from './platform.js';
-import { resolveManagedNode, managedNodeDirectories, managedNodePaths } from './managedNode.js';
+import { resolveManagedNode, managedNodeDirectories } from './managedNode.js';
 import { renderManagedShellWrappers, type ManagedShellPlan } from './managedShell.js';
 import { prepareGlobalShellInstallation } from './managedGlobalShell.js';
 
 export type GlobalMigrationInput = { snapshot: GlobalPackageSnapshotInput; binDirectory: string; protectedAbsent?: string[] };
 const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const inside = (parent: string, child: string) => { const name = relative(parent, child); return name === '' || name !== '..' && !name.startsWith('..' + sep) && !isAbsolute(name); };
-
-/** Production entry: collector injection is confined to the internal fixture binder below. */
-export function prepareGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void = () => {}) {
-  return bindGlobalMigration(input, onEvent, nativeGlobalProcessTables);
-}
 
 /** Never exposed as a CLI collector/guard override. */
 export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
@@ -34,7 +29,7 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
 /** A read-only plan never creates a private run or acquires the installer lock. */
 export async function planGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void = () => {}) {
   const admission = await bindGlobalAdmission(input, onEvent, nativeGlobalProcessTables);
-  try { return { status: 'ready' as const, planSha256: admission.planSha256, plan: admission.plan, filesystemWrites: 0, existingProcessOperations: 0 }; }
+  try { return { status: 'ready' as const, planSha256: admission.planSha256, plan: admission.plan, processAssessment: admission.processAssessment(), filesystemWrites: 0, existingProcessOperations: 0 }; }
   finally { admission.close(); }
 }
 
@@ -104,9 +99,11 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       files: renderManagedShellWrappers(baseline.node.canonical, active.launcher).map(file => ({ ...file, path: join(binDirectory, file.name) })) };
     const leafNames = isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat'];
     const leaves = leafNames.map(name => ({ name, identity: guard.observe(binDirectory, name) }));
-    const scope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, runtimeExecutables: [nodeProof.executable.canonical], binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...managedNodePaths(nodeProof), ...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
+    const scope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, runtimeExecutables: [nodeProof.executable.canonical], binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
+    let processAssessment: Awaited<ReturnType<typeof preflightGlobalProcesses>> | null = null;
     const processCheck = async () => {
       const result = await preflightGlobalProcesses(scope, onEvent, collect);
+      processAssessment = result;
       if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result }); return result;
     };
     const verifyProtected = () => {
@@ -182,7 +179,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       }
     };
     onEvent({ phase: 'global-preflight', event: 'completed' });
-    return { planSha256, plan: structuredClone(plan), prepare, verify, close };
+    return { planSha256, plan: structuredClone(plan), prepare, verify, close, processAssessment: () => processAssessment };
   } catch (error) {
     if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
     try { onEvent({ phase: 'global-preflight', event: 'stopped' }); } catch { /* Preserve the failed preflight. */ }

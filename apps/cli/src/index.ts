@@ -90,15 +90,17 @@ for (const [name, mode] of [['registration-plan', 'plan'], ['registration-migrat
     .requiredOption('--proposal <path>', 'matching saved Node-token proposal JSON')
     .requiredOption('--node-version <version>', 'expected version of the explicitly selected ordinary Node')
     .requiredOption('--json', 'emit bounded JSON receipts');
-  if (mode === 'execute') command.requiredOption('--expected-plan-sha256 <digest>', 'exact reviewed registration plan digest');
+  if (mode === 'execute') command.requiredOption('--expected-plan-sha256 <digest>', 'exact reviewed registration plan digest')
+    .requiredOption('--clients-closed', 'confirm Claude Code, Codex, Grok, Cursor and all config writers are closed');
   command.action(async (options: RegistrationOptions) => { await runRegistrationMigration(mode, options); });
 }
 for (const [name, mode] of [['registration-recovery-plan', 'plan'], ['registration-recover', 'execute'], ['registration-inspect', 'inspect']] as const) {
   const command = deployment.command(name + ' <run-id>').description(mode === 'inspect' ? 'Inspect journal only; current objects are not assessed' : 'Fresh known-only registration recovery')
     .requiredOption('--plan-sha256 <digest>', 'expected original registration plan digest')
     .requiredOption('--json', 'emit bounded JSON receipts');
-  if (mode === 'execute') command.requiredOption('--evidence-sha256 <digest>', 'exact fresh recovery evidence digest');
-  command.action(async (runId: string, options: { planSha256: string; evidenceSha256?: string }) => { await runRegistrationRecovery(mode, runId, options.planSha256, options.evidenceSha256); });
+  if (mode === 'execute') command.requiredOption('--evidence-sha256 <digest>', 'exact fresh recovery evidence digest')
+    .requiredOption('--clients-closed', 'confirm Claude Code, Codex, Grok, Cursor and all config writers are closed');
+  command.action(async (runId: string, options: { planSha256: string; evidenceSha256?: string; clientsClosed?: boolean }) => { await runRegistrationRecovery(mode, runId, options.planSha256, options.evidenceSha256, options.clientsClosed); });
 }
 for (const [name, mode] of [['global-plan', 'plan'], ['global-migrate', 'execute']] as const) {
   const command = deployment.command(name).description(mode === 'plan' ? 'Read-only global-to-managed migration plan' : 'Execute the exact reviewed global migration plan')

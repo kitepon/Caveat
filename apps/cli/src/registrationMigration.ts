@@ -12,13 +12,14 @@ import { registrationFileSpecs, type RegistrationSources } from './registrationP
 type Guard = Awaited<ReturnType<typeof openGlobalPathGuard>>;
 type Rows = GlobalGuardTreeRow[];
 type Plan = { schema: 'caveat.registration_plan.v1'; home: string; source: RegistrationSources; node: ManagedNodeProof;
+  clientsToClose: ReturnType<typeof registrationFileSpecs>['clientsToClose'];
   files: { path: string; original: Rows; beforeSha256: string; afterSha256: string }[];
   protected: { path: string; rows: Rows }[]; directories: ReturnType<Guard['directoryBindings']> };
 type Item = { original: { place: 'config' | 'backup'; rows: Rows }; replacement: { place: 'stage' | 'config' | 'quarantine'; run: string; rows: Rows } };
 type Model = Item[];
 type Seed = { schema: 'caveat.registration_seed.v1'; origin: string; mode: 'migration' | 'recovery'; start: Model; directories: ReturnType<Guard['directoryBindings']>; source: null | { run: string; evidenceSha256: string } };
 type Preflight = (scope: GlobalProcessScope, emit: (event: ProcessProbeEvent) => void) => ReturnType<typeof preflightGlobalProcesses>;
-export type RegistrationInput = { userHome: string; source: RegistrationSources; nodeVersion: string };
+export type RegistrationInput = { userHome: string; source: RegistrationSources; nodeVersion: string; clientsClosed?: boolean };
 export type RegistrationEvent = { phase: string; event: string; runId: string | null; index?: number; pid?: number };
 type Emit = (event: RegistrationEvent) => void;
 type Evidence = { run: string; name: string; bytes: number; sha256: string };
@@ -28,6 +29,8 @@ const hash = (value: unknown) => sha(JSON.stringify(value));
 const errorHash = (error: unknown) => sha(error instanceof Error ? error.name + ':' + error.message : String(error));
 const evidenceHash = (refs: Evidence[]) => hash([...refs].sort((a, b) => a.run.localeCompare(b.run) || a.name.localeCompare(b.name)));
 const keyset = (value: unknown, keys: string[]) => { assert.ok(value && typeof value === 'object' && !Array.isArray(value), 'registration_object_required'); assert.deepEqual(Object.keys(value).sort(), [...keys].sort(), 'registration_fields_invalid'); };
+const registrationResidualRisks = ['same-file renames include synchronous identity checks and durable journal writes; they are not an atomic exchange',
+  'a concurrent config writer or interrupted rename may leave the original in private backup and require manual recovery; unknown objects are never overwritten'] as const;
 const runName = (value: string) => /^(?:registration-migration|registration-recovery)-[a-f0-9]{32}$/.test(value);
 function assertOrdinaryNode(node: ManagedNodeProof, beforeNode: string) {
   assert.ok(basename(dirname(beforeNode)) === 'bin' && ['node', 'node.exe'].includes(basename(beforeNode)), 'registration_retired_node_scope_unproved');
@@ -46,9 +49,10 @@ const movedRows = (before: Rows, after: Rows) => {
   expected[0]!.identity.ctime = after[0]!.identity.ctime; assert.deepEqual(after, expected, 'registration_original_or_replacement_changed');
 };
 function validatePlan(plan: Plan, home: string) {
-  keyset(plan, ['schema', 'home', 'source', 'node', 'files', 'protected', 'directories']);
+  keyset(plan, ['schema', 'home', 'source', 'node', 'clientsToClose', 'files', 'protected', 'directories']);
   assert.ok(plan.schema === 'caveat.registration_plan.v1' && plan.home === home && resolve(home) === home && realpathSync(home) === home, 'registration_home_changed');
   const specs = registrationFileSpecs(plan.source, home), paths = managedDeploymentPaths(home);
+  assert.deepEqual(plan.clientsToClose, specs.clientsToClose, 'registration_client_closure_scope_changed');
   assertOrdinaryNode(plan.node, specs.beforeNode);
   assert.ok(plan.node.executable.alias === specs.proposedNode && Array.isArray(plan.files) && plan.files.length === 7, 'registration_plan_node_or_scope_changed');
   for (const [index, file] of plan.files.entries()) {
@@ -94,12 +98,13 @@ function bindProtected(plan: Plan, guard: Guard) {
 }
 function scope(plan: Plan, roots: string[]): GlobalProcessScope {
   return { binAliases: [], runtimeExecutables: [plan.node.executable.canonical], protectedPaths: [...new Set([
-    ...plan.files.map(row => row.path), ...plan.protected.map(row => row.path), ...managedNodePaths(plan.node), ...roots,
+    ...plan.files.map(row => row.path), ...plan.protected.map(row => row.path), ...roots,
   ])] };
 }
 async function freshProcesses(plan: Plan, roots: string[], preflight: Preflight, emit: Emit) {
   const result = await preflight(scope(plan, roots), event => emit({ phase: event.phase, event: event.event, pid: event.pid, runId: null }));
-  assert.equal(result.status, 'ready', 'registration_process_preflight_stopped');
+  if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result });
+  return result;
 }
 function bindCurrent(plan: Plan, seed: Seed, model: Model, roots: string[], guard: Guard) {
   const specs = validatePlan(plan, plan.home); modelKeys(model, plan, seed.origin, roots);
@@ -136,6 +141,9 @@ function bindCurrent(plan: Plan, seed: Seed, model: Model, roots: string[], guar
 export async function bindRegistrationAdmission(input: RegistrationInput, emit: Emit = () => {}, preflight: Preflight = preflightGlobalProcesses) {
   input = structuredClone(input); const home = resolve(input.userHome);
   assert.ok(isAbsolute(input.userHome) && realpathSync(home) === home, 'registration_canonical_home_required');
+  const collectProcesses = preflight;
+  let processAssessment: Awaited<ReturnType<Preflight>> | null = null;
+  preflight = async (...args) => { processAssessment = await collectProcesses(...args); return processAssessment; };
   const specs = registrationFileSpecs(input.source, home), paths = managedDeploymentPaths(home), active = readManagedDeploymentAtRoot(paths.root);
   const runtime = await resolveManagedNode(specs.proposedNode, input.nodeVersion, event => emit({ ...event, runId: null }));
   let guard: Guard;
@@ -169,7 +177,7 @@ export async function bindRegistrationAdmission(input: RegistrationInput, emit: 
       assert.equal(guard.directoryIdentity(dirname(spec.path)).dev, guard.directoryIdentity(paths.root).dev, 'registration_cross_volume');
       return { token, rows, edited };
     });
-    const plan: Plan = { schema: 'caveat.registration_plan.v1', home, source: input.source, node: runtime.proof,
+    const plan: Plan = { schema: 'caveat.registration_plan.v1', home, source: input.source, node: runtime.proof, clientsToClose: specs.clientsToClose,
       files: originals.map((row, index) => ({ path: specs.files[index]!.path, original: row.rows, beforeSha256: row.edited.beforeSha256, afterSha256: row.edited.afterSha256 })),
       protected: protectedRows, directories: guard.directoryBindings() };
     const verify = () => {
@@ -179,7 +187,7 @@ export async function bindRegistrationAdmission(input: RegistrationInput, emit: 
     };
     verify(); await freshProcesses(plan, [], preflight, emit); verify();
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
-    return { plan, planSha256: hash(plan), guard, originals, verify, close, preflight };
+    return { plan, planSha256: hash(plan), guard, originals, verify, close, preflight, clientsClosed: input.clientsClosed === true, processAssessment: () => processAssessment };
   } catch (error) { close(); throw error; }
 }
 
@@ -292,11 +300,11 @@ export async function planRegistrationRecovery(home: string, run: string, planSh
   return withCurrent(home, run, planSha256, async (history, current, guard) => {
     const paths = managedDeploymentPaths(home);
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
-    current.verify(); await freshProcesses(history.plan, history.roots.map(run => join(paths.root, run)), preflight, emit); current.verify(); history.verify();
+    current.verify(); const processAssessment = await freshProcesses(history.plan, history.roots.map(run => join(paths.root, run)), preflight, emit); current.verify(); history.verify();
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
     const evidenceSha256 = hash({ source: evidenceHash(history.refs), state: history.model, directories: guard.directoryBindings() });
     return { status: history.model.some(item => item.original.place === 'backup') ? 'ready' as const : 'already-original' as const,
-      planSha256, evidenceSha256, currentObjects: 'confirmed' as const, filesystemWrites: 0, executionPermission: false as const };
+      planSha256, evidenceSha256, processAssessment, clientsToClose: history.plan.clientsToClose, otherConfigWritersMustBeClosed: true, residualRisks: registrationResidualRisks, currentObjects: 'confirmed' as const, filesystemWrites: 0, executionPermission: false as const };
   });
 }
 
@@ -327,12 +335,12 @@ function verifyModel(guard: Guard, plan: Plan, seed: Seed, model: Model, held: {
     if (actor.startsWith('registration-recovery-') && !(item.replacement.place === 'quarantine' && item.replacement.run === actor)) assert.equal(guard.observe(join(root, actor), 'used-' + index), null, 'registration_unknown_quarantine_appeared');
   }
 }
-async function performMove(guard: Guard, journal: ReturnType<typeof createGlobalMutationJournal>, plan: Plan, seed: Seed, model: Model,
+function performMove(guard: Guard, journal: ReturnType<typeof createGlobalMutationJournal>, plan: Plan, seed: Seed, model: Model,
   held: { original: GlobalGuardTree; replacement: GlobalGuardTree }[], run: string, action: 'retain' | 'publish' | 'quarantine' | 'restore', index: number,
-  verify: () => Promise<void>, emit: Emit) {
-  await verify(); const step = action + '.' + index, operation = action === 'retain' ? 'retain' : action === 'publish' ? 'manifest' : action === 'quarantine' ? 'working-copy' : 'restore';
+  verify: () => void, emit: Emit) {
+  verify(); const step = action + '.' + index, operation = action === 'retain' ? 'retain' : action === 'publish' ? 'manifest' : action === 'quarantine' ? 'working-copy' : 'restore';
   journal.intent(step, operation, hash(model)); emit({ phase: step, event: 'intent-durable', runId: run, index });
-  await verify(); const root = managedDeploymentPaths(plan.home).root, file = plan.files[index]!.path, item = model[index]!;
+  verify(); const root = managedDeploymentPaths(plan.home).root, file = plan.files[index]!.path, item = model[index]!;
   const replacement = action === 'publish' || action === 'quarantine', token = replacement ? held[index]!.replacement : held[index]!.original;
   const destination = action === 'retain' ? { directory: join(root, seed.origin), name: 'original-' + index }
     : action === 'quarantine' ? { directory: join(root, run), name: 'used-' + index } : { directory: dirname(file), name: basename(file) };
@@ -343,13 +351,14 @@ async function performMove(guard: Guard, journal: ReturnType<typeof createGlobal
     if (action === 'retain') item.original = { place: 'backup', rows };
     else if (action === 'restore') item.original = { place: 'config', rows };
     else item.replacement = { place: action === 'publish' ? 'config' : 'quarantine', run: action === 'publish' ? seed.origin : run, rows };
-    try { await verify(); } catch (error) { failure = error; }
+    try { verify(); } catch (error) { failure = error; }
   }
   const ref = writeGlobalPrivateEvidence(guard, join(root, run), 'state-' + journal.read().nextSequence + '.json', { schema: 'caveat.registration_move.v1', state: model, move });
-  const confirmed = move.status === 'moved' && !failure;
+  const confirmed = move.status === 'moved';
   journal.result(step, operation, confirmed ? 'confirmed' : 'unknown', ref.sha256);
   emit({ phase: step, event: confirmed ? 'completed' : 'unknown', runId: run, index });
   assert.ok(confirmed, 'registration_move_or_verification_unknown');
+  if (failure) throw failure;
 }
 async function independentReadback(plan: Plan, run: string, planSha256: string, journalSha256: string, expected: Model, directories: ReturnType<Guard['directoryBindings']>) {
   return withCurrent(plan.home, run, planSha256, async (history, current, guard) => {
@@ -366,6 +375,7 @@ export async function planRegistrationMigration(input: RegistrationInput, emit: 
   try { return { status: 'ready' as const, planSha256: admission.planSha256, files: 7, tokenEdits: 15,
     nodeProofSha256: hash(admission.plan.node), nodeVersion: admission.plan.node.capability.version,
     sharedNode: admission.plan.node.capability.shared, sharedLibraries: admission.plan.node.libraries.length,
+    processAssessment: admission.processAssessment(), clientsToClose: admission.plan.clientsToClose, otherConfigWritersMustBeClosed: true, residualRisks: registrationResidualRisks,
     filesystemWrites: 0, executionPermission: false as const }; }
   finally { admission.close(); }
 }
@@ -378,6 +388,7 @@ export async function executeRegistrationAdmission(admission: Awaited<ReturnType
   let run: string | null = null, phase = 'admission', attempt: ReturnType<typeof openAttempt> | null = null;
   let result: { status: 'completed' | 'unknown' | 'stopped'; planSha256: string; runId: string | null; phase: string; errorSha256?: string; existingProcessOperations: number };
   try {
+    assert.equal(admission.clientsClosed, true, 'registration_clients_must_be_closed');
     const { plan, guard, preflight } = admission, paths = managedDeploymentPaths(plan.home);
     assert.equal(hash(plan), admission.planSha256, 'registration_plan_changed'); assert.equal(admission.planSha256, expectedPlanSha256, 'registration_expected_plan_changed');
     admission.verify(); await freshProcesses(plan, [], preflight, emit); admission.verify();
@@ -397,8 +408,13 @@ export async function executeRegistrationAdmission(admission: Awaited<ReturnType
     const held = admission.originals.map((row, index) => ({ original: row.token, replacement: staged[index]! }));
     const verifySync = () => { admission.verify(); attempt!.verifyLock(); verifyModel(guard, plan, seed, model, held, run!); };
     const verify = async () => { verifySync(); await freshProcesses(plan, [attempt!.directory], preflight, emit); verifySync(); };
-    for (let index = 0; index < 7; index++) for (const action of ['retain', 'publish'] as const) {
-      phase = action + '.' + index; await performMove(guard, journal, plan, seed, model, held, run, action, index, verify, emit);
+    for (let index = 0; index < 7; index++) {
+      await verify();
+      // Keep process probes and promise scheduling outside the same-file rename pair.
+      for (const action of ['retain', 'publish'] as const) {
+        phase = action + '.' + index; performMove(guard, journal, plan, seed, model, held, run, action, index, verifySync, emit);
+      }
+      await verify();
     }
     phase = 'checkpoint'; await verify(); journal.complete(hash(model)); const journalSha256 = journal.read().bytesSha256;
     const directories = guard.directoryBindings(); phase = 'close'; attempt.closeLock(); attempt = null; admission.close();
@@ -412,12 +428,16 @@ export async function executeRegistrationAdmission(admission: Awaited<ReturnType
     try { try { attempt?.closeLock(); } finally { admission.close(); } }
     catch (error) { result = { status: 'unknown', planSha256: expectedPlanSha256, runId: run, phase: 'close', errorSha256: errorHash(error), existingProcessOperations: 0 }; }
   }
-  return result!;
+  return { ...result!, processAssessment: admission.processAssessment(), residualRisks: registrationResidualRisks };
 }
 
-export async function executeRegistrationRecovery(home: string, sourceRun: string, planSha256: string, expectedEvidenceSha256: string, emit: Emit = () => {}, preflight: Preflight = preflightGlobalProcesses) {
+export async function executeRegistrationRecovery(home: string, sourceRun: string, planSha256: string, expectedEvidenceSha256: string, emit: Emit = () => {}, preflight: Preflight = preflightGlobalProcesses, clientsClosed = false) {
+  const collectProcesses = preflight;
+  let processAssessment: Awaited<ReturnType<Preflight>> | null = null;
+  preflight = async (...args) => { processAssessment = await collectProcesses(...args); return processAssessment; };
   let run: string | null = null, phase = 'admission';
   try {
+    assert.equal(clientsClosed, true, 'registration_clients_must_be_closed');
     return await withCurrent(home, sourceRun, planSha256, async (history, current, guard) => {
       const { plan, seed: oldSeed, model } = history, paths = managedDeploymentPaths(home);
       current.verify(); history.verify(); await freshProcesses(plan, history.roots.map(run => join(paths.root, run)), preflight, emit); current.verify(); history.verify();
@@ -433,17 +453,19 @@ export async function executeRegistrationRecovery(home: string, sourceRun: strin
         const verifySync = () => { current.verify(); history.verify(); attempt.verifyLock(); verifyModel(guard, plan, seed, model, current.held, run!); };
         const verify = async () => { verifySync(); await freshProcesses(plan, [...history.roots.map(run => join(paths.root, run)), attempt.directory], preflight, emit); verifySync(); };
         for (let index = 0; index < 7; index++) {
-          if (model[index]!.replacement.place === 'config') { phase = 'quarantine.' + index; await performMove(guard, journal, plan, seed, model, current.held, run, 'quarantine', index, verify, emit); }
-          if (model[index]!.original.place === 'backup') { phase = 'restore.' + index; await performMove(guard, journal, plan, seed, model, current.held, run, 'restore', index, verify, emit); }
+          await verify();
+          if (model[index]!.replacement.place === 'config') { phase = 'quarantine.' + index; performMove(guard, journal, plan, seed, model, current.held, run, 'quarantine', index, verifySync, emit); }
+          if (model[index]!.original.place === 'backup') { phase = 'restore.' + index; performMove(guard, journal, plan, seed, model, current.held, run, 'restore', index, verifySync, emit); }
+          await verify();
         }
         phase = 'checkpoint'; await verify(); journal.complete(hash(model)); const journalSha256 = journal.read().bytesSha256, directories = guard.directoryBindings();
         phase = 'close'; attempt.closeLock(); guard.close(); phase = 'readback'; emit({ phase, event: 'issued', runId: run });
         await independentReadback(plan, run, planSha256, journalSha256, model, directories);
         emit({ phase, event: 'completed', runId: run });
-        return { status: 'restored' as const, planSha256, evidenceSha256, runId: run, phase, existingProcessOperations: 0 };
+        return { status: 'restored' as const, planSha256, evidenceSha256, runId: run, phase, existingProcessOperations: 0, processAssessment, residualRisks: registrationResidualRisks };
       } finally { attempt.closeLock(); }
     });
-  } catch (error) { return { status: run ? 'unknown' as const : 'stopped' as const, planSha256, runId: run, phase, errorSha256: errorHash(error), existingProcessOperations: 0 }; }
+  } catch (error) { return { status: run ? 'unknown' as const : 'stopped' as const, planSha256, runId: run, phase, errorSha256: errorHash(error), existingProcessOperations: 0, processAssessment, residualRisks: registrationResidualRisks }; }
 }
 
 export async function inspectRegistrationJournal(home: string, run: string, planSha256: string) {

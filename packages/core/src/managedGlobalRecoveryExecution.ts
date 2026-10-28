@@ -22,6 +22,7 @@ export function executeGlobalRecovery(runDirectory: string, planSha256: string, 
 /** The injected collector is confined to source fixtures, never CLI arguments or environment. */
 export async function recoverGlobalMigration(runDirectory: string, planSha256: string, evidenceSha256: string,
   emit: (event: GlobalRecoveryEvent) => void, collect: typeof nativeGlobalProcessTables) {
+  let processAssessment: Awaited<ReturnType<typeof checkGlobalRecoveryProcesses>> | null = null;
   let sequence = 0, phase = 'admission', recoveryDirectory: string | null = null, writes = false;
   const event = (kind: string, pid?: number) => emit({ schema: 'caveat.global_recovery_event.v1', sequence: ++sequence, phase, event: kind,
     planSha256: /^[a-f0-9]{64}$/.test(planSha256) ? planSha256 : null, evidenceSha256: /^[a-f0-9]{64}$/.test(evidenceSha256) ? evidenceSha256 : null,
@@ -66,7 +67,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
         for (const [path, place] of slots) if (!occupied.has(path)) assert.equal(guard.observe(place.directory, place.name), null, 'global_recovery_unknown_name_appeared');
       };
       const processCheck = async () => {
-        await checkGlobalRecoveryProcesses(source, runDirectory, target, (probe: ProcessProbeEvent) => {
+        processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, (probe: ProcessProbeEvent) => {
           const saved = phase; phase = 'process-preflight'; try { event(probe.event, probe.pid); } finally { phase = saved; }
         }, collect);
       };
@@ -96,13 +97,14 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
           try {
             await verify(); renameAttempted = true;
             result = guard.moveTreeNoReplace(known.tree, directory, name); assert.equal(result.status, 'moved', 'global_recovery_move_unconfirmed');
-            known.directory = directory; known.name = name; known.rows = guard.readTree(known.tree); update(); await verify();
+            known.directory = directory; known.name = name; known.rows = guard.readTree(known.tree); update(); verifyObjects();
           } catch (error) { poisoned = true; failure = errorSha(error); }
           const reference = writeGlobalPrivateEvidence(guard, target, 'state-' + journal.read().header.runId + '-' + journal.read().nextSequence + '.json', {
             schema: 'caveat.global_recovery_state.v1', sourceEvidenceSha256: evidenceSha256, step, operation, state: snapshot(), renameAttempted, renameIssued: result?.renameIssued ?? (renameAttempted ? null : false), result, errorSha256: failure,
           }); references.push(reference);
           journal.result(step, operation, poisoned ? 'unknown' : 'confirmed', reference.sha256); event(poisoned ? 'unknown' : 'completed');
           assert.ok(!poisoned, 'global_recovery_move_unknown');
+          await verify();
         };
         phase = 'quarantine-generated';
         for (const row of [generated[generated.length - 1]!, ...generated.slice(0, -1)]) if (row.status === 'installed') {
@@ -144,10 +146,12 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
     const outcome = 'executionPermission' in result ? { status: 'stopped' as const, phase, reason: result.reason } : result;
     phase = 'terminal'; event(outcome.status);
     return { schema: 'caveat.global_recovery_result.v1' as const, ...outcome, runId: recoveryDirectory ? basename(recoveryDirectory) : null,
-      filesystemWrites: writes ? null : 0, existingProcessOperations: 0, privilegeElevation: false as const };
+      processAssessment, filesystemWrites: writes ? null : 0, existingProcessOperations: 0, privilegeElevation: false as const };
   } catch (error) {
+    processAssessment = (error as { preflight?: typeof processAssessment })?.preflight ?? processAssessment;
     const result = { schema: 'caveat.global_recovery_result.v1' as const, status: writes ? 'unknown' as const : 'stopped' as const, phase, errorSha256: errorSha(error),
-      runId: recoveryDirectory ? basename(recoveryDirectory) : null, filesystemWrites: writes ? null : 0, existingProcessOperations: 0, privilegeElevation: false as const };
+      runId: recoveryDirectory ? basename(recoveryDirectory) : null,
+      recovery: writes ? { command: 'deployment global-recovery-plan', runId: recoveryDirectory ? basename(recoveryDirectory) : null, planSha256, requiresFreshEvidence: true } : null, processAssessment, filesystemWrites: writes ? null : 0, existingProcessOperations: 0, privilegeElevation: false as const };
     phase = 'terminal'; try { event(result.status); } catch { /* The failed receipt cannot authorize replay. */ } return result;
   }
 }

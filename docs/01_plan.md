@@ -504,12 +504,42 @@ The first migration from version-specific commands requires review/trust of the 
 
 ### Global migration preflight (unreleased source)
 
-The core process preflight compares two native observations of process birth,
-executable identity and arguments. Missing or changing metadata, unclassified
-interpreters, old-package consumers and npm writers stop the operation. Process
-names alone never justify an exclusion. Only the same stable kernel zombie birth
-is non-executing. Public results contain classifications and hashes rather than raw
-arguments or native error text. Collection failure leaves counts unknown.
+The process preflight reports an explicit observation scope, not the absence of
+all possible future imports. Every observed argv is checked for old root, npm root,
+alias and protected-path literals, including foreign users, ancestors, transient
+processes and inline code. A bound old executable/script is a consumer; a bound
+npm executable/script is a writer. Both stop the operation. Same-owner missing
+exe/argv and changed birth/executable identity remain unknown and stop it. The
+stable current migration process alone may carry its required scope arguments.
+
+Typed counts cover self, non-executing (PF_KTHREAD/kernel task or a same-birth
+zombie), foreign-user with readable uid/birth/argv, a finite identity-bound ancestor
+chain, transient observations and outside-observed-scope processes with readable
+exe/argv. No executable name alone excludes a process. Deleted-image suffixes
+are recorded and stripped only for runtime/scope classification. Public results
+contain counts, classifications and hashes; raw argv and native errors stay private.
+Collection failure leaves counts unknown. Outside-scope scripts and helpers such
+as ELECTRON_RUN_AS_NODE may dynamically import the old global after observation;
+the import can fail after retention in quarantine. The product never overwrites
+data to hide that failure. Package rename and owned npm uninstall have fresh
+checks before and after; a newly detected consumer stops at the confirmed journal
+state and requires a fresh `global-recovery-plan` before known-only recovery.
+
+The four migration/recovery callers exclude the read-only ordinary Node/libnode
+paths from the process stop scope, while retaining runtime classification. Sharing
+that Node or nvm prefix alone is allowed; old-global/npm/alias/config/protected-A
+literals still stop. The runtime proof independently re-reads held executable and
+loaded-library identities/content and alias/parent bindings before and after each
+mutation. Post-check failure retains a confirmed native move in the journal and
+stops further operations; fresh recovery admission must verify all protected state
+again. No runtime file is changed or repaired.
+
+`node scripts/check-global-processes.mjs` runs serially after mutation fixtures on
+each real CI runner. It records normal-table readiness and a stopped real literal
+consumer. A reader fault withholds metadata for that real same-owner child to
+prove refusal; this third case is explicit fault injection over a native table,
+not a claim that host access permissions were changed. The check owns only its
+fixture child and files; observation never signals existing processes.
 
 Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
 the executable with lsof text-file device/inode data; environment-shaped arguments
@@ -784,15 +814,29 @@ The selected binary and its loaded libnode dependencies must also be outside the
 recorded retired dedicated Node root.
 
 `deployment registration-migrate` takes the same inputs plus
-`--expected-plan-sha256 <reviewed-digest>`. Planning creates no run or installer
+`--expected-plan-sha256 <reviewed-digest> --clients-closed`. Planning creates no run or installer
 lock and returns no execution permission. Execution repeats fresh process/writer,
 native object, parent, alias, protected A pointer/entry/payload and runtime proof
-checks before and after every move. It never reads the retired Node executable,
+checks before and after each same-file pair. Retain/publish and recovery
+quarantine/restore run synchronously, with native identity/evidence checks and
+durable intent/result writes between the two no-replace renames. No asynchronous
+process collection or promise scheduling occurs while that name is vacant. It never reads the retired Node executable,
 changes its permissions, modifies hook trust or changes any existing process.
+The reviewed plan lists Claude Code (`~/.claude.json` and settings), Codex
+(config and hooks), Grok (config), and Cursor (MCP and hooks) with all seven paths.
+The operator must close those clients plus other editors/automation writing these
+files and explicitly attest `--clients-closed` for migration and recovery. This
+attestation never grants execution permission or proves process absence; the
+product does not close clients. B uninstall does not require this flag.
 The new configuration files are private; each complete original object, including
 its native identity, contents and security, is moved without replacement to the
 new private run before its new file is installed. Unknown names are retained and
-stop the operation. No whole-document serialization or in-place overwrite occurs.
+stop the operation. The pair is not an atomic exchange: synchronous validation
+and durable flush still take time. A concurrent writer, crash or unknown rename
+can leave the original in private backup and require manual recovery. Known
+non-move errors are not yet distinguished from unknown outcomes; pending/torn/unknown
+recovery remains refused. These residual risks accompany plan/execution results
+and the separate Owner request. No whole-document serialization or in-place overwrite occurs.
 
 The codec uses strict JSON with duplicate-key rejection and the existing TOML
 parser. JSON AST locations select exact pointer targets, including distinct hooks
@@ -811,7 +855,8 @@ and a finite chain of confirmed moves. It verifies every source privately and
 read-only, current originals/replacements, missing target names, all parents,
 protected state and fresh runtime/process proof. Its full evidence digest binds
 all source references, derived state and current directory bindings.
-`registration-recover` requires that digest through `--evidence-sha256`; each
+`registration-recover` requires that digest through `--evidence-sha256` plus
+`--clients-closed`; each
 attempt creates a separate private journal, quarantines only known installed
 replacements and restores only the held original objects. It never replays a
 saved intent or modifies an ancestor journal. Chains stop at eight runs, 256

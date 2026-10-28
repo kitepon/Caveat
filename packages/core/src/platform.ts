@@ -40,10 +40,10 @@ export function globalNpmEnvironment(node: string, run: string, platform: NodeJS
 export function globalFilesystemNativeSpec(platform: NodeJS.Platform = process.platform, architecture: string = process.arch) {
   if (platform === 'linux') return { windows: false as const, library: null,
     closeOnExec: 0x80000, linkOpen: 0x220000, loopError: 40, rename: 'renameat2', noReplace: 1, directoryRead: 'readdir', directoryNameOffset: 19,
-    xattrListTail: [] as number[], xattrGetTail: [] as number[], linkAttributesViaProc: true, aclType: undefined as number | undefined };
+    xattrListTail: [] as number[], xattrGetTail: [] as number[], linkAttributesViaProc: true, fullSync: undefined as number | undefined, aclType: undefined as number | undefined };
   if (platform === 'darwin') return { windows: false as const, library: '/usr/lib/libSystem.B.dylib',
     closeOnExec: 0x1000000, linkOpen: 0x200000, loopError: 62, rename: 'renameatx_np', noReplace: 4, directoryRead: architecture === 'x64' ? 'readdir$INODE64' : 'readdir', directoryNameOffset: 21,
-    xattrListTail: [0x20], xattrGetTail: [0, 0x20], linkAttributesViaProc: false, aclType: 0x100 };
+    xattrListTail: [0x20], xattrGetTail: [0, 0x20], linkAttributesViaProc: false, fullSync: 51, aclType: 0x100 };
   if (platform === 'win32') return { windows: true as const };
   throw Error('global_filesystem_platform_not_implemented');
 }

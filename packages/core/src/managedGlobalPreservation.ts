@@ -126,6 +126,10 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       stopped = true;
       return { status: 'unknown' as const, resultRecorded: false, result, errorSha256: errorSha(error), manifest: manifest() };
     }
+    if (outcome === 'confirmed') {
+      try { await verify(); }
+      catch (error) { stopped = true; return { status: 'stopped' as const, resultRecorded: true, errorSha256: errorSha(error), manifest: manifest(), recovery: 'fresh-known-only-plan-required' as const }; }
+    }
     return { status: outcome, resultRecorded: true, result, ...(errorSha256 ? { errorSha256 } : {}), manifest: manifest() };
   };
   return {
@@ -155,6 +159,8 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
         try { record(step, 'working-copy', outcome, result, errorSha256); }
         catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), manifest: manifest() }; }
         if (outcome === 'unknown') return { status: 'unknown' as const, result, manifest: manifest() };
+        try { await verify(); }
+        catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest(), recovery: 'fresh-known-only-plan-required' as const }; }
       }
       return { status: 'working' as const, manifest: manifest() };
     },
@@ -168,7 +174,6 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
         for (const row of saved) { guard.releaseWorkingTree(workingTrees.get(row.item.step)!); workingTrees.delete(row.item.step); row.working!.status = 'released'; }
         receipt = await run();
         assert.ok(receipt.spawned && receipt.exitObserved && receipt.closeObserved && !receipt.terminationRequested && !receipt.signal, 'global_preservation_npm_terminal_unknown');
-        await verify();
         for (const row of saved) {
           const observed = guard.observe(row.item.directory, row.item.name);
           const observation = after.find(value => value.step === row.item.step)!;
@@ -193,6 +198,8 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       try { record('npm-uninstall', 'uninstall', outcome, { receipt, after }, errorSha256); }
       catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, receipt, errorSha256: errorSha(error), manifest: manifest() }; }
       if (stopped) return { status: 'unknown' as const, receipt, after, errorSha256, manifest: manifest() };
+      try { await verify(); }
+      catch (error) { stopped = true; return { status: 'stopped' as const, receipt, after, errorSha256: errorSha(error), manifest: manifest(), recovery: 'fresh-known-only-plan-required' as const }; }
       const removed = saved.filter(row => row.item.role !== 'npm-management').every(row => row.working?.status === 'absent');
       return { status: receipt?.status === 'completed' && removed ? 'removed' as const : 'failed-known' as const, receipt, after, manifest: manifest() };
     },
@@ -211,6 +218,10 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       const outcome = row.working.status === 'quarantined' ? 'confirmed' : 'unknown';
       try { record(action, 'working-copy', outcome, result, errorSha256); }
       catch (error) { stopped = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), manifest: manifest() }; }
+      if (outcome === 'confirmed') {
+        try { await verify(); }
+        catch (error) { stopped = true; return { status: 'stopped' as const, errorSha256: errorSha(error), manifest: manifest(), recovery: 'fresh-known-only-plan-required' as const }; }
+      }
       return { status: outcome, result, manifest: manifest() };
     },
     async restoreKnown(step: string) {

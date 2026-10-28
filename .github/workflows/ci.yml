@@ -52,4 +52,5 @@ jobs:
         corepack pnpm check:release-smoke &&
         corepack pnpm test:claude-fresh-session-smoke &&
         corepack pnpm test &&
+        node scripts/check-global-processes.mjs &&
         node scripts/managed-native-hash-proof.mjs

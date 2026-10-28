@@ -106,10 +106,10 @@ export async function checkGlobalRecoveryProcesses(source: GlobalRecoverySnapsho
   emit: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
   const { plan } = source;
   const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)), runtimeExecutables: [plan.nodeProof.executable.canonical],
-    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([...managedNodePaths(plan.nodeProof),
-      ...(source.sourceRoots ?? [runDirectory]), target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
+    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([...(source.sourceRoots ?? [runDirectory]), target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
   const result = await preflightGlobalProcesses(scope, emit, collect);
-  assert.equal(result.status, 'ready', 'global_recovery_process_preflight_stopped');
+  if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result });
+  return result;
 }
 
 /** Read-only fresh plan; it creates neither a lock nor a private recovery directory. */
@@ -132,12 +132,13 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
         assert.equal(source.guard.observe(source.plan.root, basename(target)), null, 'global_recovery_attempt_already_exists');
       };
       verify();
-      await checkGlobalRecoveryProcesses(source, runDirectory, target, emit, collect); verify();
+      const processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, emit, collect); verify();
       return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'ready' as const, planSha256, evidenceSha256: source.evidenceSha256,
-        currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 };
+        processAssessment, currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 };
     });
     assert.equal(result.schema, 'caveat.global_recovery_plan.v1', 'global_recovery_plan_source_unconfirmed'); return result;
   } catch (error) { return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
+    processAssessment: (error as { preflight?: unknown })?.preflight ?? null,
     errorSha256: shaGlobalRecoveryValue(error instanceof Error ? error.name + ':' + error.message : String(error)),
     currentObjects: 'not-confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 }; }
 }

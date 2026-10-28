@@ -26,7 +26,7 @@ describe('global process assessment', () => {
   it('binds the current kernel executable and classifies stable outside-scope native processes', () => {
     const result = assessGlobalProcesses(scope, tables(record(20)));
     expect(result.status).toBe('ready');
-    expect(result.records.map(row => row.classification)).toEqual(['self', 'other-executable']);
+    expect(result.records.map(row => row.classification)).toEqual(['self', 'outside-observed-scope']);
     expect(result.filesystemWrites).toBe(0); expect(result.existingProcessOperations).toBe(0);
   });
   it('rejects an invalid scope before collecting any native process data', async () => {
@@ -46,7 +46,7 @@ describe('global process assessment', () => {
     const selected = '/ordinary/custom-runtime';
     expect(assessGlobalProcesses(scope, tables(record(20, selected, [selected, '/unrelated/script.js']))).status).toBe('ready');
     const result = assessGlobalProcesses({ ...scope, runtimeExecutables: [selected] }, tables(record(20, selected, [selected, '/unrelated/script.js'])));
-    expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1);
+    expect(result.status).toBe('ready'); expect(result.unknown).toBe(0);
   });
   it('requires a bound Node script slot and leaves data/flag literals unknown', () => {
     const root = scope.packageRoot + '/dist/caveat.js';
@@ -58,10 +58,11 @@ describe('global process assessment', () => {
     const own = tables(); own.before[0]!.argv = ['node', root]; own.after[0]!.argv = ['node', root];
     expect(assessGlobalProcesses(scope, own).status).toBe('stopped');
   });
-  it('keeps unrelated JavaScript, other interpreters and inline commands unknown', () => {
+  it('classifies readable unrelated runtimes and inline commands within the explicit observation contract', () => {
     for (const row of [record(20, '/runtime/node', ['node', '/elsewhere/program.js']), record(21, '/usr/bin/python3'), record(22, '/bin/sh', ['sh', '-c', 'hidden-command']), record(23, '/system/cmd.exe', ['cmd.exe', '/c', 'npm install'])]) {
       const result = assessGlobalProcesses(scope, tables(row));
-      expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1);
+      expect(result.status).toBe('ready'); expect(result.counts['outside-observed-scope']).toBe(1);
+      expect(result.residualRisks.join(' ')).toContain('dynamic import');
     }
   });
   it('does not mistake a neighbouring package path for the old package', () => {
@@ -73,17 +74,17 @@ describe('global process assessment', () => {
     const result = assessGlobalProcesses(scope, tables(row));
     expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1);
   });
-  it.each(['birth', 'executable', 'argv'] as const)('stops on changed process %s', field => {
+  it.each(['birth', 'executable'] as const)('stops on changed process %s', field => {
     const value = tables(record(20));
     const last = value.after[1]!;
     if (field === 'birth') last.birth = 'different-birth';
     else if (field === 'executable') last.executable = { path: '/new/image', dev: '1', ino: '99' };
-    else last.argv = ['/new/argument'];
+
     expect(assessGlobalProcesses(scope, value).unknown).toBe(1);
   });
-  it('requires the current self identity and refuses appearing/disappearing processes', () => {
+  it('requires the current self identity and classifies readable transients outside observed scope', () => {
     const value = tables(record(20)); value.after.pop();
-    expect(assessGlobalProcesses(scope, value).status).toBe('stopped');
+    expect(assessGlobalProcesses(scope, value)).toMatchObject({ status: 'ready', counts: { transient: 1 } });
     value.before = value.before.filter(row => row.pid !== 10); value.after = [];
     expect(assessGlobalProcesses(scope, value).errors).toContain('current_process_not_bound');
   });
@@ -92,6 +93,50 @@ describe('global process assessment', () => {
     expect(assessGlobalProcesses(scope, value).records[1]?.classification).toBe('non-executing');
     value.after[1]!.birth = 'new-birth';
     expect(assessGlobalProcesses(scope, value).status).toBe('stopped');
+  });
+  it('classifies kernel threads, readable foreign users and a bound finite ancestor chain', () => {
+    const value = tables({ ...record(1, '/bin/bash'), ppid: 0 },
+      { ...record(20), uid: 2000, executable: null },
+      { ...record(30), kernel: 'linux-pf-kthread', executable: null, argv: null });
+    expect(assessGlobalProcesses(scope, value)).toMatchObject({ status: 'ready', counts: { ancestor: 1, 'foreign-user': 1, 'non-executing': 1 } });
+    value.after[1]!.birth = 'changed';
+    expect(assessGlobalProcesses(scope, value).status).toBe('stopped');
+  });
+  it('checks literals in both observations before foreign, ancestor, transient, zombie or inline classification', () => {
+    for (const data of [
+      { ...record(20), uid: 2000, executable: null },
+      { ...record(1, '/bin/bash'), ppid: 0 },
+      record(21, '/usr/bin/python3'),
+    ]) {
+      data.argv = [data.executable?.path ?? 'foreign', '-e', 'require("' + scope.packageRoot + '")'];
+      for (const transient of [false, true]) {
+        const value = tables(data); if (transient) value.after.pop();
+        expect(assessGlobalProcesses(scope, value).status).toBe('stopped');
+      }
+    }
+  });
+  it('records deleted runtime images and applies the same literal and bound-script rules', () => {
+    const row = record(20, '/usr/bin/node (deleted)', ['node', '/outside/program.js']);
+    expect(assessGlobalProcesses(scope, tables(row))).toMatchObject({ status: 'ready', records: [{}, { imageDeleted: true, runtime: true }] });
+    row.argv![1] = scope.packageRoot + '/index.js';
+    expect(assessGlobalProcesses(scope, tables(row))).toMatchObject({ status: 'stopped', consumers: 1 });
+  });
+  it('requires readable foreign argv and rejects ancestor cycles and incomplete same-uid transients', () => {
+    const value = tables({ ...record(20), uid: 2000, argv: null });
+    expect(assessGlobalProcesses(scope, value).unknown).toBe(1);
+    value.before[1]!.uid = 1000; value.after.pop();
+    expect(assessGlobalProcesses(scope, value).unknown).toBe(1);
+    const cycle = tables({ ...record(1), ppid: 10 });
+    expect(assessGlobalProcesses(scope, cycle).errors).toContain('process_ancestor_cycle_or_bound');
+  });
+  it('allows a read-only nvm runtime sibling while still stopping old-global literals under the same prefix', () => {
+    const prefix = '/home/user/.nvm/versions/node/v24.14.1', node = prefix + '/bin/node';
+    const affected = { packageRoot: prefix + '/lib/node_modules/caveat-cli', npmRoot: prefix + '/lib/node_modules/npm',
+      runtimeExecutables: [node], binAliases: [prefix + '/bin/caveat'], protectedPaths: ['/managed/entry/caveat.mjs'] };
+    expect(assessGlobalProcesses(affected, tables(record(20, node, [node, '/app/bellteam.js']))).status).toBe('ready');
+    for (const argv of [[node, affected.packageRoot + '/dist/caveat.js'], [node, '-e', 'require("' + affected.packageRoot + '")']]) {
+      expect(assessGlobalProcesses(affected, tables(record(20, node, argv))).status).toBe('stopped');
+    }
   });
   it('does not retain arbitrary arguments or executable paths in public projections', () => {
     const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', 'secret-argument-value'])));
@@ -134,7 +179,7 @@ describe('native process parsers and owned transport', () => {
     expect(() => parseWindowsProcessArguments('"unterminated')).toThrow('unterminated_quote');
   });
   it('requires CIM child PID/parent/birth binding and rejects duplicate or missing table entries', () => {
-    const row = { pid: 99999, ppid: process.pid, birth: '2026-01-01T00:00:00.000Z', exe: 'C:\\Windows\\probe.exe', command: 'probe' };
+    const row = { uid: 'S-1-5-21-1000', pid: 99999, ppid: process.pid, birth: '2026-01-01T00:00:00.000Z', exe: 'C:\\Windows\\probe.exe', command: 'probe' };
     const doc = { before: [row], after: [row], probePid: row.pid, probeBirth: row.birth };
     const frames = (value: typeof doc) => [
       ['bootstrap', 'started', 0], ['before', 'started', 0], ['before', 'completed', value.before.length], ['after', 'started', 0], ['after', 'completed', value.after.length],
@@ -202,7 +247,7 @@ describe('native process parsers and owned transport', () => {
     expect(result.status).toBe('ready');
     const unbound = await readMacProcessTables(async () => ({ stdout: '', pid: fakePid + 1 }), () => structuredClone(records));
     expect(assessGlobalProcesses(scope, unbound).status).toBe('stopped');
-    expect(unbound.before[1]?.reason).toBe('kernel_text_image_unbound');
+    expect(unbound.before[1]?.executable).toBeNull();
   });
   it.skipIf(!isWindows())('executes the exact Windows probe with a scoped fake CIM cmdlet and validates its phase protocol', async () => {
     const command = join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe');

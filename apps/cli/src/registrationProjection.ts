@@ -78,5 +78,6 @@ export function registrationFileSpecs(source: RegistrationSources, userHome: str
   }
   assert.equal(roles.size, 15, 'registration_missing_definition');
   assert.ok(files.every(file => file.targets.length >= 1 && file.targets.length <= 4), 'registration_missing_file_targets');
-  return { files, beforeNode: saved.expectedDedicatedNode as string, proposedNode: proposal.selectedNodeCandidate as string };
+  const clientsToClose = [...new Set(rows.map(([client]) => client))].map(client => ({ client, files: rows.filter(([owner]) => owner === client).map(([, , path]) => path) }));
+  return { files, clientsToClose, beforeNode: saved.expectedDedicatedNode as string, proposedNode: proposal.selectedNodeCandidate as string };
 }

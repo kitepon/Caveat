@@ -29,10 +29,6 @@ export async function deploymentStatus() {
   const shell = await managedShellStatusCurrent();
   const ownSync = readMcpSyncState(findCaveatHome(homedir()));
   try {
-    if ('native' in shell) {
-      if (!shell.deployment) return { status: 'unavailable' as const, payloadVerified: false, lock, shell, ownSync, diagnostic: 'native_payload_unconfirmed' };
-      return { status: 'ready' as const, ...shell.deployment, lock, shell, ownSync };
-    }
     const active = verifyManagedDeployment();
     return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell, ownSync };
   } catch (error) {

@@ -36,7 +36,8 @@ export function decodeMacBsdInfo(bytes: Buffer, pid: number) {
   const seconds = bytes.readBigUInt64LE(120), micros = bytes.readBigUInt64LE(128);
   assert.ok(micros < 1000000n, 'mac_process_birth_invalid');
   return { pid, ppid: bytes.readUInt32LE(16), uid: bytes.readUInt32LE(20),
-    birth: seconds + ':' + micros, state: bytes.readUInt32LE(4) === 5 ? 'Z' : 'live' };
+    birth: seconds + ':' + micros, state: bytes.readUInt32LE(4) === 5 ? 'Z' : 'live',
+    ...(pid === 0 && (bytes.readUInt32LE(0) & 1) ? { kernel: 'darwin-kernel-task' as const } : {}) };
 }
 
 /** Native loading is lazy: ordinary hooks never load a C bridge or inspect processes. */
@@ -74,17 +75,18 @@ export async function createMacKernelReader() {
     } finally { buffer.fill(0); }
   };
   const readProcess = (pid: number): NativeProcessRecord => {
+    let row: NativeProcessRecord = { pid, ppid: null, uid: null, birth: null, executable: null, argv: null };
     try {
-      const first = bsd(pid);
-      if (first.state === 'Z') { assert.deepEqual(bsd(pid), first); return { ...first, executable: null, argv: null }; }
-      const executable = image(pid), argv = args(pid);
+      const first = bsd(pid); row = { ...row, ...first };
+      if (!first.kernel && first.state !== 'Z') {
+        try { row.argv = args(pid); } catch { /* Preserve the independently observed owner and birth. */ }
+        try { row.executable = image(pid); } catch { /* Foreign processes may deny executable metadata. */ }
+        if (row.executable) assert.deepEqual(image(pid), row.executable, 'mac_process_image_changed');
+        if (row.argv) assert.ok(isDeepStrictEqual(args(pid), row.argv), 'mac_process_arguments_changed');
+      }
       assert.deepEqual(bsd(pid), first, 'mac_process_birth_changed');
-      assert.deepEqual(image(pid), executable, 'mac_process_image_changed');
-      assert.ok(isDeepStrictEqual(args(pid), argv), 'mac_process_arguments_changed');
-      return { ...first, executable, argv };
-    } catch {
-      return { pid, ppid: null, uid: null, birth: null, executable: null, argv: null, reason: 'mac_kernel_metadata_unverified' };
-    }
+      return row;
+    } catch { return { ...row, reason: 'mac_kernel_metadata_unverified' }; }
   };
   return {
     readProcess,

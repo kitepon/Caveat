@@ -19,6 +19,8 @@ export function executeGlobalMigration(input: GlobalMigrationInput, expectedPlan
 export async function coordinateGlobalMigration(input: GlobalMigrationInput, expectedPlanSha256: string, emit: (event: GlobalMigrationEvent) => void,
   admit: (input: GlobalMigrationInput, events: (event: ProcessProbeEvent) => void) => Promise<Admission>) {
   let sequence = 0, phase = 'admission', planSha256: string | null = null, runId: string | null = null, admission: Admission | null = null;
+  let processAssessment: ReturnType<Admission['processAssessment']> = null;
+  let mutationStarted = false;
   let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string } = { status: 'unknown', phase };
   const event = (kind: string, pid?: number) => emit({ schema: 'caveat.global_migration_event.v1', sequence: ++sequence, phase, event: kind, planSha256, runId, ...(pid ? { pid } : {}) });
   try {
@@ -30,6 +32,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     const pointerSha256 = reviewed.protectedObjects.find(row => row.path === join(reviewed.root, 'active.json'))?.rows[0]?.identity.contentSha256;
     assert.ok(pointerSha256, 'global_migration_reviewed_pointer_required');
     phase = 'prepare'; event('issued');
+    mutationStarted = true;
     const session = await admission.prepare(expectedPlanSha256); runId = basename(session.runDirectory); event('completed');
     for (const [step, run, expected] of [
       ['preserve', () => session.engine.preserveAll(), 'preserved'],
@@ -48,6 +51,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     // A complete mutation journal is a state checkpoint, not proof of later close or independent readback.
     session.journal.complete(sha({ planSha256, originals: session.engine.manifest(), shell: session.shell.snapshot() }));
     const journalSha256 = session.journal.read().bytesSha256; event('completed');
+    processAssessment = admission.processAssessment();
     phase = 'close'; event('issued'); admission.close(); admission = null; event('completed');
     phase = 'readback'; event('issued');
     const persisted = await inspectGlobalMigrationRecovery(session.runDirectory, planSha256);
@@ -66,11 +70,13 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
 
   async function finish() {
     if (admission) {
+      processAssessment = admission.processAssessment();
       try { admission.close(); } catch (error) { result = { status: 'unknown', phase: 'close', errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) }; }
       admission = null;
     }
     phase = 'terminal';
     try { event(result.status); } catch { result = { status: 'unknown', phase: 'receipt' }; }
-    return { schema: 'caveat.global_migration_result.v1' as const, ...result, planSha256, runId, existingProcessOperations: 0, privilegeElevation: false as const };
+    return { schema: 'caveat.global_migration_result.v1' as const, ...result, planSha256, runId, processAssessment, filesystemWrites: mutationStarted ? null : 0,
+      recovery: mutationStarted && result.status !== 'completed' ? { command: 'deployment global-recovery-plan', runId, planSha256, requiresFreshEvidence: true } : null, existingProcessOperations: 0, privilegeElevation: false as const };
   }
 }

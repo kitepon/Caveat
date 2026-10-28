@@ -189,7 +189,15 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
           globalRecoveryKeys(object.working, ['status', 'rows', 'stagingName']);
           assert.ok(['known', 'after-known', 'absent', 'quarantined'].includes(object.working.status)
             && object.working.stagingName === 'work-' + journal.header.runId + '-' + object.step, 'global_recovery_working_unknown');
-          if (object.working.rows !== null) globalRecoveryRows(object.working.rows);
+          if (object.working.rows !== null) {
+            globalRecoveryRows(object.working.rows);
+            const source = new Map(expected.rows.map(row => [row.relativePath, row.identity]));
+            for (const row of object.working.rows) {
+              const before = source.get(row.relativePath); assert.ok(before, 'global_recovery_working_path_unbound');
+              assert.deepEqual([row.identity.kind, row.identity.contentSha256, row.identity.linkTarget],
+                [before.kind, before.contentSha256, before.linkTarget], 'global_recovery_working_content_unbound');
+            }
+          }
           else assert.equal(object.working.status, 'absent', 'global_recovery_working_rows_required');
         }
       }
@@ -200,7 +208,15 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
           assert.equal(object.name, index < shell.files.length ? plan.leaves[index]!.name : 'shell', 'global_recovery_shell_scope_invalid');
           assert.equal(object.backupName, index < shell.files.length ? 'generated-' + index : 'generated-shell', 'global_recovery_shell_backup_invalid');
           assert.ok(['absent', 'installed', 'quarantined'].includes(object.status), 'global_recovery_shell_unknown');
-          if (object.status === 'absent') assert.equal(object.rows, null, 'global_recovery_shell_rows_invalid'); else globalRecoveryRows(object.rows);
+          if (object.status === 'absent') assert.equal(object.rows, null, 'global_recovery_shell_rows_invalid');
+          else {
+            globalRecoveryRows(object.rows);
+            if (index < shell.files.length) {
+              assert.equal(object.rows.length, 1, 'global_recovery_wrapper_rows_invalid');
+              const reviewed = plan.shellPlan.files.find(row => row.name === object.name); assert.ok(reviewed, 'global_recovery_wrapper_plan_missing');
+              assert.equal(object.rows[0]!.identity.contentSha256, reviewed.sha256, 'global_recovery_wrapper_content_unbound');
+            }
+          }
         }
       }
     }

@@ -3,11 +3,17 @@ import { closeSync, constants, fstatSync, fsyncSync, fchmodSync, readSync, write
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
-  directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; aclType?: number };
+  directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; fullSync?: number; aclType?: number };
 type Ref = { fd: number; mutation?: boolean; runtime?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
 
 export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
+  const fullSync = spec.fullSync === undefined ? null : lib.func('int fcntl(int fd, int command)');
+  const flush = (fd: number) => {
+    fsyncSync(fd);
+    // F_FULLFSYNC drains device caches for durable files after directory metadata fsync.
+    if (fullSync && fstatSync(fd).isFile()) assert.equal(fullSync(fd, spec.fullSync), 0, 'global_guard_full_sync_failed');
+  };
   const open = lib.func('int open(const char *path, int flags)');
   const openat = lib.func('int openat(int dirfd, const char *path, int flags)');
   const createat = lib.func('int openat(int dirfd, const char *path, int flags, ...)');
@@ -110,7 +116,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     let linkTarget: string | undefined;
     if (stat.isSymbolicLink()) {
       const ref = value as Ref, bytes = Buffer.alloc(65537);
-      const length = Number(linkRead(ref.parent!.fd, ref.name!, bytes, bytes.length));
+      const length = Number(spec.linkAttributesViaProc ? linkRead(ref.fd, '', bytes, bytes.length) : linkRead(ref.parent!.fd, ref.name!, bytes, bytes.length));
       assert.ok(length > 0 && length < bytes.length, 'global_guard_link_target_unavailable');
       linkTarget = new TextDecoder('utf8', { fatal: true }).decode(bytes.subarray(0, length));
     }
@@ -200,9 +206,9 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     },
     finishWorking(ref, executable) {
       const value = working(ref), stat = fstatSync(value.fd);
-      if (stat.isFile()) { fchmodSync(value.fd, executable ? 0o700 : 0o600); fsyncSync(value.fd); }
-      else if (stat.isDirectory()) fsyncSync(value.fd);
-      fsyncSync(value.parent!.fd);
+      if (stat.isFile()) { fchmodSync(value.fd, executable ? 0o700 : 0o600); flush(value.fd); }
+      else if (stat.isDirectory()) flush(value.fd);
+      flush(value.parent!.fd);
     },
     createJournal(parent, name) {
       const stat = fstatSync((parent as Ref).fd, { bigint: true });
@@ -216,14 +222,14 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       const value = journal(ref, true); assert.ok(bytes.length <= 65536, 'global_journal_record_bound');
       assert.equal(writeSync(value.fd, bytes), bytes.length, 'global_journal_partial_write');
     },
-    flushJournal(ref) { const value = journal(ref, true); fsyncSync(value.fd); fsyncSync(value.parent!.fd); },
+    flushJournal(ref) { const value = journal(ref, true); flush(value.fd); flush(value.parent!.fd); },
     readJournal(ref) { return readFile(journal(ref), 16 * 1024 * 1024); },
     readFile,
     rename(from, name, source, to, target) {
       if (rename((from as Ref).fd, name, (to as Ref).fd, target, spec.noReplace) !== 0)
         throw Object.assign(Error('global_guard_native_rename_failed'), { nativeCode: koffi.errno() });
       Object.assign(source, { parent: to, name: target });
-      fsyncSync((from as Ref).fd); fsyncSync((to as Ref).fd);
+      flush((from as Ref).fd); flush((to as Ref).fd);
     },
     close(ref) { createdWorking.delete(ref); createdJournals.delete(ref); readOnlyJournals.delete(ref); closeSync((ref as Ref).fd); },
   };

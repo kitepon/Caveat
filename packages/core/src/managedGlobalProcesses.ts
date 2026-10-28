@@ -5,8 +5,8 @@ import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
 export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
-type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'other-executable';
-export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string };
+type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'foreign-user' | 'ancestor' | 'transient' | 'outside-observed-scope';
+export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string; imageDeleted?: boolean; runtime?: boolean };
 const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, '');
   return fold ? slash.toLowerCase() : slash;
@@ -33,68 +33,94 @@ function hasLiteral(value: string, path: string) {
   let offset = value.indexOf(path);
   while (offset >= 0) {
     const next = value[offset + path.length];
-    if (next === undefined || /[\/\s'"=]/.test(next)) return true;
+    if (next === undefined || !/[\p{L}\p{N}_.-]/u.test(next)) return true;
     offset = value.indexOf(path, offset + 1);
   }
   return false;
 }
 
-/** Only complete, unchanged executable/argv observations can be classified outside the affected package. */
+export const globalProcessResidualRisks = [
+  'process tables cannot exclude a later dynamic import of the old global by an outside-scope script or helper, including ELECTRON_RUN_AS_NODE',
+  'a later import may fail after the old global is retained in quarantine; existing data is never overwritten',
+] as const;
+
+/** Observation scope is explicit; outside-scope classification is not proof against future dynamic imports. */
 export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeProcessTables) {
   validateScope(scope);
   const fold = tables.caseInsensitive, norm = (value: string) => normalized(value, fold);
   const root = scope.packageRoot === undefined ? null : norm(scope.packageRoot), npm = scope.npmRoot === undefined ? null : norm(scope.npmRoot), aliases = scope.binAliases.map(norm);
+  const paths = [...(root ? [root] : []), ...(npm ? [npm] : []), ...aliases, ...(scope.protectedPaths ?? []).map(norm)];
   const within = (value: string, parent: string) => value === parent || value.startsWith(parent + '/');
   const records: GlobalProcessAssessment[] = [], errors = [...tables.errors];
   const before = new Map(tables.before.map(row => [row.pid, row])), after = new Map(tables.after.map(row => [row.pid, row]));
   if (!before.size || !after.size || before.size !== tables.before.length || after.size !== tables.after.length) errors.push('process_table_empty_or_duplicate');
+  const stable = ({ argv: _, reason: __, ...value }: NativeProcessRecord) => ({ ...value, state: value.state === 'Z' ? 'Z' : 'live' });
+  const unchanged = (first: NativeProcessRecord | undefined, last: NativeProcessRecord | undefined) => !!first && !!last && isDeepStrictEqual(stable(first), stable(last));
+  const ancestors = new Set<number>(), visited = new Set([tables.selfPid]);
+  let parent = before.get(tables.selfPid)?.ppid;
+  for (let depth = 0; parent !== null && parent !== undefined && parent > 0; depth++) {
+    if (depth >= 128 || visited.has(parent)) { errors.push('process_ancestor_cycle_or_bound'); break; }
+    visited.add(parent);
+    const first = before.get(parent), last = after.get(parent);
+    if (!unchanged(first, last) || !first?.birth || !first.executable || !first.argv || first.reason) break;
+    ancestors.add(parent); parent = first.ppid;
+  }
+  const ownUid = before.get(tables.selfPid)?.uid;
   for (const pid of new Set([...before.keys(), ...after.keys()])) {
     const first = before.get(pid), last = after.get(pid), row = first ?? last!;
     const result: GlobalProcessAssessment = { pid, birth: row.birth, classification: 'unknown', reason: 'process_identity_unverified' };
     records.push(result);
-    const stable = (value: NativeProcessRecord) => ({ ...value, state: value.state === 'Z' ? 'Z' : 'live' });
-    if (!first || !last || !isDeepStrictEqual(stable(first), stable(last))) { result.reason = 'process_appeared_disappeared_or_changed'; continue; }
+    // Check every observed argv, including foreign, ancestor, transient and inline commands.
+    const image = row.executable ? norm(row.executable.path).replace(/ \(deleted\)$/, '') : null;
+    result.imageDeleted = !!row.executable?.path.endsWith(' (deleted)');
+    const isRuntime = !!image && (/(?:^|\/)(?:node|nodejs|bun|deno|electron|[^/]*helper|python[\d.]*|ruby[\d.]*|perl[\d.]*|php[\d.]*|java|pwsh|powershell|cmd|sh|bash|zsh|fish|dash|ksh|csh|tcsh)(?:\.exe)?$/.test(image)
+      || (scope.runtimeExecutables ?? []).some(path => norm(path) === image)
+      || row.executable?.dev === tables.selfExecutable.dev && row.executable?.ino === tables.selfExecutable.ino);
+    result.runtime = isRuntime;
+    const bound = (entry: NativeProcessRecord) => {
+      const path = entry.executable ? norm(entry.executable.path).replace(/ \(deleted\)$/, '') : null;
+      const argv = entry.argv?.map(norm);
+      const node = !!path && (/(?:^|\/)(?:node|nodejs)(?:\.exe)?$/.test(path)
+        || (scope.runtimeExecutables ?? []).some(value => norm(value) === path)
+        || entry.executable?.dev === tables.selfExecutable.dev && entry.executable?.ino === tables.selfExecutable.ino);
+      const candidate = node && argv ? nodeScript(argv) : null;
+      if (npm && (path && within(path, npm) || candidate && within(candidate, npm))) return 'writer';
+      if (root && path && within(path, root) || candidate && (root && within(candidate, root) || aliases.includes(candidate))) return 'consumer';
+      return null;
+    };
+    const binding = [first, last].filter((value): value is NativeProcessRecord => !!value).map(bound).find(Boolean);
+    if (binding) { result.classification = binding; result.reason = 'bound_scope_executable_or_script'; continue; }
+    const literal = [first, last].some(entry => entry?.argv?.some(value => paths.some(path => hasLiteral(norm(value), path))));
+    // The migration CLI itself carries scope paths. Only its stable kernel identity can exempt that argv.
+    const self = pid === tables.selfPid && unchanged(first, last) && !first?.reason && !last?.reason && !!last?.argv && !!row.birth && row.uid !== null && !!row.argv
+      && !!row.executable && norm(row.executable.path) === norm(tables.selfExecutable.path)
+      && row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
+    if (self) { result.classification = 'self'; result.reason = 'current_pid_birth_uid_and_kernel_executable_bound'; continue; }
+    if (literal) { result.reason = 'scope_literal_outside_bound_script'; continue; }
+    if (first && last && (!unchanged(first, last) || first.reason || last.reason || !first.argv !== !last.argv)) { result.reason = 'process_identity_or_arguments_changed'; continue; }
     if (row.reason || !row.birth || row.ppid === null) { result.reason = row.reason ?? 'process_birth_or_parent_missing'; continue; }
-    if (first.state === 'Z' && last.state === 'Z') {
-      result.classification = 'non-executing'; result.reason = 'same_birth_kernel_zombie'; continue;
+    if (first && last && (row.kernel || first.state === 'Z' && last.state === 'Z')) {
+      result.classification = 'non-executing'; result.reason = row.kernel ?? 'same_birth_kernel_zombie'; continue;
     }
-    if (!row.executable || !row.argv || !absolute(norm(row.executable.path)) || !/^\d+$/.test(row.executable.dev) || !/^[1-9]\d*$/.test(row.executable.ino)) {
+    if (row.uid === null || ownUid === null || ownUid === undefined || !row.argv) { result.reason = 'process_owner_or_arguments_missing'; continue; }
+    if (row.uid !== ownUid) { result.classification = first && last ? 'foreign-user' : 'transient'; result.reason = 'foreign_uid_birth_and_arguments_outside_scope'; continue; }
+    if (!row.executable || !absolute(norm(row.executable.path)) || !/^\d+$/.test(row.executable.dev) || !/^[1-9]\d*$/.test(row.executable.ino)) {
       result.reason = 'process_executable_or_arguments_missing'; continue;
     }
     result.executableSha256 = createHash('sha256').update(JSON.stringify(row.executable)).digest('hex');
-    const image = norm(row.executable.path), args = (row.argv ?? []).map(norm);
-    const isNode = /(?:^|\/)(?:node|nodejs)(?:\.exe)?$/.test(image)
-      || (scope.runtimeExecutables ?? []).some(path => norm(path) === image)
-      || row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
-    const script = isNode && row.argv ? nodeScript(args) : null;
-    if (npm && (within(image, npm) || script && within(script, npm))) {
-      result.classification = 'writer'; result.reason = 'bound_npm_executable_or_script'; continue;
-    }
-    if (root && within(image, root) || script && (root && within(script, root) || aliases.includes(script))) {
-      result.classification = 'consumer'; result.reason = 'bound_old_executable_or_node_script'; continue;
-    }
-    if (pid === tables.selfPid) {
-      if (row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino && norm(row.executable.path) === norm(tables.selfExecutable.path)) {
-        result.classification = 'self'; result.reason = 'current_pid_and_kernel_executable_bound';
-      } else result.reason = 'current_process_binding_changed';
-      continue;
-    }
-    if (args.some(value => [...(root ? [root] : []), ...(npm ? [npm] : []), ...aliases, ...(scope.protectedPaths ?? []).map(norm)].some(path => hasLiteral(value, path)))) {
-      result.reason = 'scope_literal_outside_bound_script'; continue;
-    }
-    // Unknown JS or inline code may import the old global after this observation.
-    if (isNode || /(?:^|\/)(?:bun|deno|electron|python[\d.]*|ruby[\d.]*|perl[\d.]*|php[\d.]*|java|pwsh|powershell|cmd|sh|bash|zsh|fish|dash|ksh|csh|tcsh)(?:\.exe)?$/.test(image) || args.some(arg => /^(?:-e|--eval|-p|--print|-c|--command)(?:=|$)/.test(arg))) {
-      result.reason = 'unclassified_runtime_or_inline_code'; continue;
-    }
-    result.classification = 'other-executable'; result.reason = 'stable_kernel_executable_outside_scope';
+    result.classification = !first || !last ? 'transient' : ancestors.has(pid) ? 'ancestor' : 'outside-observed-scope';
+    result.reason = !first || !last ? 'single_observation_without_scope_reference' : ancestors.has(pid) ? 'finite_pid_birth_executable_ancestor_chain' : 'observed_executable_and_arguments_outside_scope';
   }
   if (!records.some(row => row.classification === 'self')) errors.push('current_process_not_bound');
-  const consumers = records.filter(row => row.classification === 'consumer').length;
-  const writers = records.filter(row => row.classification === 'writer').length;
-  const unknown = records.filter(row => row.classification === 'unknown').length;
+  const counts: Record<Classification, number> = { self: 0, 'non-executing': 0, consumer: 0, writer: 0, unknown: 0, 'foreign-user': 0, ancestor: 0, transient: 0, 'outside-observed-scope': 0 };
+  for (const row of records) counts[row.classification]++;
+  const consumers = counts.consumer, writers = counts.writer, unknown = counts.unknown;
   return { schema: 'caveat.global_process_preflight.v1' as const,
     status: errors.length || consumers || writers || unknown ? 'stopped' as const : 'ready' as const,
-    observedAt: new Date().toISOString(), consumers, writers, unknown, errors, records,
+    observedAt: new Date().toISOString(), consumers, writers, unknown, counts, errors, records,
+    stopScope: { oldPackage: !!scope.packageRoot, npm: !!scope.npmRoot, aliases: scope.binAliases.length, protectedPaths: scope.protectedPaths?.length ?? 0,
+      readOnlyRuntimePathsExcluded: (scope.runtimeExecutables ?? []).every(path => !(scope.protectedPaths ?? []).some(protectedPath => norm(protectedPath) === norm(path))), runtimeProofRequiredAtEveryMutation: true },
+    residualRisks: globalProcessResidualRisks,
     existingProcessOperations: 0, filesystemWrites: 0, privilegeElevation: false as const };
 }
 
@@ -105,7 +131,7 @@ export async function preflightGlobalProcesses(scope: GlobalProcessScope, onEven
   try { tables = await collect(onEvent); }
   catch (error) {
     return { schema: 'caveat.global_process_preflight.v1' as const, status: 'stopped' as const,
-      observedAt: new Date().toISOString(), consumers: null, writers: null, unknown: null, records: [],
+      observedAt: new Date().toISOString(), consumers: null, writers: null, unknown: null, records: [], counts: null, residualRisks: globalProcessResidualRisks,
       errors: ['native_process_collection_unconfirmed'],
       errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'),
       ownedProbe: error instanceof Error ? (error as Error & { ownedProbe?: unknown }).ownedProbe ?? null : null,

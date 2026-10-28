@@ -47,7 +47,7 @@ export function prepareGlobalShellInstallation(guard: Guard, journal: Journal, e
     const step = (restore ? 'retire.generated.' : 'publish.generated.') + row.name;
     journal.intent(step, operation, sha(snapshot()));
     let result: unknown, errorSha256: string | undefined;
-    try { result = mutate(); await verify(); verifyOwned(); }
+    try { result = mutate(); verifyOwned(); }
     catch (error) {
       uncertain = true; row.status = 'unknown'; errorSha256 = errorSha(error);
       const observe = (directory: string, name: string) => { try { const identity = guard.observe(directory, name); return identity ? { state: 'present', identity } : { state: 'absent' }; } catch { return { state: 'unknown' }; } };
@@ -58,6 +58,10 @@ export function prepareGlobalShellInstallation(guard: Guard, journal: Journal, e
     const outcome = uncertain ? 'unknown' : 'confirmed';
     try { record(step, operation, outcome, result, errorSha256); }
     catch (error) { uncertain = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), shell: snapshot() }; }
+    if (outcome === 'confirmed') {
+      try { await verify(); verifyOwned(); }
+      catch (error) { uncertain = true; return { status: 'stopped' as const, errorSha256: errorSha(error), shell: snapshot(), recovery: 'fresh-known-only-plan-required' as const }; }
+    }
     return { status: outcome, shell: snapshot() };
   };
   return {
