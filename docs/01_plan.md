@@ -666,6 +666,8 @@ An unknown native read never falls back to the legacy reader.
 Parent admission treats sticky directories as before and rejects non-sticky
 other-writable parents. Group-writable parents require a native NSS proof of a
 private user group (including primary-group users), or an OS administrator group.
+Linux access ACLs with named user/group writers or invalid encoding are rejected;
+default inheritance ACLs do not alter the object access decision.
 Passwd enumeration stops on errors or more than 65,536 entries; directory services
 that disable enumeration cannot currently be detected. Foreign parent owners
 remain rejected. Windows read-only protected pins accept the current user and the

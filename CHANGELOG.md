@@ -5,6 +5,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 ## [0.21.12] — 2026-10-29
 
 ### Fixed
+- Reject unclassified named write entries in Linux access ACLs, including those hidden behind a trusted group mode mask.
 - Global migration accepts POSIX private-user and administrator groups while refusing ordinary foreign writers, using native NSS membership and bounded primary-user enumeration.
 - Windows protected configuration pins accept trusted system owners while mutation targets still require the current user; retained handles keep their write/delete exclusion.
 - Global migration failures include the assertion and relevant path, permissions or owner identity, and a suggested remedy alongside the existing error digest.

@@ -8,6 +8,21 @@ type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loo
   directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; fullSync?: number; aclType?: number };
 type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string; pin?: boolean; path: string };
 
+/** Linux access ACL masks can hide foreign named writers behind the group mode bits. */
+export function verifyPosixAccessAcl(bytes: Buffer, path: string) {
+  const fail = (entry?: { tag: number; id: number }) => {
+    throw Object.assign(new assert.AssertionError({ message: 'global_guard_extended_acl_unclassified' }), {
+      diagnostic: { reason: 'global_guard_extended_acl_unclassified', path, entry: entry ?? null,
+        remedy: 'Review the named access ACL writers before retrying.' },
+    });
+  };
+  if (bytes.length < 4 || (bytes.length - 4) % 8 !== 0 || bytes.readUInt32LE(0) !== 2) fail();
+  for (let offset = 4; offset < bytes.length; offset += 8) {
+    const tag = bytes.readUInt16LE(offset), perm = bytes.readUInt16LE(offset + 2), id = bytes.readUInt32LE(offset + 4);
+    if (![1, 2, 4, 8, 16, 32].includes(tag) || perm > 7 || ((tag === 2 || tag === 8) && (perm & 2))) fail({ tag, id });
+  }
+}
+
 export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGroupLookup, readOwner: (path: string, uid: number) => number = (_path, uid) => uid): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library), groups = groupLookup ?? await nativePosixGroups();
   const groupAssessments = new Map<bigint, ReturnType<typeof posixParentGroup>>();
@@ -82,7 +97,9 @@ export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGrou
       const size = readValue(null, 0); assert.ok(size >= 0 && size <= 16 * 1024 * 1024, 'global_guard_xattr_value_unavailable');
       total += size; assert.ok(total <= 32 * 1024 * 1024, 'global_guard_xattr_total_bound');
       const value = Buffer.alloc(size || 1);
-      try { assert.equal(readValue(value, size), size, 'global_guard_xattr_changed'); values.push({ name, bytes: size, sha256: createHash('sha256').update(value.subarray(0, size)).digest('hex') }); }
+      try { assert.equal(readValue(value, size), size, 'global_guard_xattr_changed');
+        if (spec.linkAttributesViaProc && name === 'system.posix_acl_access') verifyPosixAccessAcl(value.subarray(0, size), ref.path);
+        values.push({ name, bytes: size, sha256: createHash('sha256').update(value.subarray(0, size)).digest('hex') }); }
       finally { value.fill(0); }
     }
     const namesAfter = Buffer.alloc(capacity || 1); assert.equal(readNames(namesAfter, capacity), length, 'global_guard_xattr_names_changed');
