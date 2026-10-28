@@ -36,10 +36,12 @@ async function check() {
     assert.deepEqual(protection(), before); return { tables, protection: before };
   };
   const tally = values => { const counts = {}; for (const value of values) counts[value] = (counts[value] ?? 0) + 1; return counts; };
-  const proof = (name, result) => {
+  const proof = (name, result, tables) => {
     process.stdout.write('CAVEAT_PROCESS_RUNNER_PROOF ' + JSON.stringify({ name, status: result.status, confirmedExitedDuringRead: result.confirmedExitedDuringRead, counts: result.counts, errors: result.errors,
       unobservableRuntimes: tally(result.records.filter(row => row.reason === 'foreign_runtime_arguments_unavailable').map(row => row.runtimeKind)),
       unknownReasons: tally(result.records.filter(row => row.classification === 'unknown').map(row => row.reason)),
+      unknownObservationPresence: tally(result.records.filter(row => row.classification === 'unknown').map(row => row.reason + ':'
+        + (tables.before.some(value => value.pid === row.pid) ? 'before' : '') + (tables.after.some(value => value.pid === row.pid) ? '+after' : ''))),
       metadataByOwner: tally(result.records.map(row => row.observation.owner + ':' + (row.observation.missing.join(',') || 'complete'))),
       nativeIssues: tally(result.records.flatMap(row => row.observation.nativeIssues)),
       filesystemWrites: result.filesystemWrites, existingProcessOperations: result.existingProcessOperations }) + '\n');
@@ -47,7 +49,7 @@ async function check() {
   let child;
   try {
     if (isWindows()) await checkWindowsResourceUsers(root);
-    const initial = await observe(), normal = assessGlobalProcesses(scope, initial.tables, initial.protection); proof('normal-real-table', normal);
+    const initial = await observe(), normal = assessGlobalProcesses(scope, initial.tables, initial.protection); proof('normal-real-table', normal, initial.tables);
     if (initial.tables.before.some(row => row.ownerProof === 'darwin-kinfo-proc')) await checkMacProcessRename(root, scope, nativeGlobalProcessTables, protectionFor);
     const script = join(old, 'consumer.cjs');
     writeFileSync(script, 'process.send("ready");setInterval(()=>{},1000)');
@@ -57,7 +59,7 @@ async function check() {
       await Promise.race([once(child, 'message'), once(child, 'exit').then(() => { throw Error('consumer_exited_before_ready'); }),
         new Promise((_, reject) => { timer = setTimeout(() => reject(Error('consumer_ready_deadline')), 5000); })]);
     } finally { clearTimeout(timer); }
-    const observed = await observe(), tables = observed.tables, literal = assessGlobalProcesses(scope, tables, observed.protection); proof('literal-real-consumer', literal);
+    const observed = await observe(), tables = observed.tables, literal = assessGlobalProcesses(scope, tables, observed.protection); proof('literal-real-consumer', literal, tables);
     assert.equal(literal.status, 'stopped');
     assert.equal(literal.records.find(row => row.pid === child.pid)?.classification, 'consumer');
     const self = tables.before.find(row => row.pid === tables.selfPid);
@@ -67,7 +69,7 @@ async function check() {
       const row = table.find(value => value.pid === child.pid);
       row.executable = null; row.argv = null;
     }
-    const unavailable = assessGlobalProcesses(scope, tables, observed.protection); proof('real-same-owner-child-metadata-fault', unavailable);
+    const unavailable = assessGlobalProcesses(scope, tables, observed.protection); proof('real-same-owner-child-metadata-fault', unavailable, tables);
     assert.equal(unavailable.status, 'stopped');
     assert.equal(unavailable.records.find(row => row.pid === child.pid)?.classification, 'unknown');
     assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');

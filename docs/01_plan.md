@@ -572,6 +572,10 @@ stopped by executable binding. Failed qualification leaves Mac postchecks
 unaccepted. An unlinked same-owner Node can still import the old global later;
 quarantine makes that import fail. Foreign processes not bound to Node identities
 can still read or copy it, and root/administrator exclusion is not proven.
+Complete same-owner kernel observations present in only one table retain their
+kernel image for literal/bound checks before transient classification, even if
+the process falls outside the separate lsof snapshots. Stable same-owner images
+still require text corroboration; incomplete metadata remains stopped.
 
 Windows global migration remains incomplete until a non-privileged, documented
 object-based observation provides a reachable ready state. Typed access denial

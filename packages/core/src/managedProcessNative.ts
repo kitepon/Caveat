@@ -274,7 +274,8 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
     try { assert.ok(row.ppid === process.pid && row.executable?.path === realpathSync(owned.get(row.pid)!)); }
     catch { errors.push('owned_probe_identity_changed'); }
   }
-  const convert = (rows: NativeProcessRecord[], images: Map<number, ProcessExecutable[]>) => {
+  const convert = (rows: NativeProcessRecord[], images: Map<number, ProcessExecutable[]>, other: NativeProcessRecord[]) => {
+    const otherPids = new Set(other.map(row => row.pid));
     // lsof corroborates executable identity; the two kernel tables define the observation scope.
     const filtered = rows.filter(row => !owned.has(row.pid));
     return filtered.map(row => {
@@ -282,6 +283,10 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
       const image = row.executable;
       if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
         const callerUid = before.find(value => value.pid === process.pid)?.uid;
+        // A complete single kernel observation can fall outside both lsof snapshots; scope checks still run before transient classification.
+        if (image && row.argv && row.uid === callerUid && row.ownerProof === 'darwin-kinfo-proc' && !otherPids.has(row.pid)) {
+          return { ...row, imageBinding: 'kernel-path' as const };
+        }
         if (image && typeof callerUid === 'number' && callerUid !== 0 && typeof row.uid === 'number' && row.uid !== callerUid
           && row.ownerProof === 'darwin-kinfo-proc' && (row.argv || isMacForeignArgumentDenial(row))) {
           return { ...row, imageBinding: 'kernel-path' as const };
@@ -291,7 +296,7 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
       return { ...row, imageBinding: 'kernel-and-text' as const };
     });
   };
-  return { before: convert(before, imagesBefore), after: convert(after, imagesAfter), errors,
+  return { before: convert(before, imagesBefore, after), after: convert(after, imagesAfter, before), errors,
     selfPid: process.pid, selfExecutable: executable(realpathSync(process.execPath)), caseInsensitive: false };
 }
 

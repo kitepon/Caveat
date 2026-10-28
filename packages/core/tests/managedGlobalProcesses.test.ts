@@ -368,6 +368,16 @@ describe('native process parsers and owned transport', () => {
     const unbound = await readMacProcessTables(async () => ({ stdout: '', pid: fakePid + 1 }), () => structuredClone(records));
     expect(assessGlobalProcesses(scope, unbound).status).toBe('stopped');
     expect(unbound.before[1]?.executable).toBeNull();
+    const ownImages = images.slice(0, images.indexOf(`p${fakePid}\0`));
+    const transient = async (row: NativeProcessRecord) => {
+      let reads = 0;
+      return readMacProcessTables(async () => ({ stdout: ownImages, pid: fakePid + 1 }),
+        () => structuredClone(reads++ === 0 ? [records[0]!, { ...row, ownerProof: 'darwin-kinfo-proc' as const }] : [records[0]!]));
+    };
+    expect(assessGlobalProcesses(scope, await transient(records[1]!))).toMatchObject({ status: 'ready', counts: { transient: 1 } });
+    expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, argv: ['native', scope.packageRoot!] })).status).toBe('stopped');
+    expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, executable: { ...records[1]!.executable!, path: scope.packageRoot + '/native' } })).consumers).toBe(1);
+    expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, argv: null })).status).toBe('stopped');
   });
   it.skipIf(!isWindows())('executes the exact Windows probe with a scoped fake CIM cmdlet and validates its phase protocol', async () => {
     const command = join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe');
