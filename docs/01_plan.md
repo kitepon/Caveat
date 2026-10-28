@@ -595,7 +595,12 @@ pins. Fresh process/protected-state integration and scoped npm remain unfinished
 this primitive is not an executable global-migration command.
 
 The product migration caller now captures the old package/dependency closure,
-Node/npm bytes and aliases, other globals and existing/absent shell leaves. It
+Node/npm bytes and aliases, other globals and existing/absent shell leaves. Unrelated
+global packages are compared without opening file contents, through dev/ino,
+uid/gid, mode, size, nlink, mtimeNs/ctimeNs, kind and link target. The 100000-entry
+bound remains. Admission, mutation checks and recovery share this comparison;
+Caveat, npm, protected files and npm management retain their content hashes and
+existing byte limits. It
 validates the active managed payload against its manifest and retains native
 objects for its pointer, entry, payload and protected settings. Before each
 mutation it rechecks those objects, runtime/npm and other-global baselines, and a

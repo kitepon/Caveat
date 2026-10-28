@@ -56,9 +56,10 @@ export function readGlobalPackageJson(file: string): Record<string, unknown> {
 
 /** Observation permits shared/special objects; a mutation snapshot rejects both. Links are never followed. */
 export function snapshotGlobalTree(root: string, options: {
-  observeOnly?: boolean; opaqueExternalLinks?: boolean; skip?: string[]; maxBytes?: number;
+  observeOnly?: boolean; opaqueExternalLinks?: boolean; skip?: string[]; maxBytes?: number; metadataOnly?: boolean;
 } = {}): GlobalTreeRow[] {
   assert.ok(isAbsolute(root), 'absolute_tree_root_required');
+  assert.ok(!options.metadataOnly || options.observeOnly, 'metadata_only_observation_required');
   root = resolve(root);
   const rows: GlobalTreeRow[] = [], skipped = new Set(options.skip ?? []);
   const limit = options.maxBytes ?? 128 * MiB;
@@ -77,11 +78,14 @@ export function snapshotGlobalTree(root: string, options: {
     } else {
       assert.ok(options.observeOnly || before.isFile() && before.nlink === 1n, 'nonregular_or_shared_file');
       if (before.isFile()) {
-        row.kind = 'file'; total += Number(before.size);
-        assert.ok(total <= limit, 'tree_byte_bound');
-        const read = readRegular(file, limit - total + Number(before.size), false);
-        assert.deepEqual(read.identity, identity(before), 'tree_changed_during_read');
-        row.sha256 = read.sha256;
+        row.kind = 'file';
+        if (!options.metadataOnly) {
+          total += Number(before.size);
+          assert.ok(total <= limit, 'tree_byte_bound');
+          const read = readRegular(file, limit - total + Number(before.size), false);
+          assert.deepEqual(read.identity, identity(before), 'tree_changed_during_read');
+          row.sha256 = read.sha256;
+        }
       } else row.fileType = String(before.mode & 0o170000n);
     }
     rows.push(row);
@@ -195,14 +199,14 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     }
     phase = 'other_globals';
     const otherGlobals = snapshotGlobalTree(globalRoot, {
-      observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true,
+      observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true, metadataOnly: true,
     }).filter(row => row.relativePath !== '');
     phase = 'final_identity';
     assert.equal(realpathSync(packageRoot), canonicalPackageRoot, 'package_root_changed_during_read');
     assert.deepEqual(observed(packageRoot), packageTree, 'package_changed_during_read');
     for (const file of protectedFiles) assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read');
     assert.deepEqual(snapshotGlobalTree(npmRoot, { observeOnly: true, opaqueExternalLinks: true }), npmTree, 'npm_changed_during_read');
-    assert.deepEqual(snapshotGlobalTree(globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true }).filter(row => row.relativePath !== ''), otherGlobals, 'other_global_changed_during_read');
+    assert.deepEqual(snapshotGlobalTree(globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true, metadataOnly: true }).filter(row => row.relativePath !== ''), otherGlobals, 'other_global_changed_during_read');
     try {
       const current = observed(management, 8 * MiB);
       assert.ok(!npmManagement.absent, 'management_created_during_read');

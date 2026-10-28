@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.11] — 2026-10-28
+
+### Fixed
+- Compare unrelated global packages through file identity, metadata and link targets during global migration and recovery, without reading their contents. Keep SHA-256 checks and byte limits for Caveat, npm, protected settings and npm management files.
+- Exercise large AI-client binaries and later content changes through admission, mutation checks and recovery checks on all three operating systems.
+
 ## [0.21.10] — 2026-10-28
 
 ### Fixed

@@ -110,6 +110,7 @@ describe('global package snapshot', () => {
   it('bounds tree contents before reading oversized bytes', () => {
     const { input } = fixture();
     expect(() => snapshotGlobalTree(input.packageRoot, { maxBytes: 1 })).toThrow('tree_byte_bound');
+    expect(() => snapshotGlobalTree(input.packageRoot, { metadataOnly: true })).toThrow('metadata_only_observation_required');
   });
   it.skipIf(isWindows())('observes an incidental FIFO without opening it and rejects required FIFO JSON', () => {
     const { input } = fixture(), fifo = join(input.packageRoot, 'incidental-fifo');
