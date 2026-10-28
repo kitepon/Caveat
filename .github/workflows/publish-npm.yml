@@ -48,7 +48,6 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          node scripts/ci-toolchain.mjs hosted
           if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid release tag: $RELEASE_TAG" >&2
             exit 1
@@ -61,6 +60,8 @@ jobs:
           version=$(node -p "require('./apps/cli/package.json').version")
           test "$RELEASE_TAG" = "v$version"
           node scripts/verify-release-commit.mjs
+          corepack pnpm install --frozen-lockfile
+          node scripts/ci-toolchain.mjs hosted
       - name: Download and verify the accepted archive
         env:
           GH_TOKEN: ${{ github.token }}

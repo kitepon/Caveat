@@ -24,6 +24,15 @@ test('Hosted doc/pack/publish share full Node and packageManager pnpm pins', () 
   assertWorkflowPins(workflow('product-full-ci.yml'), workflow('pack-release.yml'), workflow('publish-npm.yml'));
   assertHostedToolchain(contract.node, contract.pnpm);
 });
+test('hosted checks run after installing their workspace dependencies', () => {
+  for (const [name, job] of [['product-full-ci.yml', 'classify'], ['pack-release.yml', 'pack'], ['publish-npm.yml', 'publish']]) {
+    const steps = workflow(name).jobs[job].steps;
+    const commands = steps.flatMap(step => (step.run ?? '').split('\n'));
+    const install = commands.findIndex(line => /pnpm install|inputs\.dependency-command/.test(line));
+    const check = commands.findIndex(line => line.includes('node scripts/ci-toolchain.mjs hosted'));
+    assert.ok(install >= 0 && check > install, `${name}: install before the semver-dependent toolchain check`);
+  }
+});
 for (const [index, name] of ['documentation', 'pack', 'publish'].entries()) {
   test(`contract rejects floating or drifted ${name} workflow pins`, () => {
     for (const version of ['24', '24.x', '24.21.0', '26.12.1']) {
