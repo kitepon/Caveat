@@ -168,6 +168,15 @@ describe('global process assessment', () => {
       if (kind === 'changed-image') data.after[1]!.executable!.ino = '77777';
       expect(assessGlobalProcesses(affected, data).status).toBe('stopped');
     });
+  it('retains a typed metadata refusal from the second observation without exposing argv', () => {
+    const data = tables(record(20, '/runtime/node', ['node', 'private-argument']));
+    data.after[1]!.executable = null;
+    data.after[1]!.windowsFields = { executable: 'null', arguments: 'present' };
+    const result = assessGlobalProcesses(scope, data), row = result.records.find(row => row.pid === 20)!;
+    expect(row.reason).toBe('process_executable_observation_incomplete');
+    expect(row.observation?.nativeIssues).toContain('windows-metadata:executable-null:null');
+    expect(JSON.stringify(result)).not.toContain('private-argument');
+  });
   it('does not retain arbitrary arguments or executable paths in public projections', () => {
     const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', 'secret-argument-value'])));
     expect(JSON.stringify(result)).not.toContain('secret-argument-value');
@@ -200,6 +209,20 @@ describe('native process parsers and owned transport', () => {
     rmSync(join(proc, 'cmdline'));
     const missing = assessGlobalProcesses(scope, readLinuxProcessTables(root));
     expect(missing.status).toBe('stopped'); expect(missing.unknown).toBe(1);
+  });
+  it.skipIf(isWindows())('drops an ENOENT row only after an independent kernel exit proof, retaining inaccessible live metadata', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'caveat-exited-procfs-'))); roots.push(root);
+    const live = join(root, String(process.pid)), gonePid = process.pid + 1000000;
+    mkdirSync(live); mkdirSync(join(root, String(gonePid)));
+    const fields = ['S', '1', ...Array(17).fill('0'), '987654', ...Array(30).fill('0')];
+    writeFileSync(join(live, 'stat'), process.pid + ' (fixture) ' + fields.join(' '));
+    writeFileSync(join(live, 'status'), 'Uid: 1000 1000 1000 1000\n');
+    symlinkSync(process.execPath, join(live, 'exe')); writeFileSync(join(live, 'cmdline'), process.execPath + '\0fixture\0');
+    expect(assessGlobalProcesses(scope, readLinuxProcessTables(root)).status).toBe('stopped');
+    const exited = readLinuxProcessTables(root, pid => pid === gonePid);
+    expect(exited.confirmedExitedDuringRead).toBe(2); expect(assessGlobalProcesses(scope, exited).status).toBe('ready');
+    rmSync(join(live, 'cmdline'));
+    expect(assessGlobalProcesses(scope, readLinuxProcessTables(root, pid => pid === gonePid)).status).toBe('stopped');
   });
   it('roundtrips Windows CreateProcess argument quoting including Unicode and trailing slashes', () => {
     const argv = ['C:\\Program Files\\node.exe', 'C:\\作業\\entry.js', '', 'space value', 'trailing\\', 'quote"value', '\\"', 'a\\\\"b'];

@@ -30,7 +30,7 @@ describe('native process bridge and Darwin layouts', () => {
   it('decodes only the LP64 kinfo PID, birth and effective uid used for the foreign-owner proof', () => {
     const bytes = Buffer.alloc(648); bytes.writeInt32LE(42, 40); bytes.writeUInt32LE(501, 420);
     bytes.writeBigInt64LE(1700000000n, 0); bytes.writeInt32LE(123456, 8);
-    expect(decodeMacKinfoIdentity(bytes, 42)).toEqual({ uid: 501, birth: '1700000000:123456', kernel: false });
+    expect(decodeMacKinfoIdentity(bytes, 42)).toEqual({ pid: 42, ppid: 0, uid: 501, birth: '1700000000:123456', state: 'live', kernel: false });
     expect(() => decodeMacKinfoIdentity(bytes, 43)).toThrow('pid_changed');
     expect(() => decodeMacKinfoIdentity(bytes.subarray(0, 640), 42)).toThrow('lp64_size');
     bytes.writeInt32LE(0, 40); bytes.writeUInt32LE(0x200, 32);

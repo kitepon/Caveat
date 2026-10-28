@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { assessGlobalProcesses } from '../packages/core/dist/managedGlobalProcesses.js';
+import { isWindows } from '../packages/core/dist/platform.js';
 import { nativeGlobalProcessTables } from '../packages/core/dist/managedProcessNative.js';
 
 // Serial real-table acceptance: reads existing processes and owns only its bounded fixture child.
@@ -14,7 +15,7 @@ async function check() {
   const scope = { packageRoot: old, npmRoot: join(root, 'npm'), binAliases: [join(root, 'bin/caveat')] };
   const tally = values => { const counts = {}; for (const value of values) counts[value] = (counts[value] ?? 0) + 1; return counts; };
   const proof = (name, result) => {
-    process.stdout.write('CAVEAT_PROCESS_RUNNER_PROOF ' + JSON.stringify({ name, status: result.status, counts: result.counts, errors: result.errors,
+    process.stdout.write('CAVEAT_PROCESS_RUNNER_PROOF ' + JSON.stringify({ name, status: result.status, confirmedExitedDuringRead: result.confirmedExitedDuringRead, counts: result.counts, errors: result.errors,
       unknownReasons: tally(result.records.filter(row => row.classification === 'unknown').map(row => row.reason)),
       metadataByOwner: tally(result.records.map(row => row.observation.owner + ':' + (row.observation.missing.join(',') || 'complete'))),
       nativeIssues: tally(result.records.flatMap(row => row.observation.nativeIssues)),
@@ -23,7 +24,14 @@ async function check() {
   let child;
   try {
     const normal = assessGlobalProcesses(scope, await nativeGlobalProcessTables()); proof('normal-real-table', normal);
-    assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');
+    if (isWindows()) {
+      assert.equal(normal.status, 'stopped', 'windows_normal_readiness_not_accepted');
+      assert.deepEqual(normal.errors, []); assert.equal(normal.consumers, 0); assert.equal(normal.writers, 0);
+      const unknown = normal.records.filter(row => row.classification === 'unknown');
+      assert.ok(unknown.length > 0, 'windows_typed_refusal_required');
+      assert.ok(unknown.every(row => row.observation.nativeIssues.some(issue => /^(?:windows-owner:|windows-metadata:|windows-owner-method:)/.test(issue))), 'windows_unclassified_unknown');
+      process.stdout.write('CAVEAT_PROCESS_RUNNER_ACCEPTANCE ' + JSON.stringify({ normal: 'windows-typed-stopped', ready: 'not-accepted', typedRefusals: unknown.length, unclassifiedUnknown: 0 }) + '\n');
+    } else assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');
     const script = join(old, 'consumer.cjs');
     writeFileSync(script, 'process.send("ready");setInterval(()=>{},1000)');
     child = spawn(process.execPath, [script], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });

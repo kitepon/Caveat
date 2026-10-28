@@ -553,7 +553,9 @@ consumers or writers, or administrator/root exclusivity.
 Windows keeps metadata refusal intact. Owner failures report their native stage
 and error code. A bounded ordinary CIM GetOwnerSid attempt may corroborate a SID
 only after matching the process birth again; denial never proves a foreign user.
-No debug privilege or elevation is enabled. The twenty-second owned-child deadline
+Windows normal-host readiness is not accepted in this release. CI requires a
+typed stopped result with no unexplained unknowns, plus literal-consumer and
+same-owner metadata-fault refusal; this does not authorize migration. No debug privilege or elevation is enabled. The twenty-second owned-child deadline
 and verified close remain mandatory. Real-runner receipts aggregate metadata gaps
 by owner relationship and native stage without exposing argv, image paths or SIDs.
 

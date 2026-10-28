@@ -71,12 +71,18 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   for (const pid of new Set([...before.keys(), ...after.keys()])) {
     const first = before.get(pid), last = after.get(pid), row = first ?? last!;
     const result: GlobalProcessAssessment = { pid, birth: row.birth, classification: 'unknown', reason: 'process_identity_unverified' };
-    result.observation = { owner: row.uid === null || ownUid === null || ownUid === undefined ? 'unknown' : row.uid === ownUid ? 'same' : 'foreign',
-      missing: ['uid', 'birth', 'ppid', 'executable', 'argv'].filter(key => row[key as keyof NativeProcessRecord] === null),
-      nativeIssues: [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode : null,
+    const observed = [first, last].filter((value): value is NativeProcessRecord => !!value);
+    const knownOwner = ownUid !== null && ownUid !== undefined && observed.every(entry => entry.uid !== null);
+    result.observation = {
+      owner: knownOwner && observed.every(entry => entry.uid === ownUid) ? 'same' : knownOwner && observed.every(entry => entry.uid !== ownUid) ? 'foreign' : 'unknown',
+      missing: [...new Set(observed.flatMap(entry => ['uid', 'birth', 'ppid', 'executable', 'argv'].filter(key => entry[key as keyof NativeProcessRecord] === null)))],
+      nativeIssues: [...new Set(observed.flatMap(row => [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode + (row.argumentFailure.decodeReason ? ':' + row.argumentFailure.decodeReason : '') : null,
         row.ownerFailure ? 'windows-owner:' + row.ownerFailure.stage + ':' + row.ownerFailure.nativeCode : null,
         row.ownerMethod ? 'windows-owner-method:' + row.ownerMethod.stage + ':' + row.ownerMethod.returnValue : null,
-        row.kernelFailure ? 'darwin-kernel:' + row.kernelFailure.stage + ':' + row.kernelFailure.nativeCode : null].filter((value): value is string => value !== null) };
+        row.kernelFailure ? 'darwin-kernel:' + row.kernelFailure.stage + ':' + row.kernelFailure.nativeCode : null,
+        row.windowsFields?.executable !== undefined && row.windowsFields.executable !== 'present' ? 'windows-metadata:executable-' + row.windowsFields.executable + ':null' : null,
+        row.windowsFields?.arguments !== undefined && row.windowsFields.arguments !== 'present' ? 'windows-metadata:arguments-' + row.windowsFields.arguments + ':null' : null].filter((value): value is string => value !== null)))],
+    };
     records.push(result);
     // Check every observed argv, including foreign, ancestor, transient and inline commands.
     const image = row.executable ? norm(row.executable.path).replace(/ \(deleted\)$/, '') : null;
@@ -142,7 +148,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const consumers = counts.consumer, writers = counts.writer, unknown = counts.unknown;
   return { schema: 'caveat.global_process_preflight.v1' as const,
     status: errors.length || consumers || writers || unknown ? 'stopped' as const : 'ready' as const,
-    observedAt: new Date().toISOString(), consumers, writers, unknown, counts, errors, records,
+    observedAt: new Date().toISOString(), consumers, writers, unknown, counts, errors, records, confirmedExitedDuringRead: tables.confirmedExitedDuringRead ?? 0,
     stopScope: { oldPackage: !!scope.packageRoot, npm: !!scope.npmRoot, aliases: scope.binAliases.length, protectedPaths: scope.protectedPaths?.length ?? 0,
       readOnlyRuntimePathsExcluded: (scope.runtimeExecutables ?? []).every(path => !(scope.protectedPaths ?? []).some(protectedPath => norm(protectedPath) === norm(path))), runtimeProofRequiredAtEveryMutation: true },
     residualRisks: globalProcessResidualRisks,

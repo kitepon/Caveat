@@ -7,22 +7,26 @@ import { createMacKernelReader } from './managedMacProcessNative.js';
 import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
-export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean };
+export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; decodeReason?: string };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
   executable: ProcessExecutable | null; argv: string[] | null; state?: string;
-  ownerProof?: 'darwin-kinfo-proc'; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
+  ownerProof?: 'darwin-kinfo-proc'; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
-  selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean;
+  selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean; confirmedExitedDuringRead?: number;
 };
 export type ProcessProbeEvent = { phase: string; event: 'issued' | 'started' | 'completed' | 'stopped'; pid?: number };
 export type ProcessProbeRun = (command: string, args: string[], phase: string, deadline: number) => Promise<{ stdout: string; pid: number }>;
 
 export function nativeGlobalProcessTables(onEvent: (event: ProcessProbeEvent) => void = () => {}): Promise<NativeProcessTables> {
   return collectNativeGlobalProcesses({
-    linux: async () => readLinuxProcessTables(),
+    linux: async () => {
+      assert.equal(readlinkSync('/proc/self'), String(process.pid), 'process_procfs_namespace_unbound');
+      const koffi = await import('koffi'), getGroup = koffi.load(null).func('int getpgid(int pid)');
+      return readLinuxProcessTables('/proc', pid => { koffi.errno(0); return Number(getGroup(pid)) === -1 && koffi.errno() === 3; });
+    },
     darwin: () => readMacProcessTables(ownedProcessProbe(onEvent)),
     win32: command => readWindowsProcessTables(command, ownedProcessProbe(onEvent)),
   });
@@ -168,7 +172,8 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
   }
 }
 
-export function readLinuxProcessTables(procRoot = '/proc'): NativeProcessTables {
+export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number) => boolean = () => false): NativeProcessTables {
+  let confirmedExitedDuringRead = 0;
   const deadline = Date.now() + 20000;
   const readTable = () => {
     const pids = readdirSync(procRoot).filter(name => /^\d+$/.test(name)).map(Number).sort((a, b) => a - b);
@@ -179,10 +184,12 @@ export function readLinuxProcessTables(procRoot = '/proc'): NativeProcessTables 
       const row = linuxRecord(procRoot, pid);
       total += Buffer.byteLength(JSON.stringify(row));
       assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
+      if (row.reason === 'ENOENT' && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedDuringRead++; return null; }
       return row;
-    });
+    }).filter((row): row is NativeProcessRecord => row !== null);
   };
-  return { before: readTable(), after: readTable(), errors: [], selfPid: process.pid,
+  const before = readTable(), after = readTable();
+  return { before, after, errors: [], selfPid: process.pid, confirmedExitedDuringRead,
     selfExecutable: executable(process.execPath), caseInsensitive: false };
 }
 
@@ -385,8 +392,9 @@ export async function readWindowsProcessTables(command: string, run: ProcessProb
     if ((row.pid === 0 || row.pid === 4) && row.ppid === 0 && !row.exe && !row.command) {
       return { ...base, birth: row.birth ?? 'windows-idle-boot', kernel: 'windows-kernel-process' };
     }
-    if (row.command) try { base.argv = parseWindowsProcessArguments(row.command); } catch { return { ...base, reason: 'process_arguments_unverified' }; }
-    if (row.exe) try { base.executable = executable(row.exe); } catch { /* Preserve readable owner/argv for foreign-user assessment. */ }
+    base.windowsFields = { executable: row.exe ? 'present' : 'null', arguments: row.command ? 'present' : 'null' };
+    if (row.command) try { base.argv = parseWindowsProcessArguments(row.command); } catch { base.windowsFields.arguments = 'unverified'; return { ...base, reason: 'process_arguments_unverified' }; }
+    if (row.exe) try { base.executable = executable(row.exe); } catch { base.windowsFields.executable = 'unverified'; }
     return base;
   });
   const before = convert(tables.before), after = convert(tables.after);

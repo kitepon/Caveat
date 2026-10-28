@@ -46,7 +46,8 @@ export function decodeMacKinfoIdentity(bytes: Buffer, pid: number) {
   assert.equal(bytes.readInt32LE(40), pid, 'mac_kinfo_pid_changed');
   const seconds = bytes.readBigInt64LE(0), micros = bytes.readInt32LE(8);
   assert.ok(seconds >= 0n && micros >= 0 && micros < 1000000, 'mac_kinfo_birth_invalid');
-  return { uid: bytes.readUInt32LE(420), birth: seconds + ':' + micros,
+  const ppid = bytes.readInt32LE(560); assert.ok(ppid >= 0, 'mac_kinfo_parent_invalid');
+  return { pid, ppid, uid: bytes.readUInt32LE(420), birth: seconds + ':' + micros, state: bytes.readInt8(36) === 5 ? 'Z' : 'live',
     kernel: pid === 0 && (bytes.readUInt32LE(32) & 0x200) !== 0 };
 }
 
@@ -64,7 +65,11 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
     const used = Number(length[0]);
     if (!Number.isSafeInteger(used) || used < 6 || used > buffer.length) return { argv: null, failure: { stage: 'read-bound', nativeCode: null, sizeQuerySucceeded: true } };
     try { return { argv: decodeMacArguments(buffer.subarray(0, used)).argv }; }
-    catch { return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true } }; }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const decodeReason = ['mac_argument_count', 'mac_saved_executable_missing', 'mac_saved_executable_invalid', 'mac_argument_unterminated', 'mac_argument_environment_shaped', 'mac_argv0_unavailable'].find(reason => message.includes(reason)) ?? 'utf8-or-invalid';
+      return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true, decodeReason } };
+    }
   } finally { buffer.fill(0); }
 }
 
@@ -83,7 +88,7 @@ export async function createMacKernelReader() {
   };
   const image = (pid: number): ProcessExecutable => {
     const buffer = Buffer.alloc(4096), length = Number(path(pid, buffer, buffer.length)), end = buffer.indexOf(0);
-    assert.ok(length > 0 && length <= buffer.length && end > 0 && end <= length, 'mac_process_path_unavailable');
+    if (!(length > 0 && length <= buffer.length && end > 0 && end <= length)) throw Object.assign(Error('mac_process_path_unavailable'), { nativeCode: koffi.errno() });
     const name = decode(buffer.subarray(0, end));
     assert.ok(name.startsWith('/') && !/[\r\n]/.test(name), 'mac_process_path_invalid');
     const stat = statSync(name, { bigint: true }); assert.ok(stat.isFile(), 'mac_process_image_nonregular');
@@ -98,17 +103,18 @@ export async function createMacKernelReader() {
     return decodeMacKinfoIdentity(buffer, pid);
   };
   const args = (pid: number) => readMacProcessArguments(pid, (...values) => Number(sysctl(...values)), () => koffi.errno());
+  const calibration = kinfo(process.pid), currentBsd = bsd(process.pid);
+  assert.deepEqual([calibration.pid, calibration.ppid, calibration.uid, calibration.birth],
+    [currentBsd.pid, currentBsd.ppid, currentBsd.uid, currentBsd.birth], 'mac_kinfo_self_calibration_failed');
   const readProcess = (pid: number): NativeProcessRecord => {
     let phase = 'kinfo';
     const code = (error: unknown) => { const value = error as { nativeCode?: number; errno?: number }; return value.nativeCode ?? value.errno ?? null; };
     let row: NativeProcessRecord = { pid, ppid: null, uid: null, birth: null, executable: null, argv: null };
     try {
       const owner = kinfo(pid);
-      if (owner.kernel) return { ...row, ppid: 0, uid: owner.uid, birth: owner.birth, kernel: 'darwin-kernel-task', ownerProof: 'darwin-kinfo-proc' };
-      phase = 'bsd'; const first = bsd(pid); row = { ...row, ...first };
-      assert.equal(owner.uid, first.uid, 'mac_kinfo_uid_changed'); assert.equal(owner.birth, first.birth, 'mac_kinfo_birth_changed');
-      row.ownerProof = 'darwin-kinfo-proc';
-      if (!first.kernel && first.state !== 'Z') {
+      row = { ...row, ppid: owner.ppid, uid: owner.uid, birth: owner.birth, state: owner.state, ownerProof: 'darwin-kinfo-proc' };
+      if (owner.kernel) row.kernel = 'darwin-kernel-task';
+      if (!owner.kernel && owner.state !== 'Z') {
         phase = 'arguments'; const argument = args(pid); row.argv = argument.argv; if (argument.failure) row.argumentFailure = argument.failure;
         phase = 'image';
         try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase, nativeCode: code(error) }; }
@@ -117,11 +123,10 @@ export async function createMacKernelReader() {
         phase = 'arguments-recheck';
         if (row.argv) {
           const current = args(pid);
-          if (!current.argv && current.failure?.stage === 'read' && current.failure.nativeCode === 22) { row.argumentFailure = current.failure; }
+          if (!current.argv && current.failure?.stage === 'read' && current.failure.nativeCode === 22) row.argumentFailure = current.failure;
           else assert.ok(isDeepStrictEqual(current.argv, row.argv), 'mac_process_arguments_changed');
         }
       }
-      phase = 'bsd-recheck'; assert.deepEqual(bsd(pid), first, 'mac_process_birth_changed');
       phase = 'kinfo-recheck'; assert.deepEqual(kinfo(pid), owner, 'mac_kinfo_identity_changed');
       return row;
     } catch (error) { return { ...row, reason: 'mac_kernel_metadata_unverified', kernelFailure: { stage: phase, nativeCode: code(error) } }; }
