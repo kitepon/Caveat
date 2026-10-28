@@ -46,9 +46,12 @@ async function check() {
       nativeIssues: tally(result.records.flatMap(row => row.observation.nativeIssues)),
       filesystemWrites: result.filesystemWrites, existingProcessOperations: result.existingProcessOperations }) + '\n');
   };
-  let child;
+  let child, resourceFailure;
   try {
-    if (isWindows()) await checkWindowsResourceUsers(root);
+    if (isWindows()) {
+      try { await checkWindowsResourceUsers(root); }
+      catch (error) { resourceFailure = error; process.stdout.write('CAVEAT_WINDOWS_RESOURCE_QUALIFICATION {"status":"failed","productReadiness":"not-qualified"}\n'); }
+    }
     const initial = await observe(), normal = assessGlobalProcesses(scope, initial.tables, initial.protection); proof('normal-real-table', normal, initial.tables);
     if (initial.tables.before.some(row => row.ownerProof === 'darwin-kinfo-proc')) await checkMacProcessRename(root, scope, nativeGlobalProcessTables, protectionFor);
     const script = join(old, 'consumer.cjs');
@@ -72,6 +75,7 @@ async function check() {
     const unavailable = assessGlobalProcesses(scope, tables, observed.protection); proof('real-same-owner-child-metadata-fault', unavailable, tables);
     assert.equal(unavailable.status, 'stopped');
     assert.equal(unavailable.records.find(row => row.pid === child.pid)?.classification, 'unknown');
+    if (resourceFailure) throw resourceFailure;
     assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill(); await closed; }

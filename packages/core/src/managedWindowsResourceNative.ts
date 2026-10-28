@@ -4,7 +4,7 @@ import { ownedProcessProbe, type ProcessProbeEvent, type ProcessProbeRun } from 
 
 export type WindowsResourceObservation = {
   schema: 'caveat.windows_resources.v1'; files: number; stage: 'start' | 'register' | 'list' | 'list-bound' | 'complete'; code: number;
-  endCode: number | null; rebootReasons: number; observerAdministrator: boolean;
+  endCode: number | null; rebootReasons: number; observerAdministrator: boolean; regularFiles: number; directories: number;
   users: { pid: number; birth: string; type: number; service: boolean; session: number }[];
 };
 
@@ -35,12 +35,13 @@ public static class CaveatResources {
   [DllImport("rstrtmgr.dll")] static extern int RmEndSession(uint session);
   public sealed class User { public uint pid; public string birth; public uint type; public bool service; public uint session; }
   public sealed class Result {
-    public string schema="caveat.windows_resources.v1"; public int files; public string stage; public int code; public int? endCode;
+    public string schema="caveat.windows_resources.v1"; public int files; public int regularFiles; public int directories; public string stage; public int code; public int? endCode;
     public bool observerAdministrator=new System.Security.Principal.WindowsPrincipal(System.Security.Principal.WindowsIdentity.GetCurrent()).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
     public uint rebootReasons; public List<User> users=new List<User>();
   }
   public static Result Query(string[] files) {
     var result=new Result { files=files.Length, stage="start" }; uint handle;
+    foreach(var file in files) { if(System.IO.File.Exists(file)) result.regularFiles++; if(System.IO.Directory.Exists(file)) result.directories++; }
     result.code=RmStartSession(out handle,0,new StringBuilder(33)); if(result.code!=0) return result;
     try {
       result.stage="register"; result.code=RmRegisterResources(handle,(uint)files.Length,files,0,IntPtr.Zero,0,IntPtr.Zero);
@@ -73,10 +74,11 @@ public static class CaveatResources {
 export function decodeWindowsResourceObservation(stdout: string, files: number): WindowsResourceObservation {
   assert.ok(Buffer.byteLength(stdout) <= 1024 * 1024, 'windows_resource_output_bound');
   const result = JSON.parse(stdout) as WindowsResourceObservation;
-  assert.equal(Object.keys(result).sort().join(','), 'code,endCode,files,observerAdministrator,rebootReasons,schema,stage,users');
+  assert.equal(Object.keys(result).sort().join(','), 'code,directories,endCode,files,observerAdministrator,rebootReasons,regularFiles,schema,stage,users');
   assert.ok(result.schema === 'caveat.windows_resources.v1' && result.files === files && ['start', 'register', 'list', 'list-bound', 'complete'].includes(result.stage), 'windows_resource_protocol_invalid');
   assert.ok(Number.isSafeInteger(result.code) && result.code >= 0 && (result.endCode === null || Number.isSafeInteger(result.endCode) && result.endCode >= 0) && Number.isSafeInteger(result.rebootReasons) && result.rebootReasons >= 0 && result.rebootReasons <= 0xffffffff && typeof result.observerAdministrator === 'boolean', 'windows_resource_code_invalid');
   assert.ok(Array.isArray(result.users) && result.users.length <= 4096, 'windows_resource_users_bound');
+  assert.ok(Number.isSafeInteger(result.regularFiles) && result.regularFiles >= 0 && Number.isSafeInteger(result.directories) && result.directories >= 0 && result.regularFiles + result.directories <= files, 'windows_resource_file_kinds_invalid');
   const identities = new Set<string>();
   for (const user of result.users) {
     assert.equal(Object.keys(user).sort().join(','), 'birth,pid,service,session,type');
