@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { statSync } from 'node:fs';
-import { isDeepStrictEqual } from 'node:util';
-import type { NativeProcessRecord, ProcessExecutable, MacArgumentFailure, MacTextObservation } from './managedProcessNative.js';
+import type { NativeProcessRecord, ProcessExecutable, MacArgumentFailure } from './managedProcessNative.js';
 
 const MAX_ARGUMENT_BYTES = 1024 * 1024;
 const BSD_INFO_BYTES = 136;
@@ -56,11 +55,6 @@ export function readMacKinfoIdentity(pid: number, query: MacSysctl, errno: () =>
   assert.equal(Number(length[0]), buffer.length, 'mac_kinfo_lp64_size');
   return decodeMacKinfoIdentity(buffer, pid);
 }
-export function confirmMacInitialExit(row: NativeProcessRecord, phase: string, error: unknown, group: (pid: number) => { result: number; nativeCode: number }) {
-  if (phase !== 'kinfo' || row.pid <= 0 || row.pid > 0x7fffffff || row.argv !== null || row.executable !== null || row.uid !== null || row.birth !== null
-    || (error as { initialKinfoAbsent?: boolean })?.initialKinfoAbsent !== true) return false;
-  const proof = group(row.pid); return proof.result === -1 && proof.nativeCode === 3;
-}
 /** Exact size/read failures are retained separately; decoding never exposes the environment segment. */
 export function readMacProcessArguments(pid: number, query: MacSysctl, errno: () => number): { argv: string[] | null; failure?: MacArgumentFailure } {
   const mib = Buffer.alloc(12); [1, 49, pid].forEach((value, index) => mib.writeInt32LE(value, index * 4));
@@ -82,22 +76,6 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
   } finally { buffer.fill(0); }
 }
 
-/** LP64 proc_regionwithpathinfo: region(96), vnode_info(152), path(1024). */
-export function readMacTextRegions(pid: number, query: (pid: number, flavor: number, address: bigint, bytes: Buffer, size: number) => number, errno: () => number): MacTextObservation {
-  let address = 0n;
-  const identities: MacTextObservation['identities'] = [];
-  for (let index = 0; index < 256; index++) {
-    const bytes = Buffer.alloc(1272), size = query(pid, 8, address, bytes, bytes.length);
-    if (size !== bytes.length) return { status: identities.length && size === 0 && errno() === 22 ? 'read' : 'unreadable', identities, stage: 'region-read', nativeCode: errno() };
-    const start = bytes.readBigUInt64LE(80), length = bytes.readBigUInt64LE(88), next = start + length;
-    if (!length || start < address || next <= address || next > 0xffffffffffffffffn) return { status: 'unreadable', identities, stage: 'region-bound', nativeCode: null };
-    const ino = bytes.readBigUInt64LE(104), dev = bytes.readUInt32LE(96);
-    if ((bytes.readUInt32LE(0) & 4) !== 0 && ino > 0n) identities.push({ dev: String(dev), ino: String(ino) });
-    address = next;
-  }
-  return { status: 'unreadable', identities, stage: 'region-count-bound', nativeCode: null };
-}
-
 /** Native loading is lazy: ordinary hooks never load a C bridge or inspect processes. */
 export async function createMacKernelReader() {
   const koffi = await import('koffi');
@@ -106,7 +84,6 @@ export async function createMacKernelReader() {
   const info = proc.func('int proc_pidinfo(int pid, int flavor, uint64_t arg, _Out_ void *buffer, int buffersize)');
   const path = proc.func('int proc_pidpath(int pid, _Out_ void *buffer, uint32_t buffersize)');
   const sysctl = libc.func('int sysctl(const int *name, uint32_t namelen, _Out_ void *oldp, _Inout_ size_t *oldlenp, const void *newp, size_t newlen)');
-  const getGroup = libc.func('int getpgid(int pid)');
   const bsd = (pid: number) => {
     const buffer = Buffer.alloc(BSD_INFO_BYTES);
     if (Number(info(pid, 3, 0, buffer, buffer.length)) !== BSD_INFO_BYTES) throw Object.assign(Error('mac_process_info_unavailable'), { nativeCode: koffi.errno() });
@@ -119,7 +96,7 @@ export async function createMacKernelReader() {
     assert.ok(name.startsWith('/') && !/[\r\n]/.test(name), 'mac_process_path_invalid');
     let stat;
     try { stat = statSync(name, { bigint: true }); }
-    catch (error) { throw Object.assign(error as Error, { nativeStage: 'stat' }); }
+    catch { return { path: name, dev: '', ino: '' }; }
     assert.ok(stat.isFile(), 'mac_process_image_nonregular');
     return { path: name, dev: String(stat.dev), ino: String(stat.ino) };
   };
@@ -141,26 +118,9 @@ export async function createMacKernelReader() {
         phase = 'arguments'; const argument = args(pid); row.argv = argument.argv; if (argument.failure) row.argumentFailure = argument.failure;
         phase = 'image';
         try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase + '-' + ((error as { nativeStage?: string }).nativeStage ?? 'unverified'), nativeCode: code(error) }; }
-        if (!row.executable && row.kernelFailure?.stage === 'image-proc-pidpath' && [2, 3].includes(row.kernelFailure.nativeCode!)) {
-          phase = 'text-regions'; row.text = readMacTextRegions(pid, (...values) => Number(info(...values)), () => koffi.errno());
-        }
-        phase = 'image-recheck';
-        if (row.executable) assert.deepEqual(image(pid), row.executable, 'mac_process_image_changed');
-        phase = 'arguments-recheck';
-        if (row.argv) {
-          const current = args(pid);
-          if (!current.argv && current.failure?.stage === 'read' && current.failure.nativeCode === 22) row.argumentFailure = current.failure;
-          else assert.ok(isDeepStrictEqual(current.argv, row.argv), 'mac_process_arguments_changed');
-        }
       }
-      phase = 'kinfo-recheck'; assert.deepEqual(kinfo(pid), owner, 'mac_kinfo_identity_changed');
-      if (!row.executable && row.kernelFailure?.stage === 'image-proc-pidpath' && [2, 3].includes(row.kernelFailure.nativeCode!)) row.imageIdentityBound = true;
-      if (row.argumentFailure?.nativeCode === 22 && (row.argumentFailure.stage === 'size' || row.argumentFailure.stage === 'read')) row.argumentFailure.identityBound = true;
       return row;
     } catch (error) {
-      if (confirmMacInitialExit(row, phase, error, pid => { koffi.errno(0); const result = Number(getGroup(pid)); return { result, nativeCode: koffi.errno() }; })) {
-        return { ...row, confirmedExited: 'darwin-kinfo-empty-getpgid-esrch' };
-      }
       return { ...row, reason: 'mac_kernel_metadata_unverified', kernelFailure: { stage: phase, nativeCode: code(error) } };
     }
   };

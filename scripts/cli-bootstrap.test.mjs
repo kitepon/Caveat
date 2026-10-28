@@ -127,3 +127,15 @@ test(`POSIX ${signal} after entry readiness reaches the child and cannot return 
   } finally {clearTimeout(timeout);if(child.exitCode===null&&child.signalCode===null)child.kill('SIGKILL');rmSync(root,{recursive:true,force:true});}
 });
 }
+
+test('unsupported Node versions explain the declared dependency and installation steps before loading product code', () => {
+  const root = fixture("process.stdout.write('loaded');");
+  try {
+    for (const [version, allowed] of [['22.15.0', false], ['22.16.0', true], ['23.0.0', false], ['24.0.0', true]]) {
+      const preload = 'data:text/javascript,' + encodeURIComponent("Object.defineProperty(process.versions,'node',{value:" + JSON.stringify(version) + '})');
+      const simulated = spawnSync(process.execPath, ['--import', preload, join(root, 'caveat.js')], { encoding: 'utf8', timeout: 10000 });
+      assert.equal(simulated.status, allowed ? 0 : 1, simulated.stderr);
+      if (!allowed) { assert.equal(simulated.stdout, ''); assert.match(simulated.stderr, /nodejs\.org\/en\/download/); assert.match(simulated.stderr, /npm install -g caveat-cli/); }
+    }
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

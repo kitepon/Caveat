@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { bindGlobalAdmission, type GlobalMigrationInput } from './managedGlobalMigration.js';
+import { globalProcessResidualRisks } from './managedGlobalProcesses.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
 import { inspectGlobalMigrationRecovery } from './managedGlobalRecovery.js';
 import { managedShellStatusCurrent } from './managedGlobalShellStatus.js';
@@ -21,7 +22,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
   let sequence = 0, phase = 'admission', planSha256: string | null = null, runId: string | null = null, admission: Admission | null = null;
   let processAssessment: ReturnType<Admission['processAssessment']> = null;
   let mutationStarted = false;
-  let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string } = { status: 'unknown', phase };
+  let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string; sharingViolation?: { code: number; file?: string; instruction: string; readableHolders: unknown[] } } = { status: 'unknown', phase };
   const event = (kind: string, pid?: number) => emit({ schema: 'caveat.global_migration_event.v1', sequence: ++sequence, phase, event: kind, planSha256, runId, ...(pid ? { pid } : {}) });
   try {
     event('issued'); assert.ok(/^[a-f0-9]{64}$/.test(expectedPlanSha256), 'global_migration_expected_hash_required');
@@ -42,7 +43,9 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     ] as const) {
       phase = step; event('issued'); const observed = await run();
       if (observed.status !== expected) {
-        result = { status: observed.status === 'unknown' ? 'unknown' : 'stopped', phase }; event(result.status); return await finish();
+        const failure = ('result' in observed ? observed.result : null) as { nativeCode?: number; file?: string } | null;
+        result = failure?.nativeCode === 32 ? { status: 'stopped', phase, sharingViolation: { code: 32, file: failure.file, instruction: 'Close the AI client using this file, then retry.', readableHolders: admission.processAssessment()?.records ?? [] } }
+          : { status: observed.status === 'unknown' ? 'unknown' : 'stopped', phase }; event(result.status); return await finish();
       }
       event('completed');
     }
@@ -60,10 +63,11 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     const readback = await managedShellStatusCurrent({ root: reviewed.root });
     assert.ok(readback.status === 'ready' && 'native' in readback, 'global_migration_independent_readback_unconfirmed');
     assert.equal(readback.deployment?.pointerSha256, pointerSha256, 'global_migration_readback_pointer_changed');
-    assert.equal(readback.nodeSha256, sha({ canonical: node.canonical, version: node.version, binary: node.binary, proof: reviewed.nodeProof }), 'global_migration_readback_node_changed');
+    assert.equal(readback.nodeSha256, sha({ command: 'node', version: node.version }), 'global_migration_readback_node_changed');
     assert.deepEqual(readback.wrappers, reviewed.shellPlan.files.map(({ path, sha256 }) => ({ path, sha256 })), 'global_migration_readback_wrappers_changed'); event('completed');
     result = { status: 'completed', phase };
   } catch (error) {
+    processAssessment = (error as { preflight?: typeof processAssessment }).preflight ?? processAssessment;
     result = { status: phase === 'admission' ? 'stopped' : 'unknown', phase, errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) };
   }
   return await finish();
@@ -76,7 +80,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     }
     phase = 'terminal';
     try { event(result.status); } catch { result = { status: 'unknown', phase: 'receipt' }; }
-    return { schema: 'caveat.global_migration_result.v1' as const, ...result, planSha256, runId, processAssessment, filesystemWrites: mutationStarted ? null : 0,
+    return { schema: 'caveat.global_migration_result.v1' as const, ...result, planSha256, runId, processAssessment, residualRisks: globalProcessResidualRisks, filesystemWrites: mutationStarted ? null : 0,
       recovery: mutationStarted && result.status !== 'completed' ? { command: 'deployment global-recovery-plan', runId, planSha256, requiresFreshEvidence: true } : null, existingProcessOperations: 0, privilegeElevation: false as const };
   }
 }

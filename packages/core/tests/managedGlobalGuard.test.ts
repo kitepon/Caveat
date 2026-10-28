@@ -41,26 +41,14 @@ describe('retained global filesystem guard', () => {
     try { expect(() => guard.readRetainedFile(guard.retainTree(source, 'leaf'))).toThrow('retained_file_changed'); }
     finally { guard.close(); }
   });
-  it('rejects a different native name identity even when its runtime bytes match the held file', async () => {
-    const { source, backup } = fixture(); writeFileSync(join(source, 'other'), 'original bytes', { mode: 0o600 });
-    if (isWindows()) runWindowsAclPrivateTree(source);
-    const driver = await nativeDriver(); let opens = 0;
-    const guard = bindGlobalPathGuard([source, backup], { ...driver, openChild(parent, name, purpose) {
-      return driver.openChild(parent, purpose === 'runtime' && name === 'leaf' && ++opens === 2 ? 'other' : name, purpose);
-    } });
-    try { expect(() => guard.retainRuntimeFile(source, 'leaf')).toThrow('runtime_name_changed'); }
-    finally { guard.close(); }
-  });
-  it('holds runtime files with read-only tokens that cannot rename or impersonate a retained object', async () => {
-    const { source, backup } = fixture(), guard = await openGlobalPathGuard([source, backup]);
-    const token = guard.retainRuntimeFile(source, 'leaf');
+  it('reports a real sharing-violation result with its source file and close-client instruction', async () => {
+    const { source, backup } = fixture(), driver = await nativeDriver();
+    const guard = bindGlobalPathGuard([source, backup], { ...driver, rename() { throw Object.assign(Error('fixture busy'), { nativeCode: 32 }); } });
     try {
-      expect(guard.readRuntimeFile(token).contentSha256).toMatch(/^[a-f0-9]{64}$/);
-      expect(() => guard.readRuntimeFile({ ...token })).toThrow('foreign_runtime');
-      expect(() => guard.moveTreeNoReplace(token as never, backup, 'illegal')).toThrow();
-      expect(existsSync(join(source, 'leaf'))).toBe(true); expect(existsSync(join(backup, 'illegal'))).toBe(false);
+      const result = guard.moveNoReplace(guard.retain(source, 'leaf'), backup, 'retained');
+      expect(result).toMatchObject({ status: 'unknown', nativeCode: 32, reason: 'global_guard_sharing_violation', file: join(source, 'leaf'), resolution: { instruction: expect.stringContaining('Close the AI client') } });
+      expect(readFileSync(join(source, 'leaf'), 'utf8')).toBe('original bytes'); expect(existsSync(join(backup, 'retained'))).toBe(false);
     } finally { guard.close(); }
-    expect(() => guard.readRuntimeFile(token)).toThrow('closed');
   });
   it('moves and restores the original object without replacing inode, bytes or mode', async () => {
     const { source, backup } = fixture(), original = statSync(join(source, 'leaf'), { bigint: true });

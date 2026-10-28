@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
   directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; fullSync?: number; aclType?: number };
-type Ref = { fd: number; mutation?: boolean; runtime?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
+type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
 
 export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library);
@@ -92,17 +92,13 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       assert.equal(Number(stat.uid), process.getuid?.(), 'global_guard_foreign_leaf');
       assert.ok(stat.isSymbolicLink() || (stat.mode & 0o022n) === 0n, 'global_guard_writable_leaf');
     }
-    if ((value as Ref).runtime) {
-      assert.ok(stat.isFile() && (stat.uid === 0n || Number(stat.uid) === process.getuid?.()), 'global_guard_foreign_runtime');
-      assert.equal(stat.mode & 0o022n, 0n, 'global_guard_writable_runtime');
-    }
     if (stat.isDirectory()) {
       assert.ok(stat.uid === 0n || Number(stat.uid) === process.getuid?.(), 'global_guard_foreign_parent');
       assert.ok((stat.mode & 0o022n) === 0n || (stat.mode & 0o1000n) !== 0n, 'global_guard_writable_parent');
     }
     let contentSha256: string | undefined;
     if (stat.isFile() && !metadataOnly) {
-      const limit = (value as Ref).runtime ? 256 : 128;
+      const limit = 128;
       assert.ok(stat.size <= BigInt(limit) * 1024n * 1024n, 'global_guard_file_bound');
       const hash = createHash('sha256'), buffer = Buffer.alloc(65536); let offset = 0;
       for (;;) {
@@ -142,7 +138,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      const ref = { fd, mutation: purpose === 'mutation', runtime: purpose === 'runtime', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
+      const ref = { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,

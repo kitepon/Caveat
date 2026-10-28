@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { managedDeploymentPaths } from '@caveat/core';
 import { resolveAgentConfigPaths, quoteCommandPath } from './installShared.js';
+import { resolveHookNodePath } from './nodePath.js';
 import type { RegistrationNodeTarget } from './registrationNodeCodec.js';
 
 export type RegistrationObservationFile = { file: string; status: string; sha256: string; bytes: number; uid: number; gid: number; mode: string; dev: string; ino: string };
@@ -42,6 +43,7 @@ export function registrationFileSpecs(source: RegistrationSources, userHome: str
       && typeof row.dev === 'string' && /^\d+$/.test(row.dev) && typeof row.ino === 'string' && /^[1-9]\d*$/.test(row.ino), 'registration_saved_identity_invalid');
     return { path, format, observed: row, targets: [] };
   });
+  const proposedNode = resolveHookNodePath();
   const ids = new Set<string>(), roles = new Set<string>();
   for (const def of saved.definitions) {
     assert.ok(def && typeof def.id === 'string' && !ids.has(def.id), 'registration_duplicate_definition'); ids.add(def.id);
@@ -62,7 +64,7 @@ export function registrationFileSpecs(source: RegistrationSources, userHome: str
       const argsSha256 = sha('[' + args.map(value => JSON.stringify(value)).join(', ') + ']');
       assert.equal(def.argsSha256, argsSha256, 'registration_saved_args_unbound');
       assert.equal(change.expectedSuffix, null, 'registration_mcp_suffix_invalid'); role = def.client + '/mcp';
-      target = { path: [key, 'caveat'], kind: 'mcp', suffix: '', argsSha256, beforeCommandSha256: change.beforeCommandSha256, proposedCommandSha256: change.proposedCommandSha256 };
+      target = { path: [key, 'caveat'], kind: 'mcp', suffix: '', argsSha256, beforeCommandSha256: change.beforeCommandSha256, proposedCommandSha256: sha(def.kind === 'mcp' ? JSON.stringify(proposedNode) : quoteCommandPath(proposedNode) + change.expectedSuffix) };
     } else {
       assert.ok(def.kind === 'hook' && typeof def.json_pointer === 'string' && def.exactRecordedAfterNodeOnlyChange === true, 'registration_hook_unconfirmed');
       const pattern = def.client === 'cursor' ? /^\/hooks\/([a-zA-Z]+)\/(0|[1-9][0-9]*)\/command$/ : /^\/hooks\/([a-zA-Z]+)\/(0|[1-9][0-9]*)\/hooks\/(0|[1-9][0-9]*)\/command$/;
@@ -72,12 +74,12 @@ export function registrationFileSpecs(source: RegistrationSources, userHome: str
       const suffix = ' ' + entry + ' ' + handler; assert.equal(change.expectedSuffix, suffix, 'registration_hook_suffix_changed');
       role = def.client + '/' + match[1];
       target = { path: def.json_pointer.slice(1).split('/').map((part: string) => /^\d+$/.test(part) ? Number(part) : part),
-        kind: 'hook', suffix, beforeCommandSha256: change.beforeCommandSha256, proposedCommandSha256: change.proposedCommandSha256 };
+        kind: 'hook', suffix, beforeCommandSha256: change.beforeCommandSha256, proposedCommandSha256: sha(def.kind === 'mcp' ? JSON.stringify(proposedNode) : quoteCommandPath(proposedNode) + change.expectedSuffix) };
     }
     assert.ok(!roles.has(role), 'registration_duplicate_role'); roles.add(role); files[fileIndex]!.targets.push(target);
   }
   assert.equal(roles.size, 15, 'registration_missing_definition');
   assert.ok(files.every(file => file.targets.length >= 1 && file.targets.length <= 4), 'registration_missing_file_targets');
   const clientsToClose = [...new Set(rows.map(([client]) => client))].map(client => ({ client, files: rows.filter(([owner]) => owner === client).map(([, , path]) => path) }));
-  return { files, clientsToClose, beforeNode: saved.expectedDedicatedNode as string, proposedNode: proposal.selectedNodeCandidate as string };
+  return { files, clientsToClose, beforeNode: saved.expectedDedicatedNode as string, proposedNode };
 }

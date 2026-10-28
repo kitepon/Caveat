@@ -142,7 +142,7 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の既存`engines`宣言はworkspaceの`>=22`、公開CLIの`>=22.5`をそれぞれ保持します。その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
+Node 22.16以上の22.x、またはNode 24以上とgitが必要です。[Node LTS](https://nodejs.org/en/download)を導入し、`npm install -g caveat-cli`を実行してAI clientを開き直してください。MCPとhookはclient環境の`node`を使います。版のdirectoryを指す絶対pathやhost専用shimは登録しません。Nodeは製品の依存で、移行時にlibnodeのidentityやhashを証明する条件はありません。
 
 本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
 
@@ -376,3 +376,5 @@ private GitHub同期は `~/.caveatrc.json` の任意・非secret設定 `"githubU
 15個のNode tokenだけを照合・移行します。元objectは保全し、既知部分の復帰は別journalへ記録します。
 計画やjournal閲覧は実行許可を与えません。詳細は
 [保存登録の契約](docs/01_plan.md#saved-seven-file-registration-node-migration-unreleased-source)を参照してください。
+
+`caveat deployment status --json`は、動き続ける旧版MCP serverのPIDと親appを示し、そのclientを開き直すよう案内します。新しいserverは起動時の製品版をlocalに記録するため、install先が更新されても起動済みの版を区別できます。記録がない旧版は読めるscript pathから分かる範囲を示します。clientを終了・再起動する処理は持ちません。旧版の記録がない状態で同じinstall先が上書きされた場合、既読JS cacheの版を判別できない場合があります。

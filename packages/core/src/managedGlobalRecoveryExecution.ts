@@ -1,4 +1,3 @@
-import type { GlobalProcessProtection } from './managedGlobalProcesses.js';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
@@ -6,7 +5,7 @@ import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths } from './managed
 import { openGlobalPathGuard, type GlobalGuardTree, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import { createGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
 import { assertGlobalRestoreOrder, writeGlobalPrivateEvidence } from './managedGlobalPreservation.js';
-import { checkGlobalRecoveryProcesses, globalRecoveryProcessProtection, withGlobalRecoverySourceSnapshot } from './managedGlobalRecoveryChain.js';
+import { checkGlobalRecoveryProcesses, withGlobalRecoverySourceSnapshot } from './managedGlobalRecoveryChain.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
 
 type Entry = { directory: string; name: string; rows: GlobalGuardTreeRow[]; tree: GlobalGuardTree };
@@ -68,16 +67,13 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
         for (const [path, place] of slots) if (!occupied.has(path)) assert.equal(guard.observe(place.directory, place.name), null, 'global_recovery_unknown_name_appeared');
       };
       let currentJournal: ReturnType<typeof createGlobalMutationJournal> | undefined;
-      const processCheck = async (observeProtection?: () => GlobalProcessProtection) => {
+      const processCheck = async () => {
         processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, (probe: ProcessProbeEvent) => {
           const saved = phase; phase = 'process-preflight'; try { event(probe.event, probe.pid); } finally { phase = saved; }
-        }, collect, observeProtection ?? (() => {
-          assert.ok(!currentJournal || ['ready', 'complete'].includes(currentJournal.read().status), 'global_recovery_process_journal_unconfirmed');
-          return globalRecoveryProcessProtection(source, verifyImmutable, entries(), [...slots.values()]);
-        }));
+        }, collect);
       };
       const verifyImmutable = () => { source.verifyEvidence(); source.verifyProtected(); verifyObjects(); };
-      const verifyCurrent = async () => { await processCheck(); };
+      const verifyCurrent = async () => { verifyImmutable(); await processCheck(); verifyImmutable(); };
       await verifyCurrent();
       assert.equal(guard.observe(plan.root, 'installer.lock'), null, 'global_recovery_installer_busy');
       assert.equal(guard.observe(plan.root, basename(target)), null, 'global_recovery_attempt_already_exists');
@@ -100,15 +96,11 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
           assert.ok(!poisoned, 'global_recovery_attempt_poisoned'); verifyImmutable(); guard.readJournal(lock);
           for (const ref of references) assert.equal(createHash('sha256').update(guard.readPersistedJournal(target, ref.name)).digest('hex'), ref.sha256, 'global_recovery_new_evidence_changed');
           slot(directory, name);
-          const confirmedProtection = globalRecoveryProcessProtection(source, verifyImmutable, entries(), [...slots.values()]);
           journal.intent(step, operation, sha(snapshot())); event('intent-persisted');
           let result: ReturnType<typeof guard.moveTreeNoReplace> | undefined, failure: string | undefined, renameAttempted = false;
           try {
             // Reobserve the last confirmed native locations; the pending destination grants no authority.
-            await processCheck(() => {
-              const current = globalRecoveryProcessProtection(source, verifyImmutable, entries(), [...slots.values()]);
-              assert.deepEqual(current, confirmedProtection, 'global_recovery_confirmed_locations_changed'); return current;
-            });
+            await processCheck();
             verifyImmutable(); guard.readJournal(lock); renameAttempted = true;
             result = guard.moveTreeNoReplace(known.tree, directory, name); assert.equal(result.status, 'moved', 'global_recovery_move_unconfirmed');
             known.directory = directory; known.name = name; known.rows = guard.readTree(known.tree); update(); verifyObjects();

@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GlobalGuardTree, GlobalGuardTreeRow, openGlobalPathGuard } from './managedGlobalGuard.js';
-import { processProtectionTree } from './managedGlobalProcesses.js';
 import type { GlobalNpmReceipt } from './managedGlobalNpm.js';
 import type { GlobalJournalOperation, createGlobalMutationJournal } from './managedGlobalJournal.js';
 
@@ -144,30 +143,6 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
       const rows = guard.readTree(tree);
       if (previousPath) generated.delete(previousPath);
       generated.set(path, { tree, rows });
-    },
-    processProtection() {
-      assert.ok(['ready', 'complete'].includes(journal.read().status), 'global_preservation_process_journal_unconfirmed');
-      verifyRetained();
-      const objects = [], absent: string[] = [], mutationPaths: string[] = [];
-      for (const [path, value] of generated) {
-        assert.deepEqual(guard.readTree(value.tree), value.rows, 'global_preservation_generated_changed');
-        objects.push(...processProtectionTree(path, value.rows)); mutationPaths.push(path);
-      }
-      for (const row of saved) {
-        assert.ok(row.state !== 'unknown', 'global_preservation_process_object_unknown');
-        const original = join(row.item.directory, row.item.name), current = row.state === 'preserved' ? join(row.item.backupDirectory, row.item.backupName) : original;
-        mutationPaths.push(original, current); objects.push(...processProtectionTree(current, row.rows, original));
-        if (row.working && ['known', 'after-known', 'quarantined'].includes(row.working.status)) {
-          const path = row.working.status === 'quarantined' ? join(row.item.backupDirectory, 'used-' + row.working.stagingName) : original;
-          mutationPaths.push(path); objects.push(...processProtectionTree(path, row.working.rows!));
-        } else assert.ok(!row.working || row.working.status === 'absent', 'global_preservation_process_working_unknown');
-        if (row.state === 'preserved' && (!row.working || ['absent', 'quarantined'].includes(row.working.status))) {
-          const replacement = generated.get(original);
-          if (replacement) assert.deepEqual(guard.observe(row.item.directory, row.item.name), replacement.rows[0]!.identity, 'global_preservation_process_generated_changed');
-          else { assert.equal(guard.observe(row.item.directory, row.item.name), null, 'global_preservation_process_unknown_entry'); absent.push(original); }
-        }
-      }
-      return { objects, absent, mutationPaths: [...new Set(mutationPaths)], postMutation: saved.some(row => row.state !== 'original' || !!row.working) };
     },
     async verifyCurrent() {
       assert.ok(!stopped, 'global_preservation_not_known');

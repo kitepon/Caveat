@@ -14,14 +14,6 @@ export type NativeProcessRecord = {
   executable: ProcessExecutable | null; argv: string[] | null; state?: string; confirmedExited?: 'darwin-kinfo-empty-getpgid-esrch';
   ownerProof?: 'darwin-kinfo-proc'; imageIdentityBound?: true; text?: MacTextObservation; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
-/** A denied size query is usable only after kinfo has bound the call on both sides. */
-export function isMacForeignArgumentDenial(row: NativeProcessRecord) {
-  const failure = row.argumentFailure;
-  return row.ownerProof === 'darwin-kinfo-proc' && failure?.nativeCode === 22
-    && (failure.stage === 'read' && failure.sizeQuerySucceeded
-      || failure.stage === 'size' && !failure.sizeQuerySucceeded && failure.identityBound === true);
-}
-
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
   selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean; confirmedExitedDuringRead?: number; confirmedExitedPids?: number[];
@@ -33,8 +25,7 @@ export function nativeGlobalProcessTables(onEvent: (event: ProcessProbeEvent) =>
   return collectNativeGlobalProcesses({
     linux: async () => {
       assert.equal(readlinkSync('/proc/self'), String(process.pid), 'process_procfs_namespace_unbound');
-      const koffi = await import('koffi'), getGroup = koffi.load(null).func('int getpgid(int pid)');
-      return readLinuxProcessTables('/proc', pid => { koffi.errno(0); return Number(getGroup(pid)) === -1 && koffi.errno() === 3; });
+      return readLinuxProcessTables();
     },
     darwin: () => readMacProcessTables(ownedProcessProbe(onEvent)),
     win32: command => readWindowsProcessTables(command, ownedProcessProbe(onEvent)),
@@ -183,8 +174,7 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
   }
 }
 
-export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number) => boolean = () => false): NativeProcessTables {
-  const confirmedExitedPids: number[] = [];
+export function readLinuxProcessTables(procRoot = '/proc'): NativeProcessTables {
   const deadline = Date.now() + 20000;
   const readTable = () => {
     const pids = readdirSync(procRoot).filter(name => /^\d+$/.test(name)).map(Number).sort((a, b) => a - b);
@@ -195,12 +185,11 @@ export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number)
       const row = linuxRecord(procRoot, pid);
       total += Buffer.byteLength(JSON.stringify(row));
       assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
-      if ((row.reason === 'ENOENT' || !row.argv || !row.executable) && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedPids.push(pid); return null; }
       return row;
     }).filter((row): row is NativeProcessRecord => row !== null);
   };
   const before = readTable(), after = readTable();
-  return { before, after, errors: [], selfPid: process.pid, confirmedExitedDuringRead: confirmedExitedPids.length, confirmedExitedPids,
+  return { before, after, errors: [], selfPid: process.pid,
     selfExecutable: executable(process.execPath), caseInsensitive: false };
 }
 
@@ -259,45 +248,10 @@ export function parseMacTextImages(text: string) {
   flush(); return rows;
 }
 
-export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (deadline: number) => NativeProcessRecord[]): Promise<NativeProcessTables> {
+export async function readMacProcessTables(_run: ProcessProbeRun, kernelTable?: (deadline: number) => NativeProcessRecord[]): Promise<NativeProcessTables> {
   const readTable = kernelTable ?? (await createMacKernelReader()).readTable;
-  const deadline = Date.now() + 20000, owned = new Map<number, string>();
-  const capture = async (phase: string) => {
-    const result = await run('/usr/sbin/lsof', ['-n', '-P', '-d', 'txt', '-F0pfDin'], phase, deadline);
-    owned.set(result.pid, '/usr/sbin/lsof'); return parseMacTextImages(result.stdout);
-  };
-  const before = readTable(deadline), imagesBefore = await capture('images-before');
-  const imagesAfter = await capture('images-after'), after = readTable(deadline);
-  const errors: string[] = [];
-  for (const rows of [before, after]) for (const row of rows) {
-    if (!owned.has(row.pid)) continue;
-    try { assert.ok(row.ppid === process.pid && row.executable?.path === realpathSync(owned.get(row.pid)!)); }
-    catch { errors.push('owned_probe_identity_changed'); }
-  }
-  const convert = (rows: NativeProcessRecord[], images: Map<number, ProcessExecutable[]>, other: NativeProcessRecord[]) => {
-    const otherPids = new Set(other.filter(row => !row.confirmedExited).map(row => row.pid));
-    // lsof corroborates executable identity; the two kernel tables define the observation scope.
-    const filtered = rows.filter(row => !owned.has(row.pid) && !row.confirmedExited);
-    return filtered.map(row => {
-      if (row.reason || row.state === 'Z' || row.kernel || row.imageIdentityBound && !row.executable) return row;
-      const image = row.executable;
-      if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
-        const callerUid = before.find(value => value.pid === process.pid)?.uid;
-        // A complete single kernel observation can fall outside both lsof snapshots; scope checks still run before transient classification.
-        if (image && row.argv && row.uid === callerUid && row.ownerProof === 'darwin-kinfo-proc' && !otherPids.has(row.pid)) {
-          return { ...row, imageBinding: 'kernel-path' as const };
-        }
-        if (image && typeof callerUid === 'number' && callerUid !== 0 && typeof row.uid === 'number' && row.uid !== callerUid
-          && row.ownerProof === 'darwin-kinfo-proc' && (row.argv || isMacForeignArgumentDenial(row))) {
-          return { ...row, imageBinding: 'kernel-path' as const };
-        }
-        return { ...row, executable: null, ...(row.uid === callerUid ? { reason: 'kernel_text_image_unbound' } : {}) };
-      }
-      return { ...row, imageBinding: 'kernel-and-text' as const };
-    });
-  };
-  const confirmedExitedPids = [...before, ...after].filter(row => row.confirmedExited === 'darwin-kinfo-empty-getpgid-esrch').map(row => row.pid);
-  return { before: convert(before, imagesBefore, after), after: convert(after, imagesAfter, before), errors, confirmedExitedPids, confirmedExitedDuringRead: confirmedExitedPids.length,
+  const deadline = Date.now() + 20000;
+  return { before: readTable(deadline), after: readTable(deadline), errors: [],
     selfPid: process.pid, selfExecutable: executable(realpathSync(process.execPath)), caseInsensitive: false };
 }
 
@@ -308,50 +262,11 @@ export const WINDOWS_PROCESS_PROBE = String.raw`$ErrorActionPreference='Stop'
 Import-Module CimCmdlets -ErrorAction Stop
 $current=[Diagnostics.Process]::GetCurrentProcess()
 $ownStart=$current.StartTime.ToUniversalTime().ToString('O')
-Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Security.Principal;
-public static class CaveatProcessOwner {
-  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
-  [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
-  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr handle, out long created, out long exited, out long kernel, out long user);
-  [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
-  public sealed class Result { public string Sid; public string Stage; public int Code; public Result(string sid, string stage, int code) { Sid=sid; Stage=stage; Code=code; } }
-  static Result Failed(string stage, int code) { return new Result(null, stage, code); }
-  public static Result Read(int pid, long expectedBirth) {
-    IntPtr process = OpenProcess(0x1000, false, pid), token = IntPtr.Zero;
-    if (process == IntPtr.Zero) return Failed("process-open", Marshal.GetLastWin32Error());
-    try {
-      long created, exited, kernel, user;
-      if (!GetProcessTimes(process, out created, out exited, out kernel, out user)) return Failed("process-times", Marshal.GetLastWin32Error());
-      if (Math.Abs(created - expectedBirth) > 9) return Failed("birth", 0);
-      if (!OpenProcessToken(process, 8, out token)) return Failed("token-open", Marshal.GetLastWin32Error());
-      using (WindowsIdentity identity = new WindowsIdentity(token)) { return new Result(identity.User.Value, "known", 0); }
-    } catch (Exception error) { return Failed("token-sid", error.HResult); }
-    finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
-  }
-}
-'@
 $tables=@()
 foreach($phase in @('before','after')){
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"started","count":0}')
-  $ownerBudget=16
   $rows=@(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine -ErrorAction Stop | Sort-Object ProcessId | ForEach-Object {
-    $owner=if($null -eq $_.CreationDate){[pscustomobject]@{Sid=$null;Stage='birth-missing';Code=0}}else{[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())}
-    $sid=$owner.Sid;$methodStage='not-attempted';$methodReturn=$null
-    if($null -eq $sid -and $ownerBudget -gt 0 -and $_.ProcessId -gt 4 -and $null -ne $_.CreationDate){
-      $ownerBudget--
-      try {
-        $method=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop
-        $methodReturn=[int]$method.ReturnValue
-        if($methodReturn -eq 0 -and $method.Sid -match '^S-1-(?:[0-9]+-)*[0-9]+$'){
-          $again=[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())
-          if(($again.Stage -eq 'known' -and $again.Sid -eq $method.Sid) -or $again.Stage -eq 'token-open'){$sid=$method.Sid;$methodStage='known'}elseif($again.Stage -eq 'known'){$methodStage='owner-changed'}else{$methodStage='birth-unconfirmed'}
-        }else{$methodStage='denied'}
-      }catch{$methodStage='unavailable'}
-    }
-    @{uid=$sid;ownerStage=$owner.Stage;ownerError=[int]$owner.Code;ownerMethodStage=$methodStage;ownerMethodReturn=$methodReturn;pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
+    @{uid=$null;pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
   })
   $tables+=,@($rows)
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"completed","count":'+$rows.Count+'}')
@@ -411,10 +326,26 @@ export async function readWindowsProcessTables(command: string, run: ProcessProb
     }
     base.windowsFields = { executable: row.exe ? 'present' : 'null', arguments: row.command ? 'present' : 'null' };
     if (row.command) try { base.argv = parseWindowsProcessArguments(row.command); } catch { base.windowsFields.arguments = 'unverified'; return { ...base, reason: 'process_arguments_unverified' }; }
-    if (row.exe) try { base.executable = executable(row.exe); } catch { base.windowsFields.executable = 'unverified'; }
+    if (row.exe) try { base.executable = executable(row.exe); } catch { base.executable = { path: row.exe, dev: '', ino: '' }; }
     return base;
   });
   const before = convert(tables.before), after = convert(tables.after);
   return { before, after, errors: [], selfPid: process.pid,
     selfExecutable: executable(process.execPath), caseInsensitive: true };
+}
+
+/** Read only this process's native birth for a product-owned MCP lifetime receipt. */
+export function nativeSelfProcessBirth(): Promise<string> {
+  return collectNativeGlobalProcesses({
+    linux: async () => parseLinuxProcessStat(bounded('/proc/self/stat', 65536).toString('utf8')).birth,
+    darwin: async () => { const birth = (await createMacKernelReader()).readProcess(process.pid).birth; assert.ok(birth); return birth; },
+    win32: async () => {
+      const koffi = await import('koffi'), kernel = koffi.load('kernel32.dll');
+      const current = kernel.func('void * __stdcall GetCurrentProcess()');
+      const times = kernel.func('int __stdcall GetProcessTimes(void *process, _Out_ int64_t *created, _Out_ int64_t *exited, _Out_ int64_t *kernel, _Out_ int64_t *user)');
+      const created = [0n]; assert.notEqual(times(current(), created, [0n], [0n], [0n]), 0, 'mcp_process_birth_unavailable');
+      const ticks = BigInt(created[0]!) - 116444736000000000n;
+      return new Date(Number(ticks / 10000n)).toISOString().replace(/\.\d{3}Z$/, '.' + String(ticks % 10000000n).padStart(7, '0') + 'Z');
+    },
+  });
 }

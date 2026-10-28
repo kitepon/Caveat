@@ -1,3 +1,4 @@
+import { registerMcpServerInstance, nativeSelfProcessBirth } from '@caveat/core';
 import { waitForMcpSyncs } from './tools/sync.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -17,6 +18,12 @@ export async function startMcpStdioServer(
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
+  let unregister = () => {};
+  if (overrides.productVersion) {
+    try { unregister = registerMcpServerInstance(ctx.caveatHome, overrides.productVersion, await nativeSelfProcessBirth()); }
+    catch { ctx.logger.warn('Caveat server version receipt is unavailable; deployment status can still inspect old installation paths.'); }
+  }
+  process.once('exit', unregister);
   let shuttingDown = false;
   const shutdown = async (): Promise<void> => {
     if (shuttingDown) return;

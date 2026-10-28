@@ -195,7 +195,7 @@ rag/                  Research asset ledger; currently only INDEX.md
 
 ## Requirements
 
-- **A Node build whose `node:sqlite` includes FTS5 and the trigram tokenizer.** The version number alone does not establish support. The official Linux Node 22.5.0 binary lacks FTS5 and is rejected with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. The shipped launcher enables SQLite once when required; explicit enable/disable options are preserved. Existing `engines` declarations remain unchanged in 0.21.3: the workspace declares `>=22`, and the published CLI declares `>=22.5`. Neither declaration guarantees that every such build has these SQLite capabilities.
+- **Node 22.16+ on the 22.x line, or Node 24+.** Install a current [Node LTS](https://nodejs.org/en/download), then run `npm install -g caveat-cli` and reopen your AI client. Registrations use the `node` command from the client environment; they do not pin a version directory or require a host shim. Node installation is a product dependency, not a migration proof.
 - Verified deployment snapshots: Linux main-server Node 24.14.1; Linux rabbit and Windows Node 24.22.1; macOS MCP Node 26.12.0 and hook Node 26.12.1 (a recorded mixed deployment, not a completed Node update). These are observed versions, not the lowest supported versions on each OS.
 - The three CI runtimes are recorded by the final native-hash proof JSON (`runtime.node`, `runtime.execPath`, `runtime.sqlite`). Verified CI versions from PR59 run 40253098781: Linux 24.20.0; macOS 26.12.1; Windows 24.22.1. Only values from the corresponding PR59 job raw logs are used here.
 - WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
@@ -585,3 +585,5 @@ replace only the fifteen reviewed Node tokens in a saved seven-file projection.
 Native originals are preserved and known-only recovery uses a new journal.
 Planning and journal inspection do not grant execution permission. See the
 [saved registration contract](docs/01_plan.md#saved-seven-file-registration-node-migration-unreleased-source).
+
+`caveat deployment status --json` reports old running MCP server PIDs and their parent applications, with an instruction to reopen that client. New servers record their loaded version in a local lifetime receipt, so an installation update does not rewrite that version. Older installations without receipts can be identified from readable script paths. This diagnostic does not terminate or restart clients. A cached script from a pre-receipt in-place update may be unobservable.

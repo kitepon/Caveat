@@ -130,7 +130,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
   try {
     assert.ok(isAbsolute(input.node) && resolve(input.node) === input.node, 'runtime_absolute_selection_required');
     assert.ok(/^v\d+\.\d+\.\d+$/.test(input.nodeVersion) && Number(input.nodeVersion.slice(1).split('.')[0]) >= 22, 'runtime_version_changed');
-    const node = realpathSync(input.node), nodeTree = observed(node, 256 * MiB);
+    const node = realpathSync(input.node);
     const packageRoot = resolve(input.packageRoot), globalRoot = resolve(input.globalRoot);
     assert.equal(dirname(packageRoot), globalRoot, 'package_not_direct_global_child');
     assert.equal(basename(packageRoot), 'caveat-cli');
@@ -201,7 +201,6 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     assert.equal(realpathSync(packageRoot), canonicalPackageRoot, 'package_root_changed_during_read');
     assert.deepEqual(observed(packageRoot), packageTree, 'package_changed_during_read');
     for (const file of protectedFiles) assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read');
-    assert.deepEqual(observed(node, 256 * MiB), nodeTree, 'runtime_changed_during_read');
     assert.deepEqual(snapshotGlobalTree(npmRoot, { observeOnly: true, opaqueExternalLinks: true }), npmTree, 'npm_changed_during_read');
     assert.deepEqual(snapshotGlobalTree(globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true }).filter(row => row.relativePath !== ''), otherGlobals, 'other_global_changed_during_read');
     try {
@@ -213,7 +212,7 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     }
     return { schema: 'caveat.global_package_snapshot.v1' as const, status: 'consistent' as const,
       packageRoot, packageVersion: pkg.version, packageTree, dependencies, reachableManifests: seen.size,
-      protectedFiles, node: { alias: input.node, canonical: node, version: input.nodeVersion, binary: nodeTree },
+      protectedFiles, node: { alias: input.node, canonical: node, version: input.nodeVersion },
       npm: { executable: npm, version: npmPackage.version, tree: npmTree }, npmManagement, otherGlobals,
       filesystemWrites: 0, childProcesses: 0, writePermission: false as const, processAssessment: 'not-performed' as const };
   } catch (error) {

@@ -13,7 +13,7 @@ export type GlobalGuardIdentity = {
 };
 export type NativeGuardDriver = {
   openRoot(path: string): object;
-  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation' | 'journal-read' | 'runtime'): object | null;
+  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation' | 'journal-read'): object | null;
   snapshot(ref: object, metadataOnly?: boolean): GlobalGuardIdentity;
   listDirectory(ref: object): string[];
   assertPrivateDirectory(ref: object): void;
@@ -32,7 +32,6 @@ export type GlobalGuardEntry = Readonly<{ identity: GlobalGuardIdentity }>;
 export type GlobalGuardTreeRow = { relativePath: string; identity: GlobalGuardIdentity };
 export type GlobalGuardTree = Readonly<{ tree: true; sha256: string }>;
 export type GlobalGuardJournal = Readonly<{ journal: true }>;
-export type GlobalGuardRuntimeFile = Readonly<{ runtime: true; identity: GlobalGuardIdentity }>;
 type Directory = { ref: object; initial: GlobalGuardIdentity; parent?: Directory; name?: string };
 type Entry = { ref: object; directory: Directory; name: string; expected: GlobalGuardIdentity };
 const leaf = (name: string) => assert.ok(typeof name === 'string' && name.length > 0 && name.length <= 255
@@ -54,7 +53,6 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
   const retired = new WeakSet<object>(), copiedTrees = new WeakSet<GlobalGuardTree>();
   const opened: object[] = [], directories = new Map<string, Directory>(), entries = new WeakMap<GlobalGuardEntry, Entry>();
   const trees = new WeakMap<GlobalGuardTree, { entry: GlobalGuardEntry; rows: GlobalGuardTreeRow[] }>();
-  const runtimeFiles = new WeakMap<GlobalGuardRuntimeFile, Entry>();
   const journals = new WeakMap<GlobalGuardJournal, Entry & { bytes: Buffer; failed: boolean }>();
   const aliases = new Map<string, string>(); let closed = false;
   const keep = (ref: object) => { opened.push(ref); return ref; };
@@ -65,7 +63,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     if (errors.length) throw new AggregateError(errors, 'global_guard_close_unconfirmed');
   };
   const active = () => assert.ok(!closed, 'global_guard_closed');
-  const inspect = (parent: object, name: string, purpose: 'parent' | 'observe' | 'runtime' = 'observe', metadataOnly = false) => {
+  const inspect = (parent: object, name: string, purpose: 'parent' | 'observe' = 'observe', metadataOnly = false) => {
     const ref = driver.openChild(parent, name, purpose === 'parent' ? 'observe-parent' : purpose); if (!ref) return null;
     try { return driver.snapshot(ref, metadataOnly); } finally { driver.close(ref); }
   };
@@ -119,7 +117,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         const names = driver.listDirectory(held).sort();
         assert.ok(names.length <= 100000 && new Set(names).size === names.length, 'global_guard_tree_duplicate_or_bound');
         for (const name of names) {
-          leaf(name); const child = driver.openChild(held, name, 'mutation'); assert.ok(child, 'global_guard_tree_child_missing');
+          leaf(name); const child = driver.openChild(held, name, 'observe'); assert.ok(child, 'global_guard_tree_child_missing');
           try {
             visit(child, relativePath ? relativePath + '/' + name : name, depth + 1);
             assert.deepEqual(inspect(held, name), driver.snapshot(child), 'global_guard_tree_child_name_changed');
@@ -236,21 +234,6 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     directoryIdentity(path: string) { checkDirectories(); return driver.snapshot(directory(path).ref); },
     canonicalDirectory(path: string) { checkDirectories(); directory(path); return aliases.get(path)!; },
     observe(path: string, name: string) { leaf(name); checkDirectories(); const parent = directory(path); return inspect(parent.ref, name); },
-    retainRuntimeFile(path: string, name: string): GlobalGuardRuntimeFile {
-      leaf(name); checkDirectories(); const parent = directory(path);
-      const ref = driver.openChild(parent.ref, name, 'runtime'); assert.ok(ref, 'global_guard_runtime_missing'); keep(ref);
-      const expected = driver.snapshot(ref); assert.equal(expected.kind, 'file', 'global_guard_runtime_nonregular');
-      const token = Object.freeze({ runtime: true as const, identity: Object.freeze({ ...expected }) });
-      runtimeFiles.set(token, { ref, directory: parent, name, expected }); guard.readRuntimeFile(token); return token;
-    },
-    readRuntimeFile(token: GlobalGuardRuntimeFile) {
-      checkDirectories(); const held = runtimeFiles.get(token); assert.ok(held, 'global_guard_foreign_runtime');
-      assert.deepEqual(driver.snapshot(held.ref), held.expected, 'global_guard_runtime_changed');
-      const metadata = ({ contentSha256: _, ...value }: GlobalGuardIdentity) => value;
-      // The held file supplies fresh bytes; the native name observation must bind that same object.
-      assert.deepEqual(metadata(inspect(held.directory.ref, held.name, 'runtime', true)!), metadata(held.expected), 'global_guard_runtime_name_changed');
-      checkDirectories(); return structuredClone(held.expected);
-    },
     retainTree(path: string, name: string): GlobalGuardTree {
       const entry = guard.retain(path, name), held = entries.get(entry)!;
       const rows = treeInventory(held.ref, held.expected.dev);
@@ -424,7 +407,8 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
         return { status: 'unknown' as const, renameIssued: issued, before, phase,
           nativeCode: Number.isSafeInteger(nativeCode) && nativeCode! >= 0 && nativeCode! <= 0xffffffff ? nativeCode! : null,
           observations: { held: observe(() => driver.snapshot(entry.ref)), source: observe(() => inspect(entry.directory.ref, entry.name)), destination: observe(() => inspect(target.ref, name)) },
-          reason: 'global_guard_move_unconfirmed',
+          reason: nativeCode === 32 ? 'global_guard_sharing_violation' : 'global_guard_move_unconfirmed',
+          ...(nativeCode === 32 ? { file: join([...directories].find(([, value]) => value === entry.directory)![0], entry.name), resolution: { instruction: 'Close the AI client using this file, then retry.' } } : {}),
           errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
       }
     },

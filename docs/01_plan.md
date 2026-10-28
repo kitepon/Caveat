@@ -12,7 +12,7 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 
 ## 真実の源と状態
 
-SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. This candidate does not change the numerical minimum Node version; adopting its supported-runtime wording remains a product review decision.
+SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. The declared dependency is Node 22.16+ on 22.x or Node 24+; errors include Node LTS installation and client-reopen instructions. This database search requirement is separate from migration process observation.
 
 - 正本はmarkdown-in-git。SQLite FTS5 indexは常に再構築できる派生物。
 - 自分の知識は既定で`~/.caveat/own/`、indexは`~/.caveat/index/caveat.db`。
@@ -504,117 +504,11 @@ The first migration from version-specific commands requires review/trust of the 
 
 ### Global migration preflight (unreleased source)
 
-The process preflight reports an explicit observation scope, not the absence of
-all possible future imports. Every observed argv is checked for old root, npm root,
-alias and protected-path literals, including foreign users, ancestors, transient
-processes and inline code. A bound old executable/script is a consumer; a bound
-npm executable/script is a writer. Both stop the operation. Same-owner missing
-exe/argv and changed birth/executable identity remain unknown and stop it. The
-stable current migration process alone may carry its required scope arguments.
+B removes the old shell-global Caveat from PATH and npm, retaining only the fixed entry. Preflight stops only for readable argv/executable references to the old root or a readable external npm writer targeting it. It reports the consumer PID, parent application and how to close that client before retrying. Unreadable processes, foreign users, kernel processes, short-lived entries and exited consumers are counts, not stop conditions. Process observation is read-only and never terminates an existing application.
 
-Typed counts cover self, non-executing (PF_KTHREAD/kernel task or a same-birth
-zombie), foreign-user with readable uid/birth/argv, a finite identity-bound ancestor
-chain, transient observations and outside-observed-scope processes with readable
-exe/argv. No executable name alone excludes a process. Deleted-image suffixes
-are recorded and stripped only for runtime/scope classification. Public results
-contain counts, classifications and hashes; raw argv and native errors stay private.
-Collection failure leaves counts unknown. Outside-scope scripts and helpers such
-as ELECTRON_RUN_AS_NODE may dynamically import the old global after observation;
-the import can fail after retention in quarantine. The product never overwrites
-data to hide that failure. Package rename and owned npm uninstall have fresh
-checks before and after; a newly detected consumer stops at the confirmed journal
-state and requires a fresh `global-recovery-plan` before known-only recovery.
+Linux reads procfs, macOS reads native argv/executable paths, and Windows uses a bounded owned CIM child. Each actual OS runner must show normal ready, a literal old-global consumer stopped with its PID and parent, and ready after that consumer closes. No same-uid metadata-fault refusal, foreign-user classification, text-image proof, positive-exit exception, Restart Manager lease, exclusive-open qualification or DuplicateHandle is required.
 
-The four migration/recovery callers exclude the read-only ordinary Node/libnode
-paths from the process stop scope, while retaining runtime classification. Sharing
-that Node or nvm prefix alone is allowed; old-global/npm/alias/config/protected-A
-literals still stop. The runtime proof independently re-reads held executable and
-loaded-library identities/content and alias/parent bindings before and after each
-mutation. Post-check failure retains a confirmed native move in the journal and
-stops further operations; fresh recovery admission must verify all protected state
-again. No runtime file is changed or repaired.
-
-`node scripts/check-global-processes.mjs` runs serially after build and before mutation fixtures on
-each real CI runner. It records normal-table readiness and a stopped real literal
-consumer. A reader fault withholds metadata for that real same-owner child to
-prove refusal; this third case is explicit fault injection over a native table,
-not a claim that host access permissions were changed. The check owns only its
-fixture child and files; observation never signals existing processes.
-
-Darwin additionally classifies `foreign-user-unobservable` only for a non-root
-caller and a different uid proven by LP64 `kinfo_proc`, when argument size querying
-succeeds and the actual read fails with EINVAL, or the size query itself fails
-with EINVAL and equal kinfo PID, birth and uid bracket that call. Both births and kernel executable
-identities must agree, with a readable image in each observation. Argument access
-alone may vary. Readable literals and bound paths are checked first. Unobservable
-Node identities, missing owners, unclassified same-uid gaps, other errno/stages and changed birth/image
-remain stopped. Other foreign interpreters/helpers retain runtime classification
-but may use the foreign-user exception when they are outside package/npm roots. The exception does not prove the absence of foreign non-runtime
-consumers or writers, or administrator/root exclusivity.
-
-Darwin can also classify `same-uid-unresolvable-image` for exact proc_pidpath
-ENOENT/ESRCH, matching kinfo PID/birth/uid around each call and across observations,
-and complete decoded argv outside literal/bound scope. A caller must independently
-verify every protected object before and after the same process collection:
-original package/npm/aliases and read-only Node/libnode identities, or current
-locations admitted by confirmed native journals. Original slots must be absent or
-contain only the confirmed working copy or confirmed npm remainder, with the full
-tree, kind, mode, bytes and device/inode unchanged and no unknown entry. Pending,
-torn and unknown journal paths grant no classification. Both retained and working
-locations participate in literal and executable/script binding checks.
-
-The native reader attempts bounded executable-text-region device/inode reads
-through documented libproc.h APIs; matching any protected object stops the
-process. Unreadable text is reported explicitly. Post-mutation use of the
-unreadable-text inference requires the real Mac runner's owned executable-directory
-rename check: the kernel must report the quarantine path and the process must be
-stopped by executable binding. Failed qualification leaves Mac postchecks
-unaccepted. An unlinked same-owner Node can still import the old global later;
-quarantine makes that import fail. Foreign processes not bound to Node identities
-can still read or copy it, and root/administrator exclusion is not proven.
-Complete same-owner kernel observations present in only one table retain their
-kernel image for literal/bound checks before transient classification, even if
-the process falls outside the separate lsof snapshots. Stable same-owner images
-still require text corroboration; incomplete metadata remains stopped.
-Darwin drops a listed PID as confirmed exited only when the first kinfo sysctl
-succeeds with zero returned bytes and an independent subsequent getpgid reports
-ESRCH, before any argv or image has been read. Counts and PIDs are retained in
-the result. Live or reused PIDs, EPERM, invalid lengths, later identity failures
-and already observed scope references do not qualify.
-
-Windows global migration remains incomplete until a non-privileged, documented
-object-based observation provides a reachable ready state. Typed access denial
-alone is not acceptance. The intended gate retains observable argv/exe checks,
-queries users of protected package/npm/alias resources, refuses a fixture holder,
-and returns to ready after that holder closes. Debug privilege, elevation, ACL
-changes, undocumented APIs and process-name exclusions are forbidden. Every stop
-must identify an actionable resolution; unresolved ordinary-host unknowns leave
-that OS incomplete. Fox read-only observation requires separate owner approval. The current resource-query
-qualification uses an owned, bounded PowerShell child and stdin for private file
-paths. It imports only RmStartSession/RmRegisterResources/RmGetList/RmEndSession;
-these may update the OS-managed session registry but do not modify resource files.
-A real holder/release fixture and a read-only system-module query report actual
-coverage. They do not enable a metadata-denial bypass or qualify product readiness
-until foreign-user, service and elevated-user coverage is established. The query
-reports whether its observer token is administrative; an administrative runner's
-diagnostic result cannot establish ordinary-user coverage. Consumer stops identify
-the PID to close normally, while writer stops require the npm operation to finish.
-Other unknowns explicitly report that no supported resolution is established.
-The exclusive-open qualification measures read, read/delete and read/write access
-with sharing disabled, without writing bytes. It distinguishes an owned open-file
-holder, a mapped view after source handles close, and a privately copied loaded
-DLL; each holder receives a normal close request and the fixture bytes are
-rechecked. These observations do not replace the product guard. A successful
-open alone is not treated as proof against all mappings, future imports or use
-by another security context.
-
-Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
-the executable with lsof text-file device/inode data. Darwin argv decoding uses
-the kernel argc, retaining NAME=value arguments while excluding trailing environment strings. Windows
-uses one owned CIM child with ordered progress frames and a 20-second deadline.
-Only a child created by the probe may be terminated. Exit without pipe closure
-does not establish completion. No privilege elevation or existing-process signals
-are part of preflight.
+The existing journal and known-only recovery preserve the old root through identity-retaining quarantine rename and remove old aliases/bins. Windows sharing violation 32 identifies the affected file and directs the user to close the AI client and retry; readable holder information is diagnostic only. Fox uses this same B contract. Quarantine can make later dynamic imports fail with module-not-found; views whose handles are closed, previously read JS caches, and root/administrator writes remain risks reported in results.
 
 The package contains Koffi 3.3.4 and native binaries for Linux, macOS and Windows
 on x64/arm64. The packaged loader uses adjacent binaries only; it never searches
@@ -825,25 +719,7 @@ binding described below; journal inspection does not supply it. The final
 candidate requires validation of the exact versioned source and packaged artifact.
 These source commands do not grant approval for distribution or machine changes.
 
-Ordinary Node selection uses an explicit absolute executable path, independently
-of the interpreter running Caveat. A bounded owned child uses a restricted
-environment, tests in-memory SQLite FTS5/trigram, and reports the actual loaded
-libnode dependencies from Node's diagnostic report. Spawn, exit and pipe close
-must all succeed. The product binds alias identity, canonical file identity,
-contents, native security and every parent for the executable and reported
-libnode files, then repeats the capability under those held bindings. A shared
-build with missing or inconsistent dependency evidence is explicitly refused.
-No runtime/library permissions are repaired. This proof covers the executable
-and libnode; it does not attest every system library or the whole host.
-
-The stable runtime proof enters the reviewed plan, native shell manifest,
-coordinator readback digest and recovery admission; transient child PIDs do not
-change the plan hash. Every mutation gate freshly checks binary/library bindings
-and includes their alias/canonical paths in the native process/writer scope.
-Native status independently reads those objects without claiming process/writer
-absence (`processAssessment: not-performed`). Legacy saved history remains
-readable; a missing runtime proof cannot grant new execution or a native-ready
-result. The immutable entry/runtime sources and accepted bytes remain unchanged.
+Node is a normal product dependency: Node 22.16+ on 22.x or Node 24+, declared in package engines and the README. MCP/hooks and the managed shell use the `node` command from the client environment, matching a standalone npm installation. No version-directory path or host-owned Node shim is generated. Missing/unsupported Node errors include the Node LTS installation URL and reinstall/reopen instructions. Migration does not prove Node/libnode identity, hashes, SQLite capability or shared-build provenance.
 
 Confirmed partial recovery journals may be planned with `deployment global-recovery-plan
 <run-id> --plan-sha256 <original-digest> --json`. This is read-only: no run, lock or
@@ -867,76 +743,13 @@ and `executionPermission: false`, including completed journals.
 
 ### Saved seven-file registration Node migration (unreleased source)
 
-`deployment registration-plan --observation <saved-json> --proposal <saved-json>
---node-version <exact-version> --json` admits the saved Main projection schemas
-`caveat.main15_readonly_confirmation.v1` and
-`caveat.main15_node_migration_proposal.v1`. Saved paths are assertions against
-seven normal configuration paths derived from the current home, never authority
-for arbitrary files. The plan requires exactly four MCP definitions and eleven
-Claude/Codex/Cursor hook roles. All fifteen exact pointers, original metadata and
-command/argument hashes must agree. The saved Node candidate is independently
-resolved and proven with the ordinary Node/libnode capability described above;
-neither its saved name nor an earlier observation establishes current acceptance.
-The selected binary and its loaded libnode dependencies must also be outside the
-recorded retired dedicated Node root.
+`deployment registration-plan --observation <saved-json> --proposal <saved-json> --json` reads the saved seven files and fifteen exact pointers. Saved paths are assertions against normal paths derived from the current home. The codec preserves unrelated JSON/TOML bytes, values, MCP args and hook suffixes and changes only the Node command to `node`. The historical proposal's version-specific candidate remains input evidence, never the emitted command.
 
-`deployment registration-migrate` takes the same inputs plus
-`--expected-plan-sha256 <reviewed-digest> --clients-closed`. Planning creates no run or installer
-lock and returns no execution permission. Execution repeats fresh process/writer,
-native object, parent, alias, protected A pointer/entry/payload and runtime proof
-checks before and after each same-file pair. Retain/publish and recovery
-quarantine/restore run synchronously, with native identity/evidence checks and
-durable intent/result writes between the two no-replace renames. No asynchronous
-process collection or promise scheduling occurs while that name is vacant. It never reads the retired Node executable,
-changes its permissions, modifies hook trust or changes any existing process.
-The reviewed plan lists Claude Code (`~/.claude.json` and settings), Codex
-(config and hooks), Grok (config), and Cursor (MCP and hooks) with all seven paths.
-The operator must close those clients plus other editors/automation writing these
-files and explicitly attest `--clients-closed` for migration and recovery. This
-attestation never grants execution permission or proves process absence; the
-product does not close clients. B uninstall does not require this flag.
-The new configuration files are private; each complete original object, including
-its native identity, contents and security, is moved without replacement to the
-new private run before its new file is installed. Unknown names are retained and
-stop the operation. The pair is not an atomic exchange: synchronous validation
-and durable flush still take time. A concurrent writer, crash or unknown rename
-can leave the original in private backup and require manual recovery. Known
-non-move errors are not yet distinguished from unknown outcomes; pending/torn/unknown
-recovery remains refused. These residual risks accompany plan/execution results
-and the separate Owner request. No whole-document serialization or in-place overwrite occurs.
+`registration-migrate --expected-plan-sha256 <digest>` preserves each original in a private backup, writes its replacement temp in the same directory as the target, flushes it, then renames it over the original name. That name stays present throughout. There is no retain/publish pair, per-file process check or declaration that all clients are closed. A readable Claude Code argv stops admission with close-and-retry instructions because Claude Code writes `~/.claude.json`. No client is closed by Caveat.
 
-The codec uses strict JSON with duplicate-key rejection and the existing TOML
-parser. JSON AST locations select exact pointer targets, including distinct hooks
-with identical command values; only the encoded leading Node token is replaced.
-TOML accepts a uniquely located single-line command string and refuses ambiguous
-or multiline command targets. Both formats are parsed again and compared against
-the complete expected semantic value. All other source bytes, MCP arguments,
-hook suffixes, entry paths and unrelated values remain unchanged. The saved MCP
-argument hash uses the original comma-space JSON array encoding, not a compact
-reserialization. Missing full original configuration bytes are not reconstructed
-from the saved projection; execution must bind the exact original files.
+The existing mutation journal records each atomic replacement and allows a separate known-only recovery to restore backup bytes through the same atomic-write method. Recovery keeps old evidence immutable, rejects changed target bytes and pending/torn/unknown source journals, and reads current objects again after closing the writer. `registration-inspect` remains read-only with no execution permission. Native inode identity is retained for B's quarantined root; a Main backup copy preserves original bytes while a standard atomic write replaces the config inode.
 
-`deployment registration-recovery-plan <run-id> --plan-sha256 <original-digest>
---json` derives current placements only from that approved plan, its native seed
-and a finite chain of confirmed moves. It verifies every source privately and
-read-only, current originals/replacements, missing target names, all parents,
-protected state and fresh runtime/process proof. Its full evidence digest binds
-all source references, derived state and current directory bindings.
-`registration-recover` requires that digest through `--evidence-sha256` plus
-`--clients-closed`; each
-attempt creates a separate private journal, quarantines only known installed
-replacements and restores only the held original objects. It never replays a
-saved intent or modifies an ancestor journal. Chains stop at eight runs, 256
-references and 64 MiB; cycles, reused journal identities, redirected directories,
-pending/torn/unknown ancestors and reuse of an existing attempt are refused.
-Independent post-close readback covers every source/new directory, journal,
-protected object and current original/replacement before completion is reported.
-`registration-inspect` reads only bounded saved plan/journal evidence and always
-returns `currentObjects: not-assessed` and `executionPermission: false`.
-
-### Windows hookの保護保存transport（未公開source）
-
-Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。
+`deployment status --json` includes old MCP server PIDs, parent app names and reopen instructions. Server lifetime receipts identify loaded versions across an in-place installation update; pre-receipt installations are identified where script paths remain readable. This is a product diagnostic. BellTeam's seat restart operation is separate and is not product acceptance.
 
 ## MCP runtimeの読込み境界（次版source）
 

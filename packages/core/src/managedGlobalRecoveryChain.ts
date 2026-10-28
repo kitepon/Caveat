@@ -5,9 +5,8 @@ import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, globalRecoveryKe
 import { withGlobalRecoveryAttemptEvidence } from './managedGlobalRecoveryAttempt.js';
 import { recoveryLocations, recoveryModelFromMigration, recoveryVacancySlots, validateRecoveryJournalState, type RecoveryModel } from './managedGlobalRecoveryModel.js';
 import { openGlobalPathGuard, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
-import { preflightGlobalProcesses, processProtectionTree, type GlobalProcessProtection } from './managedGlobalProcesses.js';
+import { preflightGlobalProcesses, type GlobalProcessScope } from './managedGlobalProcesses.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
-import { managedNodePaths, managedNodeProcessObjects } from './managedNode.js';
 
 type Reference = GlobalMigrationEvidence['references'][number];
 type Chain = { origin: GlobalMigrationEvidence; model: RecoveryModel; roots: string[]; references: Reference[];
@@ -102,38 +101,13 @@ export function withGlobalRecoverySourceSnapshot<T>(runDirectory: string, planSh
   });
 }
 
-/** Source parsing already rejected unknown history; this rechecks actual objects on both sides of collection. */
-export function globalRecoveryProcessProtection(source: GlobalRecoverySnapshot, verify: () => void,
-  locations = [...source.bindings.values()].filter(row => row.rows !== null) as { directory: string; name: string; rows: GlobalGuardTreeRow[] }[],
-  slots = source.vacancySlots ?? []) {
-  verify();
-  const { plan, guard } = source;
-  const occupied = new Set(locations.map(row => join(row.directory, row.name))), absent: string[] = [];
-  for (const slot of slots) if (!occupied.has(join(slot.directory, slot.name))) {
-    assert.equal(guard.observe(slot.directory, slot.name), null, 'global_recovery_process_unknown_entry'); absent.push(join(slot.directory, slot.name));
-  }
-  const objects = locations.flatMap(row => {
-    const original = source.original.objects.find(value => value.rows[0]!.identity.dev === row.rows[0]!.identity.dev && value.rows[0]!.identity.ino === row.rows[0]!.identity.ino);
-    return processProtectionTree(join(row.directory, row.name), row.rows, original ? join(original.directory, original.name) : join(row.directory, row.name));
-  });
-  return { objects: [...objects, ...managedNodeProcessObjects(plan.nodeProof),
-    ...processProtectionTree(dirname(dirname(plan.baseline.npm.executable)), plan.baseline.npm.tree.map(row => ({ relativePath: row.relativePath, identity: row }))),
-    ...plan.protectedObjects.flatMap(row => processProtectionTree(row.path, row.rows))], absent, postMutation: true, mutationPaths: [...occupied] };
-}
-
 export async function checkGlobalRecoveryProcesses(source: GlobalRecoverySnapshot, runDirectory: string, target: string,
-  emit: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables, observeProtection?: () => GlobalProcessProtection) {
+  emit: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
   const { plan } = source;
-  const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)), runtimeExecutables: [plan.nodeProof.executable.canonical],
-    retainedRoots: [...(source.sourceRoots ?? [runDirectory]), target],
-    protection: observeProtection ?? (() => globalRecoveryProcessProtection(source, () => {
-      source.verifyEvidence(); source.verifyProtected();
-      for (const row of source.bindings.values()) if (row.tree) assert.deepEqual(source.guard.readTree(row.tree), row.rows);
-        else assert.equal(source.guard.observe(row.directory, row.name), null, 'global_recovery_process_unknown_entry');
-    })),
-    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([...(source.sourceRoots ?? [runDirectory]), target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
+  const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)),
+    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)) };
   const result = await preflightGlobalProcesses(scope, emit, collect);
-  if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: !('protectionFailure' in result && result.protectionFailure && !result.protectionFailure.readOnly) });
+  if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true });
   return result;
 }
 
@@ -156,7 +130,7 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
         assert.equal(source.guard.observe(source.plan.root, 'installer.lock'), null, 'global_recovery_installer_busy');
         assert.equal(source.guard.observe(source.plan.root, basename(target)), null, 'global_recovery_attempt_already_exists');
       };
-      const processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, emit, collect, () => globalRecoveryProcessProtection(source, verify));
+      verify(); const processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, emit, collect); verify();
       return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'ready' as const, planSha256, evidenceSha256: source.evidenceSha256,
         processAssessment, currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 };
     });

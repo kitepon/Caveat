@@ -18,20 +18,23 @@ function literal(value: string, windows: boolean) {
 
 /** Contents only: no PATH lookup, host writes, or pointer/registration changes. */
 export function renderManagedShellWrappers(node: string, entry: string, windows = isWindows()) {
-  literal(node, windows); literal(entry, windows);
+  if (node !== 'node') literal(node, windows); literal(entry, windows);
   const posix = windows ? [node, entry].map(value => value.replaceAll('\\', '/')) : [node, entry];
-  const files = [{ name: 'caveat', content: '#!/bin/sh\nexec ' + posix.map(quote).join(' ') + ' "$@"\n' }];
+  const missing = 'Caveat requires Node 22.16+ (22.x) or Node 24+. Install a current Node LTS from https://nodejs.org/en/download, then reopen your AI client.';
+  const checkNode = node === 'node' ? 'command -v node >/dev/null 2>&1 || { echo ' + quote(missing) + ' >&2; exit 127; }\n' : '';
+  const files = [{ name: 'caveat', content: '#!/bin/sh\n' + checkNode + 'exec ' + posix.map(quote).join(' ') + ' "$@"\n' }];
   if (windows) {
     // shortcut: cmd bootstrap needs an ASCII Node path; reject other paths until a native Unicode launcher is adopted.
     if (/[^\x20-\x7e]/.test(node)) fail('unsupported_windows_node_path');
     // ASCII batch bytes cannot corrupt a Unicode entry path; the fixed Node child receives its absolute argv.
     const bootstrap = "const c=require('node:child_process').spawnSync(process.execPath,[Buffer.from('" + Buffer.from(entry).toString('base64') + "','base64').toString('utf8'),...process.argv.slice(1)],{stdio:'inherit'});if(c.error){console.error(c.error.message);process.exit(1)}process.exit(c.status===null?1:c.status)";
-    files.push({ name: 'caveat.cmd', content: '@echo off\r\n"' + node + '" -e "' + bootstrap + '" -- %*\r\nexit /b %errorlevel%\r\n' });
+    files.push({ name: 'caveat.cmd', content: '@echo off\r\n' + (node === 'node' ? 'where node >nul 2>nul\r\nif errorlevel 1 (echo ' + missing + ' 1>&2 & exit /b 127)\r\n' : '') + '"' + node + '" -e "' + bootstrap + '" -- %*\r\nexit /b %errorlevel%\r\n' });
     // ProcessStartInfo inherits native stdio; a PowerShell pipeline would decode bytes.
     // Quote for CreateProcess also on Windows PowerShell 5.1 (no ArgumentList).
     const psQuote = (value: string) => "'" + value.replaceAll("'", "''") + "'";
     const ps = [
       "$ErrorActionPreference = 'Stop'",
+      ...(node === 'node' ? ["if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw " + psQuote(missing) + " }"] : []),
       '$start = New-Object System.Diagnostics.ProcessStartInfo',
       '$start.UseShellExecute = $false',
       '$start.FileName = ' + psQuote(node),
@@ -81,7 +84,7 @@ function nativeIdentities(paths: string[]): NativeIdentity[] {
 
 export function managedShellPlan(registrationNode: string, binDir: string, options: ManagedDeploymentOptions = {}): ManagedShellPlan {
   const active = verifyManagedDeployment(options), windows = options.windows ?? isWindows();
-  literal(registrationNode, windows);
+  if (registrationNode !== 'node') literal(registrationNode, windows);
   if (!isAbsolute(binDir)) fail('absolute_bin_required');
   binDir = resolve(binDir);
   const entry = readRegular(active.launcher, 1024 * 1024);

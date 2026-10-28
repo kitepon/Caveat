@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+const semver = createRequire(new URL('../packages/core/package.json', import.meta.url))('semver');
 import { spawnCommandSync } from './process-command.mjs';
 
 const readJson = path => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
@@ -18,14 +20,10 @@ function compare(left, right) {
 }
 export function assertNodeAllowed(version) {
   parts(version);
-  for (const engine of [root.engines.node, cli.engines.node]) {
-    assert.match(engine, /^>=\d+(?:\.\d+){0,2}$/);
-    const floor = engine.slice(2).split('.');
-    while (floor.length < 3) floor.push('0');
-    assert.ok(compare(version, floor.join('.')) >= 0, `Node ${version} does not satisfy engines ${engine}`);
-  }
   const affected = contract.knownAffected.find(range => compare(version, range.from) >= 0 && compare(version, range.before) < 0);
   assert.ok(!affected, `Known affected Node ${version}: ${affected?.reason}; ${affected?.source}`);
+  for (const engine of [root.engines.node, cli.engines.node]) assert.ok(semver.satisfies(version, engine), `Node ${version} does not satisfy engines ${engine}`);
+
 }
 export function assertHostedToolchain(node, pnpm) {
   assertNodeAllowed(node);

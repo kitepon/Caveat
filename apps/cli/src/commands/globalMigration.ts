@@ -42,13 +42,13 @@ export async function runGlobalMigrationCommand(mode: 'plan' | 'execute', option
       const result = await planGlobalMigration(input, event => output({ schema: 'caveat.global_migration_event.v1', ...event }));
       output({ schema: 'caveat.global_migration_plan_result.v1', status: 'ready', planSha256: result.planSha256,
         packageVersion: result.plan.baseline.packageVersion, release: input.snapshot.expectedRelease, protectedFiles: input.snapshot.protectedFiles.length,
-        protectedAbsences: input.protectedAbsent!.length, filesystemWrites: 0, existingProcessOperations: 0 });
+        protectedAbsences: input.protectedAbsent!.length, processAssessment: result.processAssessment, residualRisks: result.processAssessment?.residualRisks, filesystemWrites: 0, existingProcessOperations: 0 });
     } else {
       const result = await executeGlobalMigration(input, options.expectedPlanSha256 ?? '', event => output({ ...event }));
       output({ ...result }); if (result.status !== 'completed') process.exitCode = 1;
     }
   } catch (error) {
-    output({ schema: 'caveat.global_migration_result.v1', status: 'stopped', phase: 'input-or-preflight',
+    output({ schema: 'caveat.global_migration_result.v1', status: 'stopped', phase: 'input-or-preflight', processAssessment: (error as { preflight?: unknown }).preflight ?? null,
       errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'),
       ...(mode === 'plan' ? { filesystemWrites: 0 } : {}), existingProcessOperations: 0 }); process.exitCode = 1;
   }

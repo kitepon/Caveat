@@ -33,6 +33,7 @@ export function commandTokens(command: string): string[] | null {
 
 /** installer が所有する実在アセット(node バイナリ / CLI スクリプト)だけを認める。 */
 export function isCanonicalAsset(path: unknown, expectedPath: string, mode: number): path is string {
+  if (path === 'node' && (expectedPath === 'node' || expectedPath === process.execPath)) return true;
   if (typeof path !== 'string' || !isAbsolute(path) || !isAbsolute(expectedPath)) return false;
   try { accessSync(path, mode); return statSync(path).isFile() && realpathSync(path) === realpathSync(expectedPath); } catch { return false; }
 }

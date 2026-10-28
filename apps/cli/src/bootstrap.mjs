@@ -2,6 +2,12 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (!(nodeMajor === 22 && nodeMinor >= 16 || nodeMajor >= 24)) {
+  process.stderr.write('[caveat:fatal] Node 22.16+ (22.x) or Node 24+ is required. Install a current Node LTS from https://nodejs.org/en/download, then run npm install -g caveat-cli and reopen your AI client.\n');
+  process.exit(1);
+}
+
 // Install the warning handler before loading any SQLite-dependent product module.
 process.removeAllListeners('warning');
 process.on('warning', (warning) => {

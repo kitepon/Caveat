@@ -37,7 +37,7 @@ function fixture() {
 }
 
 it('shell plan rejects relative nodes and shell-interpreted Windows path literals', () => {
-  for (const node of ['node','../node','/node\ncommand']) expect(()=>renderManagedShellWrappers(node,'/entry',false)).toThrow();
+  for (const node of ['relative/node','../node','/node\ncommand']) expect(()=>renderManagedShellWrappers(node,'/entry',false)).toThrow();
   for (const node of ['C:\\日本\\node.exe','node.exe','C:\\%NODE%\\node.exe','C:\\x&y\\node.exe','C:\\x"y\\node.exe']) expect(()=>renderManagedShellWrappers(node,'C:\\entry.mjs',true)).toThrow();
   const f=fixture();expect(()=>managedShellPlan(process.execPath,'relative',f.options)).toThrow('absolute_bin_required');expect(managedShellStatus(f.options).status).toBe('not-installed');f.assertProtected();
 },60000);

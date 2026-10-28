@@ -6,7 +6,7 @@
   "type": "module",
   "packageManager": "pnpm@10.0.0",
   "engines": {
-    "node": ">=22"
+    "node": "^22.16.0 || >=24.0.0"
   },
   "scripts": {
     "build": "node scripts/pnpm.mjs -r build",
@@ -44,8 +44,15 @@
   },
   "pnpm": {
     "supportedArchitectures": {
-      "os": ["linux", "darwin", "win32"],
-      "cpu": ["x64", "arm64"]
+      "os": [
+        "linux",
+        "darwin",
+        "win32"
+      ],
+      "cpu": [
+        "x64",
+        "arm64"
+      ]
     },
     "onlyBuiltDependencies": [
       "better-sqlite3",
