@@ -16,6 +16,7 @@ async function check() {
   const tally = values => { const counts = {}; for (const value of values) counts[value] = (counts[value] ?? 0) + 1; return counts; };
   const proof = (name, result) => {
     process.stdout.write('CAVEAT_PROCESS_RUNNER_PROOF ' + JSON.stringify({ name, status: result.status, confirmedExitedDuringRead: result.confirmedExitedDuringRead, counts: result.counts, errors: result.errors,
+      unobservableRuntimes: tally(result.records.filter(row => row.reason === 'foreign_runtime_arguments_unavailable').map(row => row.runtimeKind)),
       unknownReasons: tally(result.records.filter(row => row.classification === 'unknown').map(row => row.reason)),
       metadataByOwner: tally(result.records.map(row => row.observation.owner + ':' + (row.observation.missing.join(',') || 'complete'))),
       nativeIssues: tally(result.records.flatMap(row => row.observation.nativeIssues)),

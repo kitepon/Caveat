@@ -24,8 +24,14 @@ describe('native process bridge and Darwin layouts', () => {
     expect(() => decodeMacArguments(bytes)).toThrow('mac_argument_count');
     const count = Buffer.alloc(4); count.writeInt32LE(2);
     expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0unterminated')]))).toThrow('mac_argument_unterminated');
-    expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0SECRET_KEY=unrequested-value\0')]))).toThrow('mac_argument_environment_shaped');
+    expect(decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0NAME=declared-argument\0SECRET_KEY=environment\0')])).argv).toEqual(['node', 'NAME=declared-argument']);
     expect(() => decodeMacArguments(Buffer.alloc(1024 * 1024 + 1))).toThrow('mac_arguments_bound');
+  });
+  it('accepts the original relative execve path independently of the kernel image proof', () => {
+    const count = Buffer.alloc(4); count.writeInt32LE(2);
+    expect(decodeMacArguments(Buffer.concat([count, Buffer.from('node\0node\0KEY=value\0SECRET=environment\0')]))).toEqual({
+      savedExecutable: 'node', argv: ['node', 'KEY=value'],
+    });
   });
   it('decodes only the LP64 kinfo PID, birth and effective uid used for the foreign-owner proof', () => {
     const bytes = Buffer.alloc(648); bytes.writeInt32LE(42, 40); bytes.writeUInt32LE(501, 420);

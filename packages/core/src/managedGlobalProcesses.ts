@@ -6,7 +6,7 @@ import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from
 
 export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
 type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'foreign-user' | 'foreign-user-unobservable' | 'ancestor' | 'transient' | 'outside-observed-scope';
-export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string; imageDeleted?: boolean; runtime?: boolean; observation?: { owner: 'same' | 'foreign' | 'unknown'; missing: string[]; nativeIssues: string[] } };
+export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string; imageDeleted?: boolean; runtime?: boolean; runtimeKind?: 'node' | 'selected' | 'current-image' | 'interpreter-or-helper'; observation?: { owner: 'same' | 'foreign' | 'unknown'; missing: string[]; nativeIssues: string[] } };
 const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, '');
   return fold ? slash.toLowerCase() : slash;
@@ -76,7 +76,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     result.observation = {
       owner: knownOwner && observed.every(entry => entry.uid === ownUid) ? 'same' : knownOwner && observed.every(entry => entry.uid !== ownUid) ? 'foreign' : 'unknown',
       missing: [...new Set(observed.flatMap(entry => ['uid', 'birth', 'ppid', 'executable', 'argv'].filter(key => entry[key as keyof NativeProcessRecord] === null)))],
-      nativeIssues: [...new Set(observed.flatMap(row => [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode + (row.argumentFailure.decodeReason ? ':' + row.argumentFailure.decodeReason : '') + (row.argumentFailure.decodePosition ? ':' + row.argumentFailure.decodePosition : '') : null,
+      nativeIssues: [...new Set(observed.flatMap(row => [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode + (row.argumentFailure.decodeReason ? ':' + row.argumentFailure.decodeReason : '') : null,
         row.ownerFailure ? 'windows-owner:' + row.ownerFailure.stage + ':' + row.ownerFailure.nativeCode : null,
         row.ownerMethod ? 'windows-owner-method:' + row.ownerMethod.stage + ':' + row.ownerMethod.returnValue : null,
         row.kernelFailure ? 'darwin-kernel:' + row.kernelFailure.stage + ':' + row.kernelFailure.nativeCode : null,
@@ -91,6 +91,9 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       || (scope.runtimeExecutables ?? []).some(path => norm(path) === image)
       || row.executable?.dev === tables.selfExecutable.dev && row.executable?.ino === tables.selfExecutable.ino);
     result.runtime = isRuntime;
+    if (isRuntime) result.runtimeKind = /(?:^|\/)(?:node|nodejs)(?:\.exe)?$/.test(image!) ? 'node'
+      : (scope.runtimeExecutables ?? []).some(path => norm(path) === image) ? 'selected'
+      : row.executable?.dev === tables.selfExecutable.dev && row.executable?.ino === tables.selfExecutable.ino ? 'current-image' : 'interpreter-or-helper';
     const bound = (entry: NativeProcessRecord) => {
       const path = entry.executable ? norm(entry.executable.path).replace(/ \(deleted\)$/, '') : null;
       const argv = entry.argv?.map(norm);

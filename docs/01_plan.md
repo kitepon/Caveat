@@ -561,8 +561,8 @@ and verified close remain mandatory. Real-runner receipts aggregate metadata gap
 by owner relationship and native stage without exposing argv, image paths or SIDs.
 
 Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
-the executable with lsof text-file device/inode data; environment-shaped arguments
-are conservatively rejected when argument boundaries cannot be proven. Windows
+the executable with lsof text-file device/inode data. Darwin argv decoding uses
+the kernel argc, retaining NAME=value arguments while excluding trailing environment strings. Windows
 uses one owned CIM child with ordered progress frames and a 20-second deadline.
 Only a child created by the probe may be terminated. Exit without pipe closure
 does not establish completion. No privilege elevation or existing-process signals

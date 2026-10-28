@@ -7,7 +7,7 @@ import { createMacKernelReader } from './managedMacProcessNative.js';
 import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
-export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; identityBound?: true; decodeReason?: string; decodePosition?: 'argv0' | 'later' };
+export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; identityBound?: true; decodeReason?: string };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
   executable: ProcessExecutable | null; argv: string[] | null; state?: string;

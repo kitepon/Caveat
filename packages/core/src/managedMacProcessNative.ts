@@ -15,17 +15,11 @@ export function decodeMacArguments(bytes: Buffer) {
   let cursor = bytes.indexOf(0, 4);
   assert.ok(cursor > 4, 'mac_saved_executable_missing');
   const savedExecutable = decode(bytes.subarray(4, cursor));
-  assert.ok(savedExecutable.startsWith('/'), 'mac_saved_executable_invalid');
   while (cursor < bytes.length && bytes[cursor] === 0) cursor++;
   const argv: string[] = [];
   for (let index = 0; index < count; index++) {
     const end = bytes.indexOf(0, cursor);
     assert.ok(end >= cursor && end < bytes.length, 'mac_argument_unterminated');
-    // shortcut: environment-shaped arguments are rejected until argv boundaries can be proven without exec-path padding ambiguity.
-    const equals = bytes.indexOf(61, cursor);
-    if (!(equals < cursor || equals >= end || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(bytes.subarray(cursor, equals).toString('ascii')))) {
-      throw Object.assign(Error('mac_argument_environment_shaped'), { decodePosition: index === 0 ? 'argv0' : 'later' });
-    }
     argv.push(decode(bytes.subarray(cursor, end))); cursor = end + 1;
   }
   assert.ok(argv[0], 'mac_argv0_unavailable');
@@ -69,10 +63,8 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
     try { return { argv: decodeMacArguments(buffer.subarray(0, used)).argv }; }
     catch (error) {
       const message = error instanceof Error ? error.message : '';
-      const decodeReason = ['mac_argument_count', 'mac_saved_executable_missing', 'mac_saved_executable_invalid', 'mac_argument_unterminated', 'mac_argument_environment_shaped', 'mac_argv0_unavailable'].find(reason => message.includes(reason)) ?? 'utf8-or-invalid';
-      const position = (error as { decodePosition?: string })?.decodePosition;
-      return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true, decodeReason,
-        ...(position === 'argv0' || position === 'later' ? { decodePosition: position } : {}) } };
+      const decodeReason = ['mac_argument_count', 'mac_saved_executable_missing', 'mac_argument_unterminated', 'mac_argv0_unavailable'].find(reason => message.includes(reason)) ?? 'utf8-or-invalid';
+      return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true, decodeReason } };
     }
   } finally { buffer.fill(0); }
 }
