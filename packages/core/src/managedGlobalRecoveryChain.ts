@@ -108,7 +108,7 @@ export async function checkGlobalRecoveryProcesses(source: GlobalRecoverySnapsho
   const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)), runtimeExecutables: [plan.nodeProof.executable.canonical],
     binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: [...new Set([...(source.sourceRoots ?? [runDirectory]), target, ...plan.protectedObjects.map(row => row.path), ...plan.aliases.map(row => row.path), ...plan.absences.map(row => row.path)])] };
   const result = await preflightGlobalProcesses(scope, emit, collect);
-  if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result });
+  if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true });
   return result;
 }
 

@@ -104,7 +104,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
     const processCheck = async () => {
       const result = await preflightGlobalProcesses(scope, onEvent, collect);
       processAssessment = result;
-      if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result }); return result;
+      if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true }); return result;
     };
     const verifyProtected = () => {
       guard.assertCurrent(); runtime.verify();

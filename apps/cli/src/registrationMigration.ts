@@ -103,7 +103,7 @@ function scope(plan: Plan, roots: string[]): GlobalProcessScope {
 }
 async function freshProcesses(plan: Plan, roots: string[], preflight: Preflight, emit: Emit) {
   const result = await preflight(scope(plan, roots), event => emit({ phase: event.phase, event: event.event, pid: event.pid, runId: null }));
-  if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result });
+  if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true });
   return result;
 }
 function bindCurrent(plan: Plan, seed: Seed, model: Model, roots: string[], guard: Guard) {
@@ -354,7 +354,7 @@ function performMove(guard: Guard, journal: ReturnType<typeof createGlobalMutati
     try { verify(); } catch (error) { failure = error; }
   }
   const ref = writeGlobalPrivateEvidence(guard, join(root, run), 'state-' + journal.read().nextSequence + '.json', { schema: 'caveat.registration_move.v1', state: model, move });
-  const confirmed = move.status === 'moved';
+  const confirmed = move.status === 'moved' && (!failure || !!(failure as { readOnlyCheckFailed?: boolean }).readOnlyCheckFailed);
   journal.result(step, operation, confirmed ? 'confirmed' : 'unknown', ref.sha256);
   emit({ phase: step, event: confirmed ? 'completed' : 'unknown', runId: run, index });
   assert.ok(confirmed, 'registration_move_or_verification_unknown');

@@ -855,3 +855,20 @@ it('keeps confirmed npm-after state recoverable when a bound consumer appears af
   expect(fresh.status).toBe('ready');
   expect((await recoverGlobalMigration(run, digest, fresh.evidenceSha256!, () => {}, async () => tables())).status).toBe('restored');
 });
+
+it('records a known wrapper placement when a read-only runtime post-check fails', { timeout: 180000 }, async () => {
+  const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables()); let calls = 0;
+  try {
+    await removeFixtureWorking(session);
+    const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory, f.paths.root, session.plan.shellPlan,
+      async () => { if (++calls === 2) throw Object.assign(Error('fixture read-only runtime drift'), { readOnlyCheckFailed: true }); await session.engine.verifyCurrent(); },
+      session.plan.baseline.node, session.plan.nodeProof);
+    expect((await shell.install()).status).toBe('stopped');
+    expect(shell.snapshot().files[0]!.status).toBe('installed');
+    expect(session.journal.read().status).toBe('ready');
+    expect(session.journal.read().records.at(-1)).toMatchObject({ kind: 'result', outcome: 'confirmed' });
+  } finally { session.close(); }
+  const fresh = await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables());
+  expect(fresh.status).toBe('ready');
+  expect((await recoverGlobalMigration(session.runDirectory, session.planSha256, fresh.evidenceSha256!, () => {}, async () => tables())).status).toBe('restored');
+});

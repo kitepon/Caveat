@@ -58,7 +58,7 @@ describe('ordinary selected Node proof', () => {
     try {
       expect(calls).toBe(2); expect(node.proof.libraries[0]!.canonical).toBe(f.library); node.verify();
       if (isWindows()) expect(() => writeFileSync(f.library, 'changed library')).toThrow();
-      else { writeFileSync(f.library, 'changed library'); expect(node.verify).toThrow(); }
+      else { writeFileSync(f.library, 'changed library'); expect(node.verify).toThrowError(expect.objectContaining({ readOnlyCheckFailed: true })); }
     } finally { node.close(); }
   });
   it('refuses a changed dependency during the second probe before returning any proof', { timeout: 30000 }, async () => {

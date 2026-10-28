@@ -82,14 +82,16 @@ export function bindManagedNodeProof(proof: ManagedNodeProof, guard: Guard) {
     assert.deepEqual(token.identity, row.identity, 'managed_node_file_changed'); return { row, token };
   });
   const verify = () => {
-    guard.assertCurrent(); const directories = guard.directoryBindings();
-    assert.ok(Array.isArray(proof.directories) && proof.directories.length > 0 && proof.directories.length <= 512, 'managed_node_parent_binding_required');
-    for (const expected of proof.directories) assert.deepEqual(directories.find(row => row.path === expected.path), expected, 'managed_node_parent_changed');
-    for (const { row, token } of files) {
-      assert.equal(realpathSync(row.alias), row.canonical, 'managed_node_alias_changed');
-      assert.deepEqual(aliasRows(row.alias, row.canonical), row.aliasRows, 'managed_node_alias_identity_changed');
-      assert.deepEqual(guard.readRuntimeFile(token), row.identity, 'managed_node_file_changed');
-    }
+    try {
+      guard.assertCurrent(); const directories = guard.directoryBindings();
+      assert.ok(Array.isArray(proof.directories) && proof.directories.length > 0 && proof.directories.length <= 512, 'managed_node_parent_binding_required');
+      for (const expected of proof.directories) assert.deepEqual(directories.find(row => row.path === expected.path), expected, 'managed_node_parent_changed');
+      for (const { row, token } of files) {
+        assert.equal(realpathSync(row.alias), row.canonical, 'managed_node_alias_changed');
+        assert.deepEqual(aliasRows(row.alias, row.canonical), row.aliasRows, 'managed_node_alias_identity_changed');
+        assert.deepEqual(guard.readRuntimeFile(token), row.identity, 'managed_node_file_changed');
+      }
+    } catch (error) { if (error instanceof Error) Object.assign(error, { readOnlyCheckFailed: true }); throw error; }
   };
   verify(); return verify;
 }
