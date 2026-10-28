@@ -269,3 +269,38 @@ describe.skipIf(process.platform !== 'win32')('Windows retained protected owner'
     } finally { guard.close(); }
   });
 });
+
+
+describe.skipIf(process.platform === 'win32')('POSIX protected file pins', () => {
+  const groups = () => ({ user: () => 'fixture-owner', group: (gid: number) => ({ name: 'fixture-owner', gid, members: [] }),
+    namedGroup: () => null, primaryUsers: () => ({ uids: [process.geteuid!()] }) });
+  it.each([0o664, 0o666, 0o1666])('checks protected file mode %o without sticky exemption', async mode => {
+    const f = fixture(); chmodSync(join(f.source, 'leaf'), mode);
+    const guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), groups()));
+    try {
+      if (mode === 0o664) expect(guard.readRetainedFile(guard.retainTree(f.source, 'leaf', 'protected')).toString()).toBe('original bytes');
+      else expect(() => guard.retainTree(f.source, 'leaf', 'protected')).toThrow('global_guard_writable_leaf');
+    } finally { guard.close(); }
+  });
+  it('rejects a protected file owned by another ordinary user', async () => {
+    const f = fixture(), guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), groups(),
+      (path, uid) => path === join(f.source, 'leaf') ? 12345 : uid));
+    try { expect(() => guard.retainTree(f.source, 'leaf', 'protected')).toThrow('global_guard_foreign_leaf'); }
+    finally { guard.close(); }
+  });
+  it('memoizes membership once per gid while checking every object mode', async () => {
+    const f = fixture(); chmodSync(f.source, 0o775); chmodSync(join(f.source, 'leaf'), 0o664);
+    let groupCalls = 0, primaryCalls = 0; const data = groups();
+    const driver = await createPosixGlobalGuard(globalFilesystemNativeSpec(), { ...data,
+      group(gid) { groupCalls++; return data.group(gid); }, primaryUsers() { primaryCalls++; return data.primaryUsers(); } });
+    const parent = driver.openRoot(f.source), file = driver.openChild(parent, 'leaf', 'protected')!;
+    try {
+      driver.snapshot(parent); driver.snapshot(file); driver.snapshot(parent);
+      chmodSync(join(f.source, 'leaf'), 0o666); expect(() => driver.snapshot(file)).toThrow('global_guard_writable_leaf');
+      chmodSync(join(f.source, 'leaf'), 0o664); driver.snapshot(file);
+      chmodSync(f.source, 0o777); expect(() => driver.snapshot(parent)).toThrow('global_guard_writable_parent');
+      chmodSync(f.source, 0o775); driver.snapshot(parent);
+      expect(groupCalls).toBe(1); expect(primaryCalls).toBe(1);
+    } finally { driver.close(file); driver.close(parent); }
+  });
+});

@@ -42,10 +42,10 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
       assert.ok(Buffer.from(JSON.stringify(value) + '\n').equals(bytes), 'native_shell_manifest_noncanonical');
       assert.deepEqual(value as unknown, selected, 'native_shell_manifest_changed');
       fields(value, ['schema', 'node', 'registrationNode', 'launcher', 'entrySha256', 'runtimeSha256', 'binDir', 'windows', 'binIdentity', 'files']);
-      const pointer = guard.retainTree(root, 'active.json', 'protected'), metadata = guard.retainTree(dirname(active.packageRoot), 'manifest.json', 'protected');
+      const pointer = guard.retainTree(root, 'active.json'), metadata = guard.retainTree(dirname(active.packageRoot), 'manifest.json');
       assert.deepEqual(JSON.parse(guard.readPersistedJournal(root, 'active.json').toString('utf8')), active.pointer, 'native_shell_pointer_changed');
       assert.equal(guard.readTree(metadata)[0]!.identity.contentSha256, active.pointer.manifestSha256, 'native_shell_active_manifest_changed');
-      const payload = guard.retainTree(dirname(active.packageRoot), 'package', 'protected'), entry = guard.retainTree(root, 'entry', 'protected');
+      const payload = guard.retainTree(dirname(active.packageRoot), 'package'), entry = guard.retainTree(root, 'entry');
       const payloadRows = guard.readTree(payload), entryRows = guard.readTree(entry);
       const files = payloadRows.filter(row => row.identity.kind !== 'directory').map(row => {
         assert.equal(row.identity.kind, 'file', 'native_shell_payload_link');
@@ -69,7 +69,7 @@ export async function managedShellStatusCurrent(options: ManagedDeploymentOption
         assert.equal(file.name, expected.name, 'native_shell_file_scope_invalid');
         const actual = guard.observe(value.binDir, file.name);
         if (!actual || !isDeepStrictEqual(actual, file.identity) || actual.kind !== 'file' || actual.contentSha256 !== expected.sha256) { changed ??= 'wrapper_identity_or_bytes_changed'; continue; }
-        held.push(guard.retainTree(value.binDir, file.name, 'protected'));
+        held.push(guard.retainTree(value.binDir, file.name));
       }
       for (const tree of [pointer, metadata, payload, entry, ...held]) guard.readTree(tree);
       assert.ok(guard.readPersistedJournal(directory, 'manifest.json').equals(bytes), 'native_shell_manifest_changed');

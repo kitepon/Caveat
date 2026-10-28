@@ -6,10 +6,27 @@ import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
   directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; fullSync?: number; aclType?: number };
-type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string; path: string };
+type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string; pin?: boolean; path: string };
 
-export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGroupLookup): Promise<NativeGuardDriver> {
+export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGroupLookup, readOwner: (path: string, uid: number) => number = (_path, uid) => uid): Promise<NativeGuardDriver> {
   const koffi = await import('koffi'), lib = koffi.load(spec.library), groups = groupLookup ?? await nativePosixGroups();
+  const groupAssessments = new Map<bigint, ReturnType<typeof posixParentGroup>>();
+  const writeAssessment = (stat: Pick<import('node:fs').BigIntStats, 'mode' | 'gid'>, directory: boolean) => {
+    if ((directory && (stat.mode & 0o1000n) !== 0n) || (stat.mode & 0o022n) === 0n) return { allowed: true, group: null };
+    let assessment = groupAssessments.get(stat.gid);
+    if (!assessment) {
+      assessment = posixParentGroup({ mode: 0o020n, gid: stat.gid }, groups);
+      groupAssessments.set(stat.gid, assessment);
+    }
+    return (stat.mode & 0o002n) !== 0n ? { ...assessment, allowed: false } : assessment;
+  };
+  const permissionError = (reason: string, ref: Ref, stat: import('node:fs').BigIntStats,
+    assessment: { group: string | null; error?: string } = { group: null }) => Object.assign(new assert.AssertionError({ message: reason }), {
+    diagnostic: { reason, path: ref.path, mode: '0' + (stat.mode & 0o7777n).toString(8), uid: String(stat.uid), gid: String(stat.gid),
+      group: assessment.group, lookupError: assessment.error, remedy: reason === 'global_guard_foreign_leaf'
+        ? 'Review ownership and use the original owning account.' : (stat.mode & 0o002n) !== 0n
+          ? 'Remove other write permission with chmod o-w on this path.' : 'Review group membership or remove group write permission with chmod g-w on this path.' },
+  });
   const fullSync = spec.fullSync === undefined ? null : lib.func('int fcntl(int fd, int command)');
   const flush = (fd: number) => {
     fsyncSync(fd);
@@ -91,18 +108,19 @@ export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGrou
     const stat = fstatSync((value as Ref).fd, { bigint: true });
     assert.ok(stat.isDirectory() || stat.isFile() || stat.isSymbolicLink(), 'global_guard_special_leaf');
     if ((value as Ref).mutation) {
-      assert.equal(Number(stat.uid), process.getuid?.(), 'global_guard_foreign_leaf');
+      assert.equal(readOwner((value as Ref).path, Number(stat.uid)), process.getuid?.(), 'global_guard_foreign_leaf');
       assert.ok(stat.isSymbolicLink() || (stat.mode & 0o022n) === 0n, 'global_guard_writable_leaf');
+    }
+    if ((value as Ref).pin && stat.isFile()) {
+      const owner = readOwner((value as Ref).path, Number(stat.uid));
+      if (owner !== 0 && owner !== process.getuid?.()) throw permissionError('global_guard_foreign_leaf', value as Ref, stat);
+      const assessment = writeAssessment(stat, false);
+      if (!assessment.allowed) throw permissionError('global_guard_writable_leaf', value as Ref, stat, assessment);
     }
     if (stat.isDirectory()) {
       assert.ok(stat.uid === 0n || Number(stat.uid) === process.getuid?.(), 'global_guard_foreign_parent');
-      const assessment = posixParentGroup(stat, groups);
-      if (!assessment.allowed) {
-        const error = new assert.AssertionError({ message: 'global_guard_writable_parent' });
-        throw Object.assign(error, { diagnostic: { reason: 'global_guard_writable_parent', path: (value as Ref).path,
-          mode: '0' + (stat.mode & 0o7777n).toString(8), uid: String(stat.uid), gid: String(stat.gid), group: assessment.group, lookupError: assessment.error,
-          remedy: (stat.mode & 0o002n) !== 0n ? 'Remove other write permission with chmod o-w on this path.' : 'Review group membership or remove group write permission with chmod g-w on this path.' } });
-      }
+      const assessment = writeAssessment(stat, true);
+      if (!assessment.allowed) throw permissionError('global_guard_writable_parent', value as Ref, stat, assessment);
     }
     let contentSha256: string | undefined;
     if (stat.isFile() && !metadataOnly) {
@@ -146,7 +164,7 @@ export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGrou
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      const ref = { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name, path: join((parent as Ref).path, name) };
+      const ref = { fd, mutation: purpose === 'mutation', pin: purpose === 'protected', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name, path: join((parent as Ref).path, name) };
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,

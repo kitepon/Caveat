@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { userInfo } from 'node:os';
-import { nativePosixGroups, posixParentGroup, type PosixGroupLookup } from '../src/managedPosixGroups.js';
+import { nativePosixGroups, posixParentGroup, passwdEnumerationState, type PosixGroupLookup } from '../src/managedPosixGroups.js';
 const own = { name: 'alice', gid: 1000, members: [] as string[] };
 const lookup = (changes: Partial<PosixGroupLookup> = {}): PosixGroupLookup => ({ user: () => 'alice', group: () => own,
   namedGroup: () => null, primaryUsers: () => ({ uids: [1000] }), ...changes });
@@ -21,4 +21,12 @@ describe('POSIX parent writers', () => {
     expect(data.user(uid)).toBe(userInfo().username); expect(data.group(gid)?.gid).toBe(gid);
     expect(data.primaryUsers(gid)).toEqual({ uids: expect.arrayContaining([uid]) });
   });
+});
+
+describe('passwd enumeration result', () => {
+  it.each([0, 2])('accepts ENOENT end with errno %s', errno => expect(passwdEnumerationState(2, false, errno)).toBe('end'));
+  it('accepts a zero-code empty end', () => expect(passwdEnumerationState(0, false, 2)).toBe('end'));
+  it('rejects another native error', () => expect(passwdEnumerationState(5, false, 5)).toBe('error'));
+  it('rejects errno accompanying an entry', () => expect(passwdEnumerationState(0, true, 2)).toBe('error'));
+  it('accepts a clean entry', () => expect(passwdEnumerationState(0, true, 0)).toBe('entry'));
 });

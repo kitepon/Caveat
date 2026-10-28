@@ -11,6 +11,7 @@ export type PosixGroupLookup = {
 /** NSS lookups, including directory services; never read the local group file directly. */
 export async function nativePosixGroups(): Promise<PosixGroupLookup> {
   const koffi = await import('koffi'), lib = koffi.load(process.platform === 'darwin' ? null : 'libc.so.6');
+  const passwdType = koffi.struct({ name: 'void *', password: 'void *', uid: 'uint32_t', gid: 'uint32_t' });
   const groupType = koffi.struct({ name: 'str', password: 'str', gid: 'uint32_t', members: 'void *' });
   const byId = lib.func('int getgrgid_r(uint32_t gid, _Out_ void *record, _Out_ void *buffer, size_t size, _Out_ void **result)');
   const byName = lib.func('int getgrnam_r(const char *name, _Out_ void *record, _Out_ void *buffer, size_t size, _Out_ void **result)');
@@ -45,10 +46,11 @@ export async function nativePosixGroups(): Promise<PosixGroupLookup> {
           for (let index = 0; index <= 65536; index++) {
             const result: unknown[] = [null];
             koffi.errno(0); const code = Number(next(record, buffer, buffer.length, result)), errno = koffi.errno();
-            if (!result[0] && (code === 0 || code === 2) && errno === 0) return { uids };
-            if (code !== 0 || !result[0] || errno !== 0) return { uids, error: 'passwd_enumeration_failed_' + code + '_' + errno };
+            if (passwdEnumerationState(code, !!result[0], errno) === 'end') return { uids };
+            if (passwdEnumerationState(code, !!result[0], errno) === 'error') return { uids, error: 'passwd_enumeration_failed_' + code + '_' + errno };
             if (index === 65536) return { uids, error: 'passwd_enumeration_bound' };
-            if (record.readUInt32LE(20) === gid) uids.push(record.readUInt32LE(16));
+            const entry = koffi.decode(record, passwdType) as { uid: number; gid: number };
+            if (entry.gid === gid) uids.push(entry.uid);
           }
         } finally { end(); }
       } catch { return { uids, error: 'passwd_enumeration_unavailable' }; }
@@ -72,4 +74,10 @@ export function posixParentGroup(stat: Pick<BigIntStats, 'mode' | 'gid'>, lookup
   // shortcut: directory services that disable enumeration are not detected, upgrade when a host uses sssd/LDAP
   const primary = lookup.primaryUsers(gid);
   return { allowed: !primary.error && primary.uids.includes(uid) && primary.uids.every(value => value === uid), group: group.name, error: primary.error };
+}
+
+/** ENOENT is an end marker even when libc also leaves it in errno. */
+export function passwdEnumerationState(code: number, hasResult: boolean, errno: number) {
+  if (!hasResult && (code === 0 || code === 2)) return 'end';
+  return code !== 0 || !hasResult || errno !== 0 ? 'error' : 'entry';
 }
