@@ -34,6 +34,24 @@ function probe(api, file) {
   }
   return result;
 }
+function nativeResourceQuery(api, file) {
+  const rm = api.koffi.load('rstrtmgr.dll'); assert.equal(api.koffi.sizeof('void *'), 8);
+  const start = rm.func('uint32_t __stdcall RmStartSession(_Out_ uint32_t *handle, uint32_t flags, _Out_ void *key)');
+  const register = rm.func('uint32_t __stdcall RmRegisterResources(uint32_t handle, uint32_t count, const void *files, uint32_t apps, void *processes, uint32_t services, void *names)');
+  const list = rm.func('uint32_t __stdcall RmGetList(uint32_t handle, _Out_ uint32_t *needed, _Inout_ uint32_t *count, void *apps, _Out_ uint32_t *reasons)');
+  const end = rm.func('uint32_t __stdcall RmEndSession(uint32_t handle)');
+  const handle = [0], key = Buffer.alloc(66), result = { stage: 'start', code: Number(start(handle, 0, key)), endCode: null, needed: 0 };
+  if (result.code) return result;
+  try {
+    const name = Buffer.from(file + '\0', 'utf16le'), names = Buffer.alloc(8); names.writeBigUInt64LE(api.koffi.address(name));
+    result.stage = 'register'; result.code = Number(register(handle[0], 1, names, 0, null, 0, null));
+    assert.equal(name.at(-1), 0); // Keep the name buffer live through the native call.
+    if (result.code) return result;
+    const needed = [0], count = [0], reasons = [0];
+    result.stage = 'list'; result.code = Number(list(handle[0], needed, count, null, reasons)); result.needed = Number(needed[0]);
+    return result;
+  } finally { result.endCode = Number(end(handle[0])); }
+}
 async function holder(kind, file) {
   let release;
   if (kind === 'open') { const fd = openSync(file, 'r'); release = () => closeSync(fd); }
@@ -73,16 +91,17 @@ export async function checkWindowsObjectOwnership(root) {
   const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
   const original = [hash(file), hash(image)];
   for (const kind of ['open', 'mapping', 'image']) {
-    const path = kind === 'image' ? image : file, normal = probe(api, path);
+    const path = kind === 'image' ? image : file, normal = probe(api, path), normalResource = nativeResourceQuery(api, path);
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), '--hold', kind, path], { stdio: ['ignore', 'ignore', 'pipe', 'ipc'], windowsHide: true });
     child.stderr.resume();
     let held, released;
     try {
       const ready = await deadline(Promise.race([once(child, 'message'), once(child, 'exit').then(() => { throw Error('owned_object_holder_exited'); })]), 'owned_object_holder_ready_deadline');
-      assert.equal(ready[0], 'ready'); held = probe(api, path);
+      assert.equal(ready[0], 'ready'); held = probe(api, path); const heldResource = nativeResourceQuery(api, path);
       const closed = once(child, 'close'); child.send('close'); await deadline(closed, 'owned_object_holder_close_deadline');
       assert.equal(child.exitCode, 0); released = probe(api, path);
       process.stdout.write('CAVEAT_WINDOWS_OBJECT_PROOF ' + JSON.stringify({ kind, normal, held, released, ownHolderClosed: true,
+        normalResource, heldResource, releasedResource: nativeResourceQuery(api, path),
         identityBoundToOwnedChild: true, existingProcessOperations: 0, productReadiness: 'not-qualified' }) + '\n');
       assert.deepEqual(normal, { read: 0, readDelete: 0, readWrite: 0 }, 'owned_object_normal_not_available');
       assert.deepEqual(released, normal, 'owned_object_did_not_release');
