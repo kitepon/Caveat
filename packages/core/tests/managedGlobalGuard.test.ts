@@ -304,3 +304,34 @@ describe.skipIf(process.platform === 'win32')('POSIX protected file pins', () =>
     } finally { driver.close(file); driver.close(parent); }
   });
 });
+
+
+describe.skipIf(process.platform === 'win32')('POSIX mutation root group admission', () => {
+  it.each([
+    ['directory', 0o775, [], true], ['directory', 0o777, [], false], ['directory', 0o775, ['another-user'], false],
+    ['file', 0o664, [], true], ['file', 0o666, [], false], ['file', 0o1666, [], false],
+  ] as const)('checks %s mode %o and members %j', async (kind, mode, members, allowed) => {
+    const f = fixture(), file = kind === 'directory' ? f.source : join(f.source, 'leaf'); chmodSync(file, mode);
+    const parent = kind === 'directory' ? f.root : f.source, name = kind === 'directory' ? 'source' : 'leaf';
+    const guard = bindGlobalPathGuard([parent, f.backup], await createPosixGlobalGuard(globalFilesystemNativeSpec(), {
+      user: () => 'fixture-owner', group: gid => ({ name: 'fixture-owner', gid, members: [...members] }),
+      namedGroup: () => null, primaryUsers: () => ({ uids: [process.geteuid!()] }),
+    }));
+    try {
+      if (allowed) {
+        const held = guard.retainTree(parent, name);
+        expect(guard.moveTreeNoReplace(held, f.backup, 'original').status).toBe('moved');
+        expect(statSync(join(f.backup, 'original')).mode & 0o7777).toBe(mode);
+      } else {
+        try { guard.retainTree(parent, name); throw Error('accepted unsafe mutation'); }
+        catch (error) { expect(error).toMatchObject({ message: 'global_guard_writable_leaf', diagnostic: { path: file, mode: '0' + mode.toString(8) } }); }
+      }
+    } finally { guard.close(); }
+  });
+  it('still rejects a mutation object owned by another user', async () => {
+    const f = fixture(), guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), undefined,
+      (path, uid) => path === join(f.source, 'leaf') ? process.getuid!() + 1 : uid));
+    try { expect(() => guard.retainTree(f.source, 'leaf')).toThrow('global_guard_foreign_leaf'); }
+    finally { guard.close(); }
+  });
+});

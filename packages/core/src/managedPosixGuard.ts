@@ -125,8 +125,11 @@ export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGrou
     const stat = fstatSync((value as Ref).fd, { bigint: true });
     assert.ok(stat.isDirectory() || stat.isFile() || stat.isSymbolicLink(), 'global_guard_special_leaf');
     if ((value as Ref).mutation) {
-      assert.equal(readOwner((value as Ref).path, Number(stat.uid)), process.getuid?.(), 'global_guard_foreign_leaf');
-      assert.ok(stat.isSymbolicLink() || (stat.mode & 0o022n) === 0n, 'global_guard_writable_leaf');
+      if (readOwner((value as Ref).path, Number(stat.uid)) !== process.getuid?.()) throw permissionError('global_guard_foreign_leaf', value as Ref, stat);
+      if (!stat.isSymbolicLink()) {
+        const assessment = writeAssessment(stat, stat.isDirectory());
+        if (!assessment.allowed) throw permissionError('global_guard_writable_leaf', value as Ref, stat, assessment);
+      }
     }
     if ((value as Ref).pin && stat.isFile()) {
       const owner = readOwner((value as Ref).path, Number(stat.uid));
