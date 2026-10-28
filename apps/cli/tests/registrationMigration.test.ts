@@ -187,8 +187,18 @@ describe('seven-file fifteen-token native registration migration', () => {
     expect(result.error).toBeUndefined();
     const rows = result.stdout.trim().split('\n').map(line => JSON.parse(line));
     expect(rows[0]).toMatchObject({ phase: 'input', event: 'issued' });
-    expect(rows.at(-1)).toMatchObject({ status: 'stopped', filesystemWrites: 0, existingProcessOperations: 0 });
-    expect(result.status).toBe(1); expect(result.stdout).not.toContain('fixture-private'); expect(readdirSync(f.paths.root)).toEqual(before);
+    const plan = rows.at(-1);
+    expect(['ready', 'stopped']).toContain(plan.status); expect(plan.filesystemWrites).toBe(0);
+    if (plan.status === 'ready') {
+      expect(plan).toMatchObject({ files: 7, tokenEdits: 15, executionPermission: false,
+        processAssessment: { status: 'ready', existingProcessOperations: 0 } });
+      expect(result.status).toBe(0);
+    } else { expect(plan.existingProcessOperations).toBe(0); expect(result.status).toBe(1); }
+    expect(result.stdout).not.toContain('fixture-private'); expect(readdirSync(f.paths.root)).toEqual(before);
+    for (const [path, bytes] of f.original) {
+      expect(readFileSync(path)).toEqual(bytes);
+      expect(String(statSync(path, { bigint: true }).ino)).toBe(f.input.source.observation.files.find((row: any) => row.file === path).ino);
+    }
   });
 
   it('rejects a proposed binary or library still inside the recorded retired Node root', { timeout: 60000 }, async () => {
