@@ -463,7 +463,7 @@ digestはprivate限定。元URLを返さなくても辞書推測を防げると�
 
 ## 最低Nodeと通常launcher
 
-製品の公開下限はNode22.5以降。SQLiteがstartup flagを必要とするruntimeでは、
+製品の依存範囲はNode22.16以上の22.x、またはNode24以上。SQLiteがstartup flagを必要とするruntimeでは、
 `dist/caveat.js`がbuiltinの可用性を確認し、必要な場合だけ同じNode/argv/cwd/env/stdioで一度起動し直す。
 入口は`apps/cli/src/bootstrap.mjs`をclean build後にそのままcopyして所有する。
 追加flagは製品launcherが所有し、試験又は利用者設定だけを変更して下限対応済みとしない。
