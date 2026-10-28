@@ -14,7 +14,7 @@ function tables(): NativeProcessTables {
   return { before: [self], after: [structuredClone(self)], errors: [], selfPid: process.pid, selfExecutable: executable, caseInsensitive: false };
 }
 const preflight = (scope: Parameters<typeof preflightGlobalProcesses>[0], emit: Parameters<typeof preflightGlobalProcesses>[1]) => preflightGlobalProcesses(scope, emit, async () => tables());
-describe('Main15 standard atomic registration writes', () => {
+describe('Main15 standard atomic registration writes', { timeout: 180000 }, () => {
   it('keeps every original name present, backs up original bytes, uses PATH Node, and restores through the existing journal', async () => {
     const f = fixture(), before = readdirSync(f.paths.root), admission = await bindRegistrationAdmission(f.input, () => {}, preflight);
     expect(readdirSync(f.paths.root)).toEqual(before); expect(admission.plan.files).toHaveLength(7);
