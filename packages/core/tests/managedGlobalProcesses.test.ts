@@ -18,6 +18,16 @@ function tables(...others: NativeProcessRecord[]): NativeProcessTables {
     selfExecutable: self.executable!, caseInsensitive: false };
 }
 describe('global process assessment', () => {
+  it('validates Windows protected paths and native 128-bit file identities without accepting zero or malformed IDs', () => {
+    const winScope = { packageRoot: 'C:\\global\\caveat', npmRoot: 'C:\\runtime\\npm', binAliases: [] };
+    const proof = { objects: [winScope.packageRoot, winScope.npmRoot].map(path => ({ path, originalPath: path, dev: '1', ino: 'abcdef0123456789abcdef0123456789' })), absent: [], postMutation: false };
+    const data = tables(record(20)); data.caseInsensitive = true;
+    expect(assessGlobalProcesses(winScope, data, proof).status).toBe('ready');
+    for (const ino of ['0'.repeat(32), 'a'.repeat(31), 'not-a-file-id']) {
+      const bad = structuredClone(proof); bad.objects[0]!.ino = ino;
+      expect(() => assessGlobalProcesses(winScope, data, bad)).toThrow('process_protected_objects_invalid');
+    }
+  });
   it('assesses a configuration-only scope without inventing a package root or excluding its own executable', () => {
     const scope = { binAliases: [], protectedPaths: ['/profile/.claude.json'], runtimeExecutables: ['/runtime/node'] };
     expect(assessGlobalProcesses(scope, tables(record(20)))).toMatchObject({ status: 'ready', consumers: 0 });

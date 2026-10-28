@@ -14,7 +14,7 @@ const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, '');
   return fold ? slash.toLowerCase() : slash;
 };
-const absolute = (value: string) => value.startsWith('/') || /^[a-z]:\//i.test(value);
+const absolute = (value: string) => value.startsWith('/') || /^[a-z]:[\\/]/i.test(value);
 function validateScope(scope: GlobalProcessScope) {
   assert.ok(!scope.protectedPaths || Array.isArray(scope.protectedPaths) && scope.protectedPaths.length <= 64, 'process_protected_scope_bound');
   assert.ok(!scope.runtimeExecutables || Array.isArray(scope.runtimeExecutables) && scope.runtimeExecutables.length <= 8, 'process_runtime_scope_bound');
@@ -27,7 +27,7 @@ function validateScope(scope: GlobalProcessScope) {
 function validateProtection(scope: GlobalProcessScope, proof: GlobalProcessProtection) {
   assert.ok(Array.isArray(proof.objects) && proof.objects.length > 0 && proof.objects.length <= 400000
     && proof.objects.every(row => absolute(row.path) && absolute(row.originalPath) && !/[\x00-\x1f]/.test(row.path + row.originalPath)
-      && /^\d+$/.test(row.dev) && /^[1-9]\d*$/.test(row.ino)), 'process_protected_objects_invalid');
+      && /^\d+$/.test(row.dev) && /^(?:[1-9]\d*|[0-9a-f]{32})$/.test(row.ino) && !/^0+$/.test(row.ino)), 'process_protected_objects_invalid');
   assert.ok(!proof.mutationPaths || proof.mutationPaths.length <= 256 && proof.mutationPaths.every(absolute), 'process_mutation_scope_invalid');
   assert.equal(typeof proof.postMutation, 'boolean', 'process_protection_phase_invalid');
   assert.ok(Array.isArray(proof.absent) && proof.absent.length <= 10000 && proof.absent.every(absolute), 'process_protected_absences_invalid');
