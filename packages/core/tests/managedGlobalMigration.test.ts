@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, chmodSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, chmodSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync, truncateSync, openSync, writeSync, closeSync } from 'node:fs';
 import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,9 @@ import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPat
 import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platform.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 import type { NativeProcessTables } from '../src/managedProcessNative.js';
-import { inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
+import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
+import { openGlobalPathGuard } from '../src/managedGlobalGuard.js';
+import { snapshotGlobalTree } from '../src/managedGlobalSnapshot.js';
 import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
 
@@ -53,6 +55,28 @@ function fixture() {
   return { root, profile, prefix, globalRoot, packageRoot, binDirectory, paths, config, input };
 }
 describe('product global migration caller', () => {
+  it('observes large unrelated globals during admission, mutation checks and recovery without broadening retained trees', { timeout: 60000 }, async () => {
+    const f = fixture(), file = join(f.globalRoot, 'other/index.js');
+    truncateSync(file, 129 * 1024 * 1024);
+    expect(() => snapshotGlobalTree(join(f.globalRoot, 'other'))).toThrow('tree_byte_bound');
+    const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    try {
+      expect(existsSync(f.paths.lock)).toBe(false);
+      expect(admission.plan.baseline.otherGlobals.find(row => row.relativePath === 'other/index.js')).toMatchObject({ kind: 'file', size: String(129 * 1024 * 1024) });
+      expect(admission.plan.baseline.otherGlobals.every(row => row.sha256 === undefined)).toBe(true);
+      await admission.verify();
+      const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(admission.plan, f.paths.root));
+      try {
+        const protectedState = bindGlobalRecoveryProtected(admission.plan, guard);
+        protectedState.verify();
+        const before = statSync(file), fd = openSync(file, 'r+');
+        try { writeSync(fd, Buffer.from('changed'), 0, 7, 128 * 1024 * 1024); } finally { closeSync(fd); }
+        expect(statSync(file).size).toBe(before.size);
+        await expect(admission.verify()).rejects.toThrow('global_migration_other_globals_changed');
+        expect(() => protectedState.verify()).toThrow('global_recovery_protected_state_changed');
+      } finally { guard.close(); }
+    } finally { admission.close(); }
+  });
   it('connects fresh baseline checks to original preservation, working copies and exact restoration', { timeout: 60000 }, async () => {
     const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
     const pointer = readFileSync(f.paths.pointer), config = readFileSync(f.config);

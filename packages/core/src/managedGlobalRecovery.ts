@@ -79,7 +79,7 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
     }
     for (const [step, observed, expected] of [
       ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
-      ['other-globals', () => snapshotGlobalTree(plan.globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'] }).filter(row => row.relativePath), plan.baseline.otherGlobals],
+      ['other-globals', () => snapshotGlobalTree(plan.globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'], metadataOnly: true }).filter(row => row.relativePath), plan.baseline.otherGlobals],
     ] as const) {
       try { assert.deepEqual(observed(), expected); checks.push({ step, state: 'known' }); } catch { checks.push({ step, state: 'unknown' }); }
     }

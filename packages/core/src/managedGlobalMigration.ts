@@ -114,7 +114,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       for (const object of protectedObjects) assert.deepEqual(guard.readTree(object.token), object.rows, 'global_migration_protected_changed');
       assert.equal(realpathSync(input.snapshot.npmAlias), baseline.npm.executable, 'global_migration_npm_alias_changed');
       assert.deepEqual(snapshotGlobalTree(npmRoot, { observeOnly: true, opaqueExternalLinks: true }), baseline.npm.tree, 'global_migration_npm_changed');
-      const others = snapshotGlobalTree(globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'] }).filter(row => row.relativePath);
+      const others = snapshotGlobalTree(globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'], metadataOnly: true }).filter(row => row.relativePath);
       assert.deepEqual(others, baseline.otherGlobals, 'global_migration_other_globals_changed');
       shell?.verifyOwned();
       if (!shell?.ownsManifest()) assert.equal(guard.observe(root, 'shell'), null, 'global_migration_shell_appeared');
