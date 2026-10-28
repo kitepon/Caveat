@@ -20,7 +20,7 @@ function literal(value: string, windows: boolean) {
 export function renderManagedShellWrappers(node: string, entry: string, windows = isWindows()) {
   if (node !== 'node') literal(node, windows); literal(entry, windows);
   const posix = windows ? [node, entry].map(value => value.replaceAll('\\', '/')) : [node, entry];
-  const missing = 'Caveat requires Node 22.16+ (22.x) or Node 24+. Install a current Node LTS from https://nodejs.org/en/download, then reopen your AI client.';
+  const missing = 'Caveat requires Node 22.16+ in the 22.x series or Node 24+. Install a current Node LTS from https://nodejs.org/en/download, then reopen your AI client.';
   const checkNode = node === 'node' ? 'command -v node >/dev/null 2>&1 || { echo ' + quote(missing) + ' >&2; exit 127; }\n' : '';
   const files = [{ name: 'caveat', content: '#!/bin/sh\n' + checkNode + 'exec ' + posix.map(quote).join(' ') + ' "$@"\n' }];
   if (windows) {

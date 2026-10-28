@@ -15,8 +15,8 @@ process.on('warning', (warning) => {
   process.stderr.write(`(${warning?.name}) ${warning?.message}\n`);
 });
 
-// Node 22.5 includes SQLite behind a startup flag. Own that requirement in the
-// shipped launcher, so ordinary npm-bin/MCP/hook commands keep the public floor.
+// Older supported Node releases keep SQLite behind a startup flag. Own that
+// requirement in the shipped launcher for npm-bin/MCP/hook commands.
 // Feature detection also covers other supported Node versions before unflagging.
 const hasSqlite = Boolean(process.getBuiltinModule?.('node:sqlite'));
 const flagPattern = /^--(?:no-)?experimental-sqlite(?:=|$)/;
