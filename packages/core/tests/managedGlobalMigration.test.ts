@@ -62,7 +62,7 @@ describe('product global migration caller', () => {
     const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
     try {
       expect(existsSync(f.paths.lock)).toBe(false);
-      expect(admission.plan.baseline.otherGlobals.find(row => row.relativePath === 'other/index.js')).toMatchObject({ kind: 'file', size: String(129 * 1024 * 1024) });
+      expect(admission.plan.baseline.otherGlobals.find(row => row.relativePath === join('other', 'index.js'))).toMatchObject({ kind: 'file', size: String(129 * 1024 * 1024) });
       expect(admission.plan.baseline.otherGlobals.every(row => row.sha256 === undefined)).toBe(true);
       await admission.verify();
       const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(admission.plan, f.paths.root));
