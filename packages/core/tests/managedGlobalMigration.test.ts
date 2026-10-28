@@ -55,27 +55,31 @@ function fixture() {
   return { root, profile, prefix, globalRoot, packageRoot, binDirectory, paths, config, input };
 }
 describe('product global migration caller', () => {
-  it('observes large unrelated globals during admission, mutation checks and recovery without broadening retained trees', { timeout: 60000 }, async () => {
+  it.each(['migration', 'recovery'] as const)('observes large unrelated globals during %s without broadening retained trees', { timeout: 60000 }, async mode => {
     const f = fixture(), file = join(f.globalRoot, 'other/index.js');
     truncateSync(file, 129 * 1024 * 1024);
     expect(() => snapshotGlobalTree(join(f.globalRoot, 'other'))).toThrow('tree_byte_bound');
     const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    let guard: Awaited<ReturnType<typeof openGlobalPathGuard>> | undefined;
     try {
       expect(existsSync(f.paths.lock)).toBe(false);
       expect(admission.plan.baseline.otherGlobals.find(row => row.relativePath === join('other', 'index.js'))).toMatchObject({ kind: 'file', size: String(129 * 1024 * 1024) });
       expect(admission.plan.baseline.otherGlobals.every(row => row.sha256 === undefined)).toBe(true);
       await admission.verify();
-      const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(admission.plan, f.paths.root));
-      try {
+      let verify = admission.verify;
+      if (mode === 'recovery') {
+        // Recovery starts after migration releases its native mutation pins.
+        admission.close();
+        guard = await openGlobalPathGuard(globalRecoveryGuardPaths(admission.plan, f.paths.root));
         const protectedState = bindGlobalRecoveryProtected(admission.plan, guard);
-        protectedState.verify();
-        const before = statSync(file), fd = openSync(file, 'r+');
-        try { writeSync(fd, Buffer.from('changed'), 0, 7, 128 * 1024 * 1024); } finally { closeSync(fd); }
-        expect(statSync(file).size).toBe(before.size);
-        await expect(admission.verify()).rejects.toThrow('global_migration_other_globals_changed');
-        expect(() => protectedState.verify()).toThrow('global_recovery_protected_state_changed');
-      } finally { guard.close(); }
-    } finally { admission.close(); }
+        verify = async () => { protectedState.verify(); };
+      }
+      await verify();
+      const before = statSync(file), fd = openSync(file, 'r+');
+      try { writeSync(fd, Buffer.from('changed'), 0, 7, 128 * 1024 * 1024); } finally { closeSync(fd); }
+      expect(statSync(file).size).toBe(before.size);
+      await expect(verify()).rejects.toThrow(mode === 'migration' ? 'global_migration_other_globals_changed' : 'global_recovery_protected_state_changed');
+    } finally { try { guard?.close(); } finally { admission.close(); } }
   });
   it('connects fresh baseline checks to original preservation, working copies and exact restoration', { timeout: 60000 }, async () => {
     const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
