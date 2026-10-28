@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,6 +9,7 @@ const denied: ProbeImpl = async () => ({ kind: 'denied', status: 404 });
 const readable: ProbeImpl = async () => ({ kind: 'anonymous-readable' });
 const indeterminate: ProbeImpl = async () => ({ kind: 'indeterminate', reason: 'offline' });
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
+afterEach(() => { vi.unstubAllEnvs(); });
 
 // initOwnSync commits inside a repo it creates itself (no local identity).
 // CI runners have no global git identity — inject one via env so git children
@@ -35,6 +36,10 @@ function makeFixture(): Fixture {
   const remote = join(root, 'remote.git');
   const own = join(root, 'own');
   const home = join(root, 'home');
+  const gitHome = join(root, 'git-home'); mkdirSync(gitHome, { mode: 0o700 });
+  // All direct Git and simple-git children use only this fixture's global configuration.
+  for (const key of Object.keys(process.env)) if (/^GIT_CONFIG/i.test(key)) vi.stubEnv(key, undefined);
+  vi.stubEnv('HOME', gitHome); vi.stubEnv('USERPROFILE', gitHome); vi.stubEnv('XDG_CONFIG_HOME', join(gitHome, 'config'));
   git(['init', '--bare', remote]);
   return {
     root, remote, own, home,

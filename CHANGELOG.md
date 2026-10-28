@@ -2,6 +2,14 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.9] — 2026-10-28 (candidate)
+
+- Add product-owned global-to-fixed-entry migration, identity-preserving quarantine and existing journal-based known-only recovery. Readable old-global consumers and external npm writers stop with PID, parent app and close/retry instructions; unreadable processes are counted. All three OS runners exercise ready, literal consumer stopped, and ready after close.
+- Replace the saved seven client files and fifteen exact Node tokens through backup copies and same-directory atomic writes. Preserve other bytes and values; detect readable Claude Code writers before starting and retain separately journaled known-only recovery.
+- Register the client environment's `node` command. Declare Node 22.16+ on 22.x or Node 24+ and include installation instructions in dependency errors, without Node/libnode migration proofs or a host shim.
+- Report old running MCP server PIDs and parent applications in deployment status. New servers record their loaded product version so in-place installation updates can still advise reopening the right client.
+- Keep original quarantine identity and scoped mutation validation. Remove process exception classifications, Windows lease qualification and Main retain/publish rename pairs.
+
 ## [0.21.8] — 2026-10-26 (candidate)
 
 - Fix CVE-2026-102826/102827/102828/102829 by pinning simple-git 4.0.2 and @simple-git/argv-parser 2.0.1, including conditional includes, abbreviated options, trailer commands and VISUAL editor detection.

@@ -1,6 +1,6 @@
 {
   "name": "caveat-cli",
-  "version": "0.21.8",
+  "version": "0.21.9",
   "description": "Long-term memory CLI for Claude Code, Codex, and Cursor (markdown + SQLite FTS5 + MCP + hooks)",
   "keywords": [
     "caveat",
@@ -16,7 +16,7 @@
   ],
   "license": "MIT",
   "author": {
-    "name": "Quo / \u30af\u30aa at kitepon.dev",
+    "name": "Quo / クオ at kitepon.dev",
     "url": "https://kitepon.dev/"
   },
   "homepage": "https://github.com/kitepon/Caveat#readme",
@@ -29,7 +29,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22.5"
+    "node": "^22.16.0 || >=24.0.0"
   },
   "bin": {
     "caveat": "dist/caveat.js"
@@ -45,7 +45,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "test": "vitest run",
+    "test": "node ../../packages/core/tests/run.mjs",
     "typecheck": "tsc --noEmit",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "node ../../scripts/verify-release-commit.mjs"

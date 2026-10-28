@@ -14,6 +14,55 @@ export function isWindows(platform: NodeJS.Platform = process.platform): boolean
   return platform === 'win32';
 }
 
+export function globalNpmLayout(globalRoot: string, platform: NodeJS.Platform = process.platform) {
+  const npmPaths = platform === 'win32' ? win32 : win32.posix;
+  if (npmPaths.basename(globalRoot) !== 'node_modules') throw Error('global_npm_layout_invalid');
+  if (platform === 'win32') return { prefix: npmPaths.dirname(globalRoot), binDirectory: npmPaths.dirname(globalRoot) };
+  if (platform === 'linux' || platform === 'darwin') {
+    if (npmPaths.basename(npmPaths.dirname(globalRoot)) !== 'lib') throw Error('global_npm_layout_invalid');
+    const prefix = npmPaths.dirname(npmPaths.dirname(globalRoot)); return { prefix, binDirectory: join(prefix, 'bin') };
+  }
+  throw Error('global_npm_platform_unsupported');
+}
+
+/** The owned npm child inherits no Node options, npm configuration or credentials. */
+export function globalNpmEnvironment(node: string, run: string, platform: NodeJS.Platform = process.platform) {
+  const npmPaths = platform === 'win32' ? win32 : win32.posix;
+  const env: NodeJS.ProcessEnv = { PATH: npmPaths.dirname(node), HOME: run, TMPDIR: run, TMP: run, TEMP: run, LC_ALL: 'C', LANG: 'C', CI: '1', NO_COLOR: '1' };
+  if (platform === 'win32') {
+    if (!process.env.SystemRoot || !win32.isAbsolute(process.env.SystemRoot)) throw Error('global_npm_system_root_required');
+    env.SystemRoot = process.env.SystemRoot; env.USERPROFILE = run; env.APPDATA = run; env.LOCALAPPDATA = run;
+  }
+  return env;
+}
+
+/** Native constants absent from Node's fs.constants; never infer them from another OS. */
+export function globalFilesystemNativeSpec(platform: NodeJS.Platform = process.platform, architecture: string = process.arch) {
+  if (platform === 'linux') return { windows: false as const, library: null,
+    closeOnExec: 0x80000, linkOpen: 0x220000, loopError: 40, rename: 'renameat2', noReplace: 1, directoryRead: 'readdir', directoryNameOffset: 19,
+    xattrListTail: [] as number[], xattrGetTail: [] as number[], linkAttributesViaProc: true, fullSync: undefined as number | undefined, aclType: undefined as number | undefined };
+  if (platform === 'darwin') return { windows: false as const, library: '/usr/lib/libSystem.B.dylib',
+    closeOnExec: 0x1000000, linkOpen: 0x200000, loopError: 62, rename: 'renameatx_np', noReplace: 4, directoryRead: architecture === 'x64' ? 'readdir$INODE64' : 'readdir', directoryNameOffset: 21,
+    xattrListTail: [0x20], xattrGetTail: [0, 0x20], linkAttributesViaProc: false, fullSync: 51, aclType: 0x100 };
+  if (platform === 'win32') return { windows: true as const };
+  throw Error('global_filesystem_platform_not_implemented');
+}
+
+export function windowsSystemPath(...parts: string[]) {
+  const root = process.env.SystemRoot;
+  if (!root || !win32.isAbsolute(root) || /[\x00-\x1f]/.test(root)) throw Error('process_system_root_unavailable');
+  return win32.join(root, 'System32', ...parts);
+}
+
+export function collectNativeGlobalProcesses<T>(readers: { linux: () => T; darwin: () => T; win32: (command: string) => T }, platform: NodeJS.Platform = process.platform): T {
+  if (platform === 'linux') return readers.linux();
+  if (platform === 'darwin') return readers.darwin();
+  if (platform === 'win32') {
+    return readers.win32(windowsSystemPath('WindowsPowerShell', 'v1.0', 'powershell.exe'));
+  }
+  throw Error('global_process_platform_not_implemented');
+}
+
 /**
  * env を考慮した Windows 判定。`OS=Windows_NT` は Windows native shell が必ず持つ
  * 環境変数で、テストが env 注入だけで Windows 経路を選べるようにする

@@ -165,7 +165,7 @@ See the repository README for the wire format and retry intervals.
 
 ## Requirements
 
-- Node 22.5+ (for built-in `node:sqlite`)
+- Node 22.16+ on 22.x, or Node 24+ (install a current LTS from https://nodejs.org/en/download)
 - WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
 - `git` for `caveat community add` / `caveat community pull`
 - Claude Code installed if you want Claude MCP / hooks integration. Without it, `caveat init --skip-claude` still provisions local state.

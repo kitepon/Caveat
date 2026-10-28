@@ -2,6 +2,7 @@
 import { spawnCommandSync } from './process-command.mjs';
 import { measureManagedHookTiming } from './managed-hook-timing.mjs';
 import { waitForFixtureWorkers } from './fixture-workers.mjs';
+import { nativeTargets } from './copy-managed-native-assets.mjs';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -53,6 +54,14 @@ try {
   for (const file of requiredFiles) {
     if (!entries.has(file)) throw new Error(`packed tarball missing ${file}`);
   }
+  for (const target of nativeTargets) {
+    const pkg = `package/dist/native/@koromix/koffi-${target}`;
+    if (!entries.has(pkg + '/package.json') || ![...entries.keys()].some(name => name.startsWith(pkg + '/') && name.endsWith('/koffi.node'))) {
+      throw Error(`packed native bridge missing ${target}`);
+    }
+  }
+  if (!entries.has('package/dist/native/koffi/LICENSE.txt')) throw Error('packed native bridge license missing');
+  if (manifest.dependencies?.koffi) throw Error('native bridge must not resolve from mutable external dependencies');
 
   // The fixed runtime must remain independent of mutable installer code and
   // the product/SQLite graph, so application releases do not alter its bytes.
@@ -164,6 +173,17 @@ function installAndReadVersion(tarball, expectedVersion) {
   assertEqual(preflight.stageAllowed, true, 'preflight stageAllowed');
   if (existsSync(preflight.root)) throw Error('read-only preflight created the managed root');
   const staged = manage(['stage']); manage(['activate', staged.release]);
+  const bridge = spawnCommandSync(process.execPath, ['--input-type=module', '-e', `
+    import { pathToFileURL } from 'node:url';
+    import { join } from 'node:path';
+    const koffi = await import(pathToFileURL(join(process.argv[1], 'native/koffi/index.js')).href);
+    const lib = koffi.load(process.platform === 'win32' ? 'kernel32.dll' : null);
+    const pid = lib.func(process.platform === 'win32' ? 'uint32_t __stdcall GetCurrentProcessId()' : 'int getpid()')();
+    if (pid !== process.pid) throw Error('packaged_native_bridge_pid_mismatch');
+    console.log('packaged_native_bridge_ok');
+  `, join(preflight.root, 'releases', staged.release, 'package/dist')], { env, encoding: 'utf8', timeout: 10000, maxBuffer: 1024 * 1024 });
+  if (bridge.error) throw bridge.error;
+  if (bridge.status !== 0 || bridge.stdout.trim() !== 'packaged_native_bridge_ok') throw Error(`packaged native bridge failed: ${bridge.stderr}`);
   const timings = [];
   for (const args of [['--version'], ['--help']]) {
     const started = performance.now();

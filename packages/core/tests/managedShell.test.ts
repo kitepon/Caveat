@@ -14,7 +14,7 @@ const windows = isWindows();
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 const hash = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
-function fixture() {
+function fixture(node = process.execPath) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'caveat-shell-'))); roots.push(root);
   if (windows) runWindowsAcl(root, true, true);
   const userHome = join(root, "profile space ' 日本"); mkdirSync(userHome, { mode: 0o700 });
@@ -27,7 +27,7 @@ function fixture() {
   const staged = stageManagedDeployment(source, options);activateManagedDeployment(staged.release, options);
   const paths = managedDeploymentPaths(userHome);if(windows)runWindowsAcl(paths.root,true,true);
   const binDir = join(root, 'bin space 日本');mkdirSync(binDir, { mode: 0o700 });
-  const plan = managedShellPlan(process.execPath, binDir, options);
+  const plan = managedShellPlan(node, binDir, options);
   const protectedFiles = [paths.launcher, paths.runtime, paths.pointer];
   for (let n=0;n<11;n++) {const file=join(userHome,'protected-'+n);writeFileSync(file,'unchanged-'+n,{mode:0o600});protectedFiles.push(file);}
   const initial = protectedFiles.map(hash);
@@ -37,7 +37,7 @@ function fixture() {
 }
 
 it('shell plan rejects relative nodes and shell-interpreted Windows path literals', () => {
-  for (const node of ['node','../node','/node\ncommand']) expect(()=>renderManagedShellWrappers(node,'/entry',false)).toThrow();
+  for (const node of ['relative/node','../node','/node\ncommand']) expect(()=>renderManagedShellWrappers(node,'/entry',false)).toThrow();
   for (const node of ['C:\\日本\\node.exe','node.exe','C:\\%NODE%\\node.exe','C:\\x&y\\node.exe','C:\\x"y\\node.exe']) expect(()=>renderManagedShellWrappers(node,'C:\\entry.mjs',true)).toThrow();
   const f=fixture();expect(()=>managedShellPlan(process.execPath,'relative',f.options)).toThrow('absolute_bin_required');expect(managedShellStatus(f.options).status).toBe('not-installed');f.assertProtected();
 },60000);
@@ -84,7 +84,7 @@ function invoke(file: string, args: string[], cwd: string, input?: Buffer) {
   return spawnSync(bash!,[caller.replaceAll('\\','/')],options);
 }
 it('real wrapper processes preserve argv, working directory, environment and exit status', () => {
-  const f=fixture();f.install();const args=['','space value','quote"value','single\'quote','trailing\\','日本語','--leading','semi;colon','5%'];
+  const f=fixture('node');f.install();const args=['','space value','quote"value','single\'quote','trailing\\','日本語','--leading','semi;colon','5%'];
   for(const file of f.plan.files){const r=invoke(file.path,['argv',...args],f.root);expect(r.error).toBeUndefined();expect(r.status, file.name+': '+String(r.stderr)).toBe(37);expect(JSON.parse(String(r.stdout)),file.name).toEqual({args,cwd:f.root,marker:'inherited value 日本'});}
   if(windows){const ps1=f.plan.files.find(f=>f.name.endsWith('.ps1'))!.path;const q=(v:string)=>"'"+v.replaceAll("'","''")+"'";const source='& '+q(ps1)+' '+['argv',...args].map(q).join(' ')+'; exit $LASTEXITCODE';const r=spawnSync(join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(source,'utf16le').toString('base64')],{cwd:f.root,env:{...process.env,CAVEAT_SHELL_TEST:'inherited value 日本'},timeout:30000});expect(r.error,'Windows PowerShell 5.1 absolute OS entry').toBeUndefined();expect(r.status,String(r.stderr)).toBe(37);expect(JSON.parse(String(r.stdout)).args).toEqual(args);}
   f.assertProtected();

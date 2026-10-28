@@ -51,6 +51,26 @@ export { createWindowsAclSession } from './privateWindowsAclSession.js';
 export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
 
 export * from './managedShell.js';
+export { readGlobalPackageJson, snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
+export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
+export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardTree, type GlobalGuardTreeRow, type GlobalGuardIdentity } from './managedGlobalGuard.js';
+export { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
+export { planGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
 
 export { usesManagedGuidance } from './managedGuidance.js';
 export { readMcpSyncState, writeMcpSyncState, type McpSyncState } from './mcpSyncState.js';
+
+export { inspectGlobalMigrationRecovery } from './managedGlobalRecovery.js';
+
+export { managedShellStatusCurrent } from './managedGlobalShellStatus.js';
+
+export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlobalCoordinator.js';
+
+export { executeGlobalRecovery, inspectGlobalRecoveryAttempt, type GlobalRecoveryEvent } from './managedGlobalRecoveryExecution.js';
+
+export { planGlobalRecovery } from './managedGlobalRecoveryChain.js';
+export { writeGlobalPrivateEvidence } from './managedGlobalPreservation.js';
+export type { NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
+
+export { nativeSelfProcessBirth } from './managedProcessNative.js';
+export { registerMcpServerInstance, staleMcpServers } from './mcpServerInstances.js';

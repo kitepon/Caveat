@@ -7,7 +7,7 @@ export class UnsupportedSqliteRuntimeError extends Error {
   readonly sqlite: string;
 
   constructor(sqlite: string, cause: Error) {
-    super(`CAVEAT_RUNTIME_UNSUPPORTED: Node ${process.version}, SQLite ${sqlite} requires FTS5 with the trigram tokenizer. Use a Node build that provides this search capability. Original SQLite error: ${cause.message}`, { cause });
+    super(`CAVEAT_RUNTIME_UNSUPPORTED: Node ${process.version}, SQLite ${sqlite} requires FTS5 with the trigram tokenizer. Install a current Node LTS from https://nodejs.org/en/download, then run npm install -g caveat-cli and reopen your AI client. Original SQLite error: ${cause.message}`, { cause });
     this.name = 'UnsupportedSqliteRuntimeError';
     this.sqlite = sqlite;
   }

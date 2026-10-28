@@ -76,7 +76,7 @@ by who you choose to subscribe to via `caveat community add <github-url>`.
 | Catches struggle the AI didn't self-report | ✅ transcript signal mining | ❌ | ❌ | ❌ | ❌ |
 | Mixes external-spec gotchas with repo-specific context | ✅ public / private tiers | ⚠️ no separation | ⚠️ no separation | ⚠️ | ⚠️ |
 
-**Status**: v0.21.8 candidate. Claude Code, Codex, and Cursor have native integration
+**Status**: v0.21.9 candidate. Claude Code, Codex, and Cursor have native integration
 paths. Single-user and small-team workflows are the primary supported path.
 There is no central DB and install does not auto-subscribe to one.
 
@@ -195,7 +195,7 @@ rag/                  Research asset ledger; currently only INDEX.md
 
 ## Requirements
 
-- **A Node build whose `node:sqlite` includes FTS5 and the trigram tokenizer.** The version number alone does not establish support. The official Linux Node 22.5.0 binary lacks FTS5 and is rejected with `CAVEAT_RUNTIME_UNSUPPORTED` before persistent writes. The shipped launcher enables SQLite once when required; explicit enable/disable options are preserved. Existing `engines` declarations remain unchanged in 0.21.3: the workspace declares `>=22`, and the published CLI declares `>=22.5`. Neither declaration guarantees that every such build has these SQLite capabilities.
+- **Node 22.16+ on the 22.x line, or Node 24+.** Install a current [Node LTS](https://nodejs.org/en/download), then run `npm install -g caveat-cli` and reopen your AI client. Registrations use the `node` command from the client environment; they do not pin a version directory or require a host shim. Node installation is a product dependency, not a migration proof.
 - Verified deployment snapshots: Linux main-server Node 24.14.1; Linux rabbit and Windows Node 24.22.1; macOS MCP Node 26.12.0 and hook Node 26.12.1 (a recorded mixed deployment, not a completed Node update). These are observed versions, not the lowest supported versions on each OS.
 - The three CI runtimes are recorded by the final native-hash proof JSON (`runtime.node`, `runtime.execPath`, `runtime.sqlite`). Verified CI versions from PR59 run 40253098781: Linux 24.20.0; macOS 26.12.1; Windows 24.22.1. Only values from the corresponding PR59 job raw logs are used here.
 - WindowsではPowerShell 7（`pwsh.exe`）を使います。エラー収集用ストレージのACL処理も同じ入口です。
@@ -579,3 +579,11 @@ Factory private evidence v1 is an isolated, default-OFF contract candidate. This
 For side-by-side releases with a stable MCP/hook entry, use `caveat deployment stage --json`, then `caveat deployment activate <release-id> --json`. Run the returned fixed launcher with the existing Node for `init`. Later updates and rollbacks select an already verified release through the same command; registration strings stay unchanged. `caveat deployment status --json` verifies the selected payload. The initial migration needs one normal Codex hook review. Deployment does not grant trust or change Node/PATH; see [the managed deployment contract](docs/01_plan.md#managed-deployment-and-stable-hook-identity).
 
 For private GitHub sync, set the optional non-secret `"githubUser": "your-account"` in `~/.caveatrc.json` to select an already authenticated account. Caveat passes an account-specific helper only to its Git/diagnostic children and calls `gh auth token --user ... --no-refresh`. It does not switch shared accounts or refresh credentials. Missing accounts, incompatible gh and expired credentials fail explicitly; re-authentication belongs to the owner. Without this field the previous behavior is retained. A configured account requires an explicit private HTTPS GitHub URL when initializing a new sync repository. The selected instance discards inherited Git config/protocol overrides and trace output, neutralizes configured helpers and authentication headers, and never persists its policy. The gh entry is fixed to `/usr/bin/gh` on Linux, `/opt/homebrew/bin/gh` on macOS, and `C:\Program Files\GitHub CLI\gh.exe` on Windows; no PATH fallback is used.
+
+The unreleased `deployment registration-plan` / `registration-migrate` commands
+replace only the fifteen reviewed Node tokens in a saved seven-file projection.
+Native originals are preserved and known-only recovery uses a new journal.
+Planning and journal inspection do not grant execution permission. See the
+[saved registration contract](docs/01_plan.md#saved-seven-file-registration-node-migration-unreleased-source).
+
+`caveat deployment status --json` reports old running MCP server PIDs and their parent applications, with an instruction to reopen that client. New servers record their loaded version in a local lifetime receipt, so an installation update does not rewrite that version. Older installations without receipts can be identified from readable script paths. This diagnostic does not terminate or restart clients. A cached script from a pre-receipt in-place update may be unobservable.

@@ -12,7 +12,7 @@ dotagentsは複数製品を束ねる導入・互換・host projectionを所有�
 
 ## 真実の源と状態
 
-SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. This candidate does not change the numerical minimum Node version; adopting its supported-runtime wording remains a product review decision.
+SQLite search requires a working FTS5 virtual table with the trigram tokenizer, not only a `node:sqlite` import or Node version string. A bounded in-memory create/insert/MATCH probe runs before opening or migrating the persistent index, before init/index side effects, and in managed preflight/stage/activate. Known missing FTS5/trigram fails with `CAVEAT_RUNTIME_UNSUPPORTED` and its original SQLite cause; unknown failures and probe cleanup failures remain errors. Preflight includes the measured runtime capability. No alternative search engine, empty result, or partial index is used as a fallback. The declared dependency is Node 22.16+ on 22.x or Node 24+; errors include Node LTS installation and client-reopen instructions. This database search requirement is separate from migration process observation.
 
 - 正本はmarkdown-in-git。SQLite FTS5 indexは常に再構築できる派生物。
 - 自分の知識は既定で`~/.caveat/own/`、indexは`~/.caveat/index/caveat.db`。
@@ -463,7 +463,7 @@ digestはprivate限定。元URLを返さなくても辞書推測を防げると�
 
 ## 最低Nodeと通常launcher
 
-製品の公開下限はNode22.5以降。SQLiteがstartup flagを必要とするruntimeでは、
+製品の依存範囲はNode22.16以上の22.x、またはNode24以上。SQLiteがstartup flagを必要とするruntimeでは、
 `dist/caveat.js`がbuiltinの可用性を確認し、必要な場合だけ同じNode/argv/cwd/env/stdioで一度起動し直す。
 入口は`apps/cli/src/bootstrap.mjs`をclean build後にそのままcopyして所有する。
 追加flagは製品launcherが所有し、試験又は利用者設定だけを変更して下限対応済みとしない。
@@ -502,9 +502,254 @@ Compatibility lives in `managedDeploymentLegacy.ts`, separately from the new pla
 
 The first migration from version-specific commands requires review/trust of the exact new three Codex definitions per host through Codex's normal flow. The installer never writes trusted_hash, grants another product trust or bypasses review. Static installed diagnostics do not establish native trust or conversation acceptance. Keep shared Node, PATH, credentials and native schedules unchanged unless separately authorized.
 
-### Windows hookの保護保存transport（未公開source）
+### Global migration preflight (unreleased source)
 
-Hookの集計/詳細保存は同じ同期API・排他・atomic renameと全ACL checkpointを保つ。Windowsでは1hook限りのlazy Worker/PowerShell sessionで各要求を順に実行し、ACL結果はcacheしない。disabled/POSIXはhelperを起動しない。既30秒guardを保持し、拒否/不正応答/起動失敗/timeoutはcauseを失わずunavailable、拒否後も次storeを独立に試す。helperは両保存後に明示終了し、終了異常は原hook診断と共に表面化する。共有Node/実席設定や固定entry/runtime bytesを変更する機構ではない。
+B removes the old shell-global Caveat from PATH and npm, retaining only the fixed entry. Preflight stops only for readable argv/executable references to the old root or a readable external npm writer targeting it. It reports the consumer PID, parent application and how to close that client before retrying. Unreadable processes, foreign users, kernel processes, short-lived entries and exited consumers are counts, not stop conditions. Process observation is read-only and never terminates an existing application.
+
+Linux reads procfs, macOS reads native argv/executable paths, and Windows uses a bounded owned CIM child. Each actual OS runner must show normal ready, a literal old-global consumer stopped with its PID and parent, and ready after that consumer closes. No same-uid metadata-fault refusal, foreign-user classification, text-image proof, positive-exit exception, Restart Manager lease, exclusive-open qualification or DuplicateHandle is required.
+
+The existing journal and known-only recovery preserve the old root through identity-retaining quarantine rename and remove old aliases/bins. Windows sharing violation 32 identifies the affected file and directs the user to close the AI client and retry; readable holder information is diagnostic only. Fox uses this same B contract. Quarantine can make later dynamic imports fail with module-not-found; views whose handles are closed, previously read JS caches, and root/administrator writes remain risks reported in results.
+
+The package contains Koffi 3.3.4 and native binaries for Linux, macOS and Windows
+on x64/arm64. The packaged loader uses adjacent binaries only; it never searches
+external node_modules. Loading is lazy and ordinary hooks do not inspect processes
+or load the native bridge. Full preservation, guarded uninstall/recovery, wrapper replacement and the
+seven-file registration migration are implemented by the separate unreleased
+transaction callers described below. The preflight API does not authorize or
+perform those mutations.
+
+The unreleased path guard retains directory and leaf handles. POSIX uses
+directory-relative exclusive rename; Windows opens children relative to retained
+native directory handles and renames the held object without replacement. It
+checks names, ancestry, ownership, metadata and bounded file-content hashes before
+moving, then verifies the original identity at the destination. Visible xattrs and
+Darwin extended ACLs, or Windows owner/group/DACL, have separate bounded digests.
+Hidden or privileged metadata is never inferred absent from a readable projection;
+the original object is retained rather than reconstructed from these digests.
+Darwin extended allow ACL entries remain unclassified and are refused. Unsupported
+ACL layouts, reparse objects and permission failures are stopped without repair.
+
+A failed or incomplete move returns unknown with separately observed held/source/
+destination states. It never assumes a failed syscall means unchanged state and
+never automatically overwrites an unknown object during recovery. The directory
+guard does not verify an entire descendant tree or establish process/writer
+absence; full package preservation and the mutation journal must supply those
+checks before scoped uninstall can be connected.
+
+The native guard can create a new private journal relative to its held directory.
+Only references returned by that creation may append or flush. Original object
+references, read-only journal references, foreign tokens and closed references
+cannot write. POSIX uses exclusive no-follow creation, 0600 files and file/parent
+fsync; Windows supplies a protected current-user security descriptor at exclusive
+creation and flushes its owned write handle. Each append verifies the expected
+file/name/bytes, flushes and reads back before returning. Partial writes, flush
+failure or failed readback poison that writer; no retry or truncation occurs.
+
+The bounded LF JSONL format binds a plan digest and a random run ID, consecutive
+sequence numbers and the previous record hash. Intent must precede a matching
+confirmed/unknown result. An unfinished intent stays pending; unknown and complete
+are terminal, and a partial final record stays torn evidence. Existing journals
+are read-only recovery inputs and are never replayed or appended automatically.
+The journal proves recorded ordering, not completion of the full migration plan;
+the preservation/uninstall/recovery engine still has to verify actual state.
+
+The unreleased preservation engine inventories descendants relative to retained
+native directories, with entry/depth/byte bounds and no link traversal. It checks
+every descendant's owner, link count, identity, contents and observable security,
+then repeats the inventory before and after the root-object move. A same-volume
+rename retains the original object, including unprojected attributes and Windows
+alternate streams; the inventory never substitutes for that original. A changed
+or unreadable descendant after a move yields unknown with the observed root
+placement and any completed tree observation. POSIX moves also fsync both parents.
+
+The internal engine limits original-object moves to the Caveat package, npm's
+management file and the known shell leaves. Fresh package/protected-state/process
+checks remain mandatory caller responsibilities before each mutation; the engine
+has no CLI entry or permission bypass. It records durable intent/result for each
+object, exact partial states and known-only restoration without destination
+overwrite. Before the first original move it exclusively creates, flushes and
+reads back a private full original-tree manifest. Before each result record it
+persists the current full state and binds that file digest into the journal.
+The backup directory must already be private; permissions are never repaired. This component does not yet run npm, reopen a persisted recovery plan or install
+wrappers. Those integrations, final review and
+candidate validation remain unfinished.
+
+The working-copy primitive exclusively creates new private directory/file/link
+objects relative to a held private staging directory. Only native references
+branded by that creation may receive copied bytes, mode changes or flushes;
+original, foreign and closed references cannot. It reads the retained original
+through held handles, preserves content/internal link text and owner execute,
+checks new file identities and private security, and rechecks the complete
+original tree. The staged tree is read back before an exclusive move to the
+original name. It does not unlink or overwrite competing names or failed stages.
+Original native metadata and alternate streams stay on the retained original;
+working copies use new private security and are not original-state backups.
+
+The engine rechecks its original evidence bytes, writes durable copy intent,
+persists exact copy outcomes and only quarantines an unchanged known working
+tree before original restoration. Partial writes, changed originals or working
+copies, failed flush/close and interrupted publication stay stopped/unknown.
+An explicit release method accepts only a successfully created working-tree
+token, allowing the future owned npm step to operate without dropping original
+pins. Fresh process/protected-state integration and scoped npm remain unfinished;
+this primitive is not an executable global-migration command.
+
+The product migration caller now captures the old package/dependency closure,
+Node/npm bytes and aliases, other globals and existing/absent shell leaves. It
+validates the active managed payload against its manifest and retains native
+objects for its pointer, entry, payload and protected settings. Before each
+mutation it rechecks those objects, runtime/npm and other-global baselines, and a
+fresh native process assessment. Original and working objects have separate
+identities; a missing original name is never treated as a successful fresh
+package snapshot. Declared peers outside the retained package also stop.
+
+After read-only admission it creates an exclusive private run directory and
+persists the complete plan. It shares the existing installer.lock protocol:
+a complete owned lock moves exclusively into place, then returns to the private
+run as evidence on close. It never removes someone else's lock or probes/kills
+its process. No CLI collector/deadline bypass is provided.
+
+The owned npm child uses the fixed Node and npm script with only caveat-cli,
+a bound global prefix, ignore-scripts/offline/no-audit/no-fund flags, private
+empty user/global config and a restricted environment without inherited Node
+options, npm configuration or credentials. Its started, exit and close events
+are distinct. Timeout, failed receipts, nonzero exit or unconfirmed close are
+never success; only that spawned child can receive a single termination request.
+Captured output is bounded/hashed and never returned raw. Closing owned capture
+handles after timeout does not prove close or descendant exit.
+
+Working pins alone are released before npm. After confirmed child termination,
+the caller rechecks original/protected state and processes. Only full absence or
+a deletion-only subset with the same known file identities/bytes/security can be
+accepted for recovery. New or changed objects remain unknown and untouched, with
+the observed after-tree preserved. A known partial tree may be quarantined before
+original restoration; interrupted or unknown journals are never replayed.
+Generated wrappers now publish exclusively from owned private files. Only a file
+born as this guard's journal may be sealed executable; sealing invalidates its
+write token, closes the write handle once and binds the reopened native identity,
+bytes and security before a relative move. Original/foreign/read-only references
+cannot be sealed. A complete private manifest directory is similarly closed and
+rebound before publication. The v2 shell manifest explicitly uses native guard
+identities; legacy v1 capture/status retains its existing format. The new
+publication path uses no PATH PowerShell reader. Accepted bin aliases are bound;
+redirecting a separate prefix bin outside the canonical layout is refused.
+
+Each wrapper/manifest operation persists intent, exact result and current state.
+Before and after publication it reuses the preservation engine's original-tree/
+original-evidence verification and sticky stop state, alongside fresh process and
+protected-state checks. A changed backup cannot be hidden by a healthy wrapper.
+Known partial publication can be quarantined after a fresh successful check,
+then originals restored in their required order. Unknown publication retains
+separate destination/stage/quarantine observations and is never replayed or
+removed to make the result appear successful. Original absence is restored too.
+
+Recovery inspection opens private plan/original/state/journal evidence read-only,
+checks canonical JSON, scope, sequence/hash references and current full original,
+working/generated/protected trees plus Node/npm/other globals. Its total evidence
+is limited to 256 files/64MiB; each file remains bounded to16MiB. Evidence is
+rechecked before returning. Pending/torn/unknown stops before replay. A matching
+observation grants no execution permission and starts no child or filesystem
+write. It does not reopen a writer or execute recovery actions.
+
+Native-v2 status now opens the private bounded manifest through the native guard,
+verifies the selected A payload/entry, ordinary Node proof and rendered wrapper
+identities, and finishes fresh readback before reporting payload health. It uses
+no PATH PowerShell child. Legacy v1 status remains compatible; the async product
+status caller selects the manifest version without reinterpreting v1 identities.
+An unknown native read never falls back to the legacy reader.
+
+The product `deployment global-plan --global-root <global-node-modules>
+--npm-cli <absolute-npm-cli.js> --json` performs read-only admission, using normal
+product settings paths and the production native process/writer collector. It
+creates no private run or installer lock. Its digest binds the active.json boundary,
+input aliases/canonical targets, parent identities/security, existing protected
+settings and absent settings with their nearest existing parents. It reads no
+knowledge repository or credential store. Unknown processes/writers stop admission.
+
+`deployment global-migrate` takes the same inputs plus mandatory
+`--expected-plan-sha256 <digest> --json`. The coordinator checks that reviewed
+plan digest before preparation, repeats fresh admission, then connects original
+preservation, working copies, fixed ordinary Node/npm uninstall, exclusive shell
+publication and independent status readback. Ordered bounded phase receipts omit
+raw paths, argv and exception text. The full preservation engine verification
+remains mandatory around wrapper operations. A complete journal is a mutation
+checkpoint, not proof of subsequent close or independent status. Final readback
+reopens all saved original/state/journal/protected/working/generated evidence
+read-only against the checkpoint journal byte digest (a replacement empty
+completion is not a full state match), then must also match the reviewed pointer
+bytes, executable Node proof and rendered
+wrapper paths/hashes; a separately healthy selection cannot substitute for that
+reviewed plan after the original guard closes. Partial/unknown
+results are preserved; there is no automatic replay, unlink or overwrite.
+
+`deployment global-inspect-recovery <run-id> --plan-sha256 <digest> --json`
+inspects bounded saved migration evidence read-only and returns its full evidence
+digest. It grants no execution permission and does not open a writer.
+
+`deployment global-recover <migration-or-recovery-run-id> --plan-sha256 <digest>
+--evidence-sha256 <digest> --json` separately restores independently proved original
+objects. It requires matching plan and full evidence digests, holds old evidence
+read-only, and rebinds current original/working/generated objects, protected
+state, aliases/parents/absences, Node/npm/other globals and the production native
+process/writer collector. A legitimately absent package is not a new package
+snapshot failure. Unknown or pending/torn/unknown source intent stops before a
+new run. Another installer lock is retained unchanged.
+
+The new exclusive private recovery directory is bound to the source evidence
+digest and cannot be reused. Only its new journal receives intent/result writes.
+Fresh verification occurs before intent and again after intent flush, immediately
+before each rename. Known generated objects and remaining working copies move
+into owned quarantine, then exact original objects move back in package/npm
+management/old-leaf order. Original contents and permissions are never rewritten;
+unknown names are never removed or overwritten. New state records distinguish
+confirmed observations from uncertain ones and say whether rename was issued.
+A lost receipt leaves pending/unknown history and never grants replay.
+
+Before reporting restored, recovery verifies the full state, captures its complete
+journal digest, closes the original guard and independently reopens all current
+objects, protected state, source evidence and new result files. A checkpoint
+alone is not proof of that later readback. A separately changed object is retained
+as unknown rather than silently repaired.
+
+`global-inspect-recovery` also accepts a recovery-attempt id. This only verifies
+its bounded journal/result evidence: `currentObjects: not-assessed` and
+`executionPermission: false` are explicit even for a complete journal. Resuming
+from a known partial recovery-attempt requires the separately reviewed fresh
+binding described below; journal inspection does not supply it. The final
+candidate requires validation of the exact versioned source and packaged artifact.
+These source commands do not grant approval for distribution or machine changes.
+
+Node is a normal product dependency: Node 22.16+ on 22.x or Node 24+, declared in package engines and the README. MCP/hooks and the managed shell use the `node` command from the client environment, matching a standalone npm installation. No version-directory path or host-owned Node shim is generated. Missing/unsupported Node errors include the Node LTS installation URL and reinstall/reopen instructions. Migration does not prove Node/libnode identity, hashes, SQLite capability or shared-build provenance.
+
+Confirmed partial recovery journals may be planned with `deployment global-recovery-plan
+<run-id> --plan-sha256 <original-digest> --json`. This is read-only: no run, lock or
+execution permission. A successful result supplies a full evidence digest for a
+separate `global-recover` invocation. The source chain is limited to eight runs,
+256 referenced files and 64 MiB in total; every run must have its exact canonical
+private directory. Pending, torn or unknown intents anywhere in the chain stop
+before a new journal is created. Source plan/seed and confirmed transitions derive
+all allowed names and current object locations. A saved path is never authority.
+New migration plans also bind the full native original trees before mutation;
+original seed rows must match that reviewed identity/content/security exactly.
+Legacy evidence remains readable, but a recovery chain without this native plan
+anchor is explicitly refused rather than upgrading its trust from journal hashes.
+The digest binds every source reference, derived state and fresh parent bindings;
+current objects, absences, aliases, protected state and native process/writer gates
+are rechecked independently at execution. Each attempt uses a new private journal.
+Old evidence stays read-only, and independent post-close readback covers every
+source directory as well as the new attempt and restored/quarantined objects.
+Journal-only inspection of a recovery run remains `currentObjects: not-assessed`
+and `executionPermission: false`, including completed journals.
+
+### Saved seven-file registration Node migration (unreleased source)
+
+`deployment registration-plan --observation <saved-json> --proposal <saved-json> --json` reads the saved seven files and fifteen exact pointers. Saved paths are assertions against normal paths derived from the current home. The codec preserves unrelated JSON/TOML bytes, values, MCP args and hook suffixes and changes only the Node command to `node`. The historical proposal's version-specific candidate remains input evidence, never the emitted command.
+
+`registration-migrate --expected-plan-sha256 <digest>` preserves each original in a private backup, writes its replacement temp in the same directory as the target, flushes it, then renames it over the original name. That name stays present throughout. There is no retain/publish pair, per-file process check or declaration that all clients are closed. A readable Claude Code argv stops admission with close-and-retry instructions because Claude Code writes `~/.claude.json`. No client is closed by Caveat.
+
+The existing mutation journal records each atomic replacement and allows a separate known-only recovery to restore backup bytes through the same atomic-write method. Recovery keeps old evidence immutable, rejects changed target bytes and pending/torn/unknown source journals, and reads current objects again after closing the writer. `registration-inspect` remains read-only with no execution permission. Native inode identity is retained for B's quarantined root; a Main backup copy preserves original bytes while a standard atomic write replaces the config inode.
+
+`deployment status --json` includes old MCP server PIDs, parent app names and reopen instructions. Server lifetime receipts identify loaded versions across an in-place installation update; pre-receipt installations are identified where script paths remain readable. This is a product diagnostic. BellTeam's seat restart operation is separate and is not product acceptance.
 
 ## MCP runtimeの読込み境界（次版source）
 

@@ -8,6 +8,11 @@ const yaml = requireFromCore('js-yaml');
 const workflowPath = new URL('../.github/workflows/product-full-ci.yml', import.meta.url);
 const callerPath = new URL('../.github/workflows/ci.yml', import.meta.url);
 
+test('Windows full native suite has a bounded completion budget without extending other OS jobs', () => {
+  const workflow = yaml.load(readFileSync(workflowPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+  assert.equal(workflow.jobs.full['timeout-minutes'], "${{ matrix.environment == 'windows-native' && 45 || 30 }}");
+});
+
 test('現役の3環境だけを製品CIへ割り当てる', () => {
   const source = readFileSync(workflowPath, 'utf8');
   const caller = yaml.load(readFileSync(callerPath, 'utf8'), { schema: yaml.JSON_SCHEMA });

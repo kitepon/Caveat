@@ -2,6 +2,12 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+if (!(nodeMajor === 22 && nodeMinor >= 16 || nodeMajor >= 24)) {
+  process.stderr.write('[caveat:fatal] Node 22.16+ (22.x) or Node 24+ is required. Install a current Node LTS from https://nodejs.org/en/download, then run npm install -g caveat-cli and reopen your AI client.\n');
+  process.exit(1);
+}
+
 // Install the warning handler before loading any SQLite-dependent product module.
 process.removeAllListeners('warning');
 process.on('warning', (warning) => {
@@ -9,8 +15,8 @@ process.on('warning', (warning) => {
   process.stderr.write(`(${warning?.name}) ${warning?.message}\n`);
 });
 
-// Node 22.5 includes SQLite behind a startup flag. Own that requirement in the
-// shipped launcher, so ordinary npm-bin/MCP/hook commands keep the public floor.
+// Older supported Node releases keep SQLite behind a startup flag. Own that
+// requirement in the shipped launcher for npm-bin/MCP/hook commands.
 // Feature detection also covers other supported Node versions before unflagging.
 const hasSqlite = Boolean(process.getBuiltinModule?.('node:sqlite'));
 const flagPattern = /^--(?:no-)?experimental-sqlite(?:=|$)/;

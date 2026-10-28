@@ -1,4 +1,5 @@
 import { copyPrivateEvidenceAssets } from '../../scripts/copy-private-evidence-assets.mjs';
+import { copyManagedNativeAssets } from '../../scripts/copy-managed-native-assets.mjs';
 import { defineConfig } from 'tsup';
 import {
   chmodSync,
@@ -59,6 +60,12 @@ export default defineConfig({
   platform: 'node',
   bundle: true,
   noExternal: ['@caveat/core', '@caveat/mcp', '@caveat/web'],
+  esbuildPlugins: [{
+    name: 'managed-native-assets',
+    setup(build) {
+      build.onResolve({ filter: /^koffi$/ }, () => ({ path: './native/koffi/index.js', external: true }));
+    },
+  }],
   banner: {
     js: [
       '#!/usr/bin/env node',
@@ -88,5 +95,6 @@ export default defineConfig({
     if (!existsSync(destMigrations)) mkdirSync(destMigrations, { recursive: true });
     cpSync(coreMigrations, destMigrations, { recursive: true });
     copyPrivateEvidenceAssets();
+    copyManagedNativeAssets();
   },
 });

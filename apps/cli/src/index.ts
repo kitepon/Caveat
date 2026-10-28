@@ -33,6 +33,8 @@ import { resolveAgentConfigPaths, resolveRegistrationCliPath } from './installSh
 import { factoryDiagnostics, type FactoryConnector } from './commands/factoryDiagnostics.js';
 import { parseCursor, runRuntimeErrorReport, runRuntimeErrors } from './commands/runtimeErrors.js';
 import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from './commands/jev.js';
+import { runGlobalMigrationCommand, runGlobalRecoveryInspection, runGlobalRecoveryPlan, runGlobalRecovery, type GlobalMigrationOptions } from './commands/globalMigration.js';
+import { runRegistrationMigration, runRegistrationRecovery, type RegistrationOptions } from './commands/registrationMigration.js';
 import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock, deploymentShellPlan, deploymentShellManifest } from './commands/deployment.js';
 
 const program = new Command();
@@ -72,16 +74,50 @@ deployment.command('activate <release>').requiredOption('--json', 'emit the acti
   .option('--recover-invalid-pointer', 'retain an invalid pointer and explicitly select this verified release', false)
   .action((release: string, opts: { recoverInvalidPointer: boolean }) => { process.stdout.write(`${JSON.stringify(deploymentActivate(release, opts.recoverInvalidPointer))}\n`); });
 deployment.command('status').requiredOption('--json', 'verify and report the selected release')
-  .action(() => { const result = deploymentStatus(); process.stdout.write(`${JSON.stringify(result)}\n`); if (result.status !== 'ready') process.exitCode = 1; });
+  .action(async () => { const result = await deploymentStatus(); process.stdout.write(`${JSON.stringify(result)}\n`); if (result.status !== 'ready') process.exitCode = 1; });
 deployment.command('unlock').requiredOption('--json', 'explicitly remove an installer lock after verifying its process is absent')
   .action(() => { process.stdout.write(`${JSON.stringify(deploymentUnlock())}\n`); });
 for (const [name, handler] of [['shell-plan', deploymentShellPlan], ['shell-manifest', deploymentShellManifest]] as const) {
   deployment.command(name).description('Read-only managed shell plan or installed ownership manifest')
     .requiredOption('--node <absolute-path>', 'fixed registration Node entry')
-    .requiredOption('--bin-dir <absolute-path>', 'host-approved bin directory')
+    .requiredOption('--bin-dir <absolute-path>', 'verified bin directory')
     .requiredOption('--json', 'emit JSON without writing any installation')
     .action((opts: { node: string; binDir: string }) => { process.stdout.write(JSON.stringify(handler(opts.node, opts.binDir)) + '\n'); });
 }
+for (const [name, mode] of [['registration-plan', 'plan'], ['registration-migrate', 'execute']] as const) {
+  const command = deployment.command(name).description(mode === 'plan' ? 'Read-only plan for the saved seven-file fifteen-token Node migration' : 'Apply the exact reviewed registration Node plan')
+    .requiredOption('--observation <path>', 'saved seven-file fifteen-definition observation JSON')
+    .requiredOption('--proposal <path>', 'matching saved Node-token proposal JSON')
+    .requiredOption('--json', 'emit bounded JSON receipts');
+  if (mode === 'execute') command.requiredOption('--expected-plan-sha256 <digest>', 'exact reviewed registration plan digest');
+  command.action(async (options: RegistrationOptions) => { await runRegistrationMigration(mode, options); });
+}
+for (const [name, mode] of [['registration-recovery-plan', 'plan'], ['registration-recover', 'execute'], ['registration-inspect', 'inspect']] as const) {
+  const command = deployment.command(name + ' <run-id>').description(mode === 'inspect' ? 'Inspect journal only; current objects are not assessed' : 'Fresh known-only registration recovery')
+    .requiredOption('--plan-sha256 <digest>', 'expected original registration plan digest')
+    .requiredOption('--json', 'emit bounded JSON receipts');
+  if (mode === 'execute') command.requiredOption('--evidence-sha256 <digest>', 'exact fresh recovery evidence digest');
+  command.action(async (runId: string, options: { planSha256: string; evidenceSha256?: string; clientsClosed?: boolean }) => { await runRegistrationRecovery(mode, runId, options.planSha256, options.evidenceSha256, options.clientsClosed); });
+}
+for (const [name, mode] of [['global-plan', 'plan'], ['global-migrate', 'execute']] as const) {
+  const command = deployment.command(name).description(mode === 'plan' ? 'Read-only global-to-managed migration plan' : 'Execute the exact reviewed global migration plan')
+    .requiredOption('--global-root <path>', 'existing npm global node_modules directory')
+    .requiredOption('--npm-cli <path>', 'fixed installed npm-cli.js path')
+    .requiredOption('--json', 'emit ordered bounded JSON receipts');
+  if (mode === 'execute') command.requiredOption('--expected-plan-sha256 <digest>', 'exact digest returned by global-plan');
+  command.action(async (options: GlobalMigrationOptions) => { await runGlobalMigrationCommand(mode, options); });
+}
+deployment.command('global-inspect-recovery <run-id>').description('Read-only inspection; never replays journal actions')
+  .requiredOption('--plan-sha256 <digest>', 'expected saved plan digest').requiredOption('--json', 'emit observations only')
+  .action(async (runId: string, options: { planSha256: string }) => { await runGlobalRecoveryInspection(runId, options.planSha256); });
+deployment.command('global-recovery-plan <run-id>').description('Read-only fresh current-object and source-chain recovery plan')
+  .requiredOption('--plan-sha256 <digest>', 'expected original migration plan digest').requiredOption('--json', 'emit bounded plan result')
+  .action(async (runId: string, options: { planSha256: string }) => { await runGlobalRecoveryPlan(runId, options.planSha256); });
+deployment.command('global-recover <run-id>').description('Restore independently proved originals through a new private recovery journal')
+  .requiredOption('--plan-sha256 <digest>', 'exact original migration plan digest')
+  .requiredOption('--evidence-sha256 <digest>', 'exact full digest returned by global-recovery-plan')
+  .requiredOption('--json', 'emit ordered bounded recovery receipts')
+  .action(async (runId: string, options: { planSha256: string; evidenceSha256: string }) => { await runGlobalRecovery(runId, options.planSha256, options.evidenceSha256); });
 const autosync = program.command('autosync').description('Run and inspect periodic private knowledge reception');
 type AutosyncOptions = { caveatHome?: string; userHome?: string; dryRun?: boolean };
 const autosyncCommand = (parent: Command, name: string) => parent.command(name)

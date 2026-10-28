@@ -1,9 +1,9 @@
-import { findCaveatHome, readMcpSyncState } from '@caveat/core';
+import { findCaveatHome, readMcpSyncState, staleMcpServers } from '@caveat/core';
 import { homedir } from 'node:os';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, managedShellStatus, managedShellPlan, captureManagedShellManifest } from '@caveat/core';
+import { stageManagedDeployment, preflightManagedDeployment, activateManagedDeployment, verifyManagedDeployment, managedInstallerLockStatus, recoverManagedInstallerLock, managedShellStatusCurrent, managedShellPlan, captureManagedShellManifest } from '@caveat/core';
 
 function installerPackageRoot() {
   let path = dirname(fileURLToPath(import.meta.url));
@@ -24,13 +24,14 @@ export function deploymentStage(packageRoot?: string) {
   return stageManagedDeployment(packageRoot ?? installer, { entrySourceRoot: installer });
 }
 export function deploymentActivate(release: string, recoverInvalidPointer = false) { return activateManagedDeployment(release, { recoverInvalidPointer }); }
-export function deploymentStatus() {
+export async function deploymentStatus() {
   const lock = managedInstallerLockStatus();
-  const shell = managedShellStatus();
+  const shell = await managedShellStatusCurrent();
   const ownSync = readMcpSyncState(findCaveatHome(homedir()));
   try {
     const active = verifyManagedDeployment();
-    return { status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell, ownSync };
+    const clients = await staleMcpServers(findCaveatHome(homedir()), active.manifest.version);
+    return { clients, status: 'ready' as const, release: active.pointer.release, version: active.manifest.version, launcher: active.launcher, payloadVerified: true, lock, shell, ownSync };
   } catch (error) {
     return { status: 'unavailable' as const, payloadVerified: false, lock, shell, ownSync, diagnostic: error instanceof SyntaxError ? 'invalid_deployment_json' : String((error as NodeJS.ErrnoException).code ?? (error as Error).message) };
   }

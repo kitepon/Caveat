@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.8候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.9候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 
 managed導入のAI案内は、PATHのcommandではなく登録済みの `caveat_get`・`caveat_update`・`caveat_record`・`caveat_sync` を使います。`caveat_sync` は既定remoteへ私有知識をpushし、clientの確認方針を維持します。client timeoutでも進行中のsyncは中断せず、遅れて完了した結果は deployment status の ownSync に残します。runningは成功ではありません。MCP toolが無い場合はglobal CLIや別contextへ戻さず停止します。
 
@@ -142,7 +142,7 @@ flowchart LR
 
 ## クイックスタート（NPM ユーザ）
 
-FTS5とtrigram tokenizerを備えた`node:sqlite`を持つNodeとgitが必要です。版の数字だけでは対応を保証できません。公式Linux Node 22.5.0にはFTS5がなく、永続書込前に`CAVEAT_RUNTIME_UNSUPPORTED`で停止します。0.21.3の既存`engines`宣言はworkspaceの`>=22`、公開CLIの`>=22.5`をそれぞれ保持します。その範囲の全binaryが必要なSQLite能力を持つという意味ではありません。
+Node 22.16以上の22.x、またはNode 24以上とgitが必要です。[Node LTS](https://nodejs.org/en/download)を導入し、`npm install -g caveat-cli`を実行してAI clientを開き直してください。MCPとhookはclient環境の`node`を使います。版のdirectoryを指す絶対pathやhost専用shimは登録しません。Nodeは製品の依存で、移行時にlibnodeのidentityやhashを証明する条件はありません。
 
 本人snapshotで確認済みなのは、Linux main-serverの24.14.1、Linux rabbitとWindowsの24.22.1、macOSのMCP 26.12.0とhook 26.12.1です。macOSは混在を記録した状態で、Node更新完了ではありません。各OSの最低対応版を実測した一覧でもありません。
 
@@ -371,3 +371,10 @@ Factory private evidence v1は既定OFFの隔離契約候補。このbuildは対
 `caveat deployment stage --json`で検証済みnpm packageを本人専用領域へ並べ、`caveat deployment activate <release-id> --json`で選択します。返された固定launcherを既存Nodeから実行して`init`してください。その後の更新・戻しも同じ入口で版を選ぶため、MCP/hookの登録文字列は変わりません。`caveat deployment status --json`で選択中の内容を検証できます。初回移行ではCodexの正規の定義確認が一度必要です。installerは信用を付与せず、Node/PATHも変えません。詳細は[製品契約](docs/01_plan.md#managed-deployment-and-stable-hook-identity)を参照してください。
 
 private GitHub同期は `~/.caveatrc.json` の任意・非secret設定 `"githubUser": "your-account"` で既認証accountを名指しできる。Git/診断の子processだけへhelperを渡し、`gh auth token --user ... --no-refresh` を使う。共有active切替・資格のrefreshは行わない。user不在・非対応gh・期限切れは型付きで止まり、再認証はOwnerが行う。未設定なら従来挙動を保つ。設定済みで新しい同期repoを初期化する場合はprivate HTTPS GitHub URLを明示する。 名指ししたGit instanceだけで、継承したGit config/protocolの上書きとtraceを除き、既存helper・認証headerを無効にする。利用者のGit設定へは書き込まない。gh入口はLinux `/usr/bin/gh`、Mac `/opt/homebrew/bin/gh`、Windows `C:\Program Files\GitHub CLI\gh.exe` に固定し、PATHへfallbackしない。
+
+未公開の `deployment registration-plan` / `registration-migrate` は、保存済み7 fileの
+15個のNode tokenだけを照合・移行します。元objectは保全し、既知部分の復帰は別journalへ記録します。
+計画やjournal閲覧は実行許可を与えません。詳細は
+[保存登録の契約](docs/01_plan.md#saved-seven-file-registration-node-migration-unreleased-source)を参照してください。
+
+`caveat deployment status --json`は、動き続ける旧版MCP serverのPIDと親appを示し、そのclientを開き直すよう案内します。新しいserverは起動時の製品版をlocalに記録するため、install先が更新されても起動済みの版を区別できます。記録がない旧版は読めるscript pathから分かる範囲を示します。clientを終了・再起動する処理は持ちません。旧版の記録がない状態で同じinstall先が上書きされた場合、既読JS cacheの版を判別できない場合があります。

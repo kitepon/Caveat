@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { TextDecoder, isDeepStrictEqual } from 'node:util';
+import { isDeepStrictEqual } from 'node:util';
 import { Ajv2020 } from 'ajv/dist/2020.js';
-import { visit } from 'jsonc-parser';
+import { strictJson } from '../strictJson.js';
 import capabilitySchema from '../contracts/factory-private-evidence/capability.v1.schema.json' with { type: 'json' };
 import frameSchema from '../contracts/factory-private-evidence/private-frame.v1.schema.json' with { type: 'json' };
 import windowsSchema from '../contracts/factory-private-evidence/windows-channel.v1.schema.json' with { type: 'json' };
@@ -14,23 +14,7 @@ export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const NONCE = /^[0-9a-f]{64}$/;
 export const MAX_CHANNEL_BYTES = 16384;
 
-/** Strict, bounded JSON. The parser library supplies tokenization and nesting events. */
-export function strictJson(bytes: Uint8Array, limit = MAX_CHANNEL_BYTES): unknown {
-  if (bytes.byteLength === 0 || bytes.byteLength > limit) throw new Error('json_budget');
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-  const objects: Set<string>[] = [];
-  let depth = 0, invalid = false;
-  visit(text, {
-    onObjectBegin() { if (++depth > 32) throw new Error('json_depth'); objects.push(new Set()); },
-    onObjectProperty(key) { const keys = objects.at(-1)!; if (keys.has(key)) invalid = true; keys.add(key); },
-    onObjectEnd() { objects.pop(); depth--; },
-    onArrayBegin() { if (++depth > 32) throw new Error('json_depth'); },
-    onArrayEnd() { depth--; },
-    onError() { invalid = true; },
-  }, { disallowComments: true, allowTrailingComma: false, allowEmptyContent: false });
-  if (invalid || depth !== 0 || objects.length !== 0) throw new Error('json_invalid');
-  return JSON.parse(text);
-}
+export { strictJson };
 
 type Dict = Record<string, any>; // Schema checks narrow every use below; values never enter logs.
 export function validateRequest(env: Readonly<Record<string, string | undefined>>) {
