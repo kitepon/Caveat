@@ -4,6 +4,7 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { openGlobalPathGuard, type GlobalGuardIdentity } from './managedGlobalGuard.js';
 import { ownedProcessProbe, type ProcessProbeEvent, type ProcessProbeRun } from './managedProcessNative.js';
 import { globalNpmEnvironment } from './platform.js';
+import { processProtectionTree } from './managedGlobalProcesses.js';
 import { snapshotGlobalTree, type GlobalTreeRow } from './managedGlobalSnapshot.js';
 
 type Guard = Awaited<ReturnType<typeof openGlobalPathGuard>>;
@@ -62,6 +63,13 @@ export function parseManagedNodeCapability(stdout: string, canonical: string, ve
 export function managedNodePaths(proof: ManagedNodeProof) {
   assert.ok(proof?.schema === 'caveat.managed_node.v1', 'managed_node_proof_required');
   return [proof.executable, ...proof.libraries].flatMap(row => [row.alias, row.canonical]);
+}
+/** Identities for process comparison; callers still verify all held runtime proof. */
+export function managedNodeProcessObjects(proof: ManagedNodeProof) {
+  return [proof.executable, ...proof.libraries].flatMap(row => [
+    ...processProtectionTree(row.canonical, [{ relativePath: '', identity: row.identity }]),
+    ...processProtectionTree(row.alias, row.aliasRows.map(value => ({ relativePath: value.relativePath, identity: value }))),
+  ]);
 }
 export function managedNodeDirectories(proof: ManagedNodeProof) { return [...new Set(managedNodePaths(proof).map(dirname))]; }
 

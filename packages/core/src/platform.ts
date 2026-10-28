@@ -48,13 +48,17 @@ export function globalFilesystemNativeSpec(platform: NodeJS.Platform = process.p
   throw Error('global_filesystem_platform_not_implemented');
 }
 
+export function windowsSystemPath(...parts: string[]) {
+  const root = process.env.SystemRoot;
+  if (!root || !win32.isAbsolute(root) || /[\x00-\x1f]/.test(root)) throw Error('process_system_root_unavailable');
+  return win32.join(root, 'System32', ...parts);
+}
+
 export function collectNativeGlobalProcesses<T>(readers: { linux: () => T; darwin: () => T; win32: (command: string) => T }, platform: NodeJS.Platform = process.platform): T {
   if (platform === 'linux') return readers.linux();
   if (platform === 'darwin') return readers.darwin();
   if (platform === 'win32') {
-    const root = process.env.SystemRoot;
-    if (!root || !win32.isAbsolute(root) || /[\x00-\x1f]/.test(root)) throw Error('process_system_root_unavailable');
-    return readers.win32(win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'));
+    return readers.win32(windowsSystemPath('WindowsPowerShell', 'v1.0', 'powershell.exe'));
   }
   throw Error('global_process_platform_not_implemented');
 }

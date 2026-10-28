@@ -52,7 +52,7 @@ export { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, ass
 
 export * from './managedShell.js';
 export { readGlobalPackageJson, snapshotGlobalPackage, snapshotGlobalTree, type GlobalPackageSnapshotInput, type GlobalTreeRow } from './managedGlobalSnapshot.js';
-export { preflightGlobalProcesses, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
+export { preflightGlobalProcesses, processProtectionTree, type GlobalProcessProtection, type GlobalProcessScope, type GlobalProcessAssessment } from './managedGlobalProcesses.js';
 export { openGlobalPathGuard, type GlobalGuardEntry, type GlobalGuardTree, type GlobalGuardTreeRow, type GlobalGuardIdentity } from './managedGlobalGuard.js';
 export { createGlobalMutationJournal, parseGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
 export { planGlobalMigration, type GlobalMigrationInput } from './managedGlobalMigration.js';
@@ -69,6 +69,6 @@ export { executeGlobalMigration, type GlobalMigrationEvent } from './managedGlob
 export { executeGlobalRecovery, inspectGlobalRecoveryAttempt, type GlobalRecoveryEvent } from './managedGlobalRecoveryExecution.js';
 
 export { planGlobalRecovery } from './managedGlobalRecoveryChain.js';
-export { resolveManagedNode, bindManagedNodeProof, managedNodeDirectories, managedNodePaths, type ManagedNodeProof } from './managedNode.js';
+export { resolveManagedNode, bindManagedNodeProof, managedNodeDirectories, managedNodePaths, managedNodeProcessObjects, type ManagedNodeProof } from './managedNode.js';
 export { writeGlobalPrivateEvidence } from './managedGlobalPreservation.js';
 export type { NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';

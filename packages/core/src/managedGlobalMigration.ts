@@ -6,12 +6,12 @@ import { readGlobalPackageJson, observeGlobalAbsence, snapshotGlobalPackage, sna
 import { openGlobalPathGuard } from './managedGlobalGuard.js';
 import { createGlobalMutationJournal } from './managedGlobalJournal.js';
 import { prepareGlobalObjectPreservation, writeGlobalPrivateEvidence, type GlobalPreservationObject } from './managedGlobalPreservation.js';
-import { preflightGlobalProcesses } from './managedGlobalProcesses.js';
+import { preflightGlobalProcesses, processProtectionTree, type GlobalProcessScope } from './managedGlobalProcesses.js';
 import { nativeGlobalProcessTables, type ProcessProbeEvent } from './managedProcessNative.js';
 import { readManagedDeploymentAtRoot } from './managedDeploymentRuntime.js';
 import { runGlobalNpmUninstall, type GlobalNpmEvent } from './managedGlobalNpm.js';
 import { globalNpmLayout, isWindows } from './platform.js';
-import { resolveManagedNode, managedNodeDirectories } from './managedNode.js';
+import { resolveManagedNode, managedNodeDirectories, managedNodeProcessObjects } from './managedNode.js';
 import { renderManagedShellWrappers, type ManagedShellPlan } from './managedShell.js';
 import { prepareGlobalShellInstallation } from './managedGlobalShell.js';
 
@@ -65,6 +65,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
   try { guard = await openGlobalPathGuard([...new Set([globalRoot, layout.prefix, layout.binDirectory, input.binDirectory, binDirectory, root, ...managedNodeDirectories(nodeProof), npmRoot, ...absences.map(row => row.parent), ...protectedRoots.map(dirname)])]); }
   catch (error) { try { runtime.close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'global_migration_node_and_close_failed'); } throw error; }
   let ownedLock: ReturnType<typeof guard.createJournal> | null = null, lockAtRoot = false, closed = false;
+  let preservation: ReturnType<typeof prepareGlobalObjectPreservation> | undefined;
   let shell: ReturnType<typeof prepareGlobalShellInstallation> | null = null;
   const close = () => {
     if (closed) return; closed = true;
@@ -99,12 +100,12 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       files: renderManagedShellWrappers(baseline.node.canonical, active.launcher).map(file => ({ ...file, path: join(binDirectory, file.name) })) };
     const leafNames = isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat'];
     const leaves = leafNames.map(name => ({ name, identity: guard.observe(binDirectory, name) }));
-    const scope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, runtimeExecutables: [nodeProof.executable.canonical], binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
+    const scope: GlobalProcessScope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, runtimeExecutables: [nodeProof.executable.canonical], binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
     let processAssessment: Awaited<ReturnType<typeof preflightGlobalProcesses>> | null = null;
     const processCheck = async () => {
-      const result = await preflightGlobalProcesses(scope, onEvent, collect);
+      const result = await preflightGlobalProcesses({ ...scope, retainedRoots: runDirectory ? [runDirectory] : [] }, onEvent, collect);
       processAssessment = result;
-      if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true }); return result;
+      if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: !('protectionFailure' in result && result.protectionFailure && !result.protectionFailure.readOnly) }); return result;
     };
     const verifyProtected = () => {
       guard.assertCurrent(); runtime.verify();
@@ -120,10 +121,25 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       assert.deepEqual(others, baseline.otherGlobals, 'global_migration_other_globals_changed');
       shell?.verifyOwned();
       if (!shell?.ownsManifest()) assert.equal(guard.observe(root, 'shell'), null, 'global_migration_shell_appeared');
-      for (const leaf of leaves) if (!leaf.identity && !shell?.ownsLeaf(leaf.name)) assert.equal(guard.observe(binDirectory, leaf.name), null, 'global_migration_absent_leaf_appeared');
+      for (const leaf of leaves) if (!leaf.identity && !shell?.ownsLeaf(leaf.name) && !preservation?.ownsGeneratedPath(join(binDirectory, leaf.name))) assert.equal(guard.observe(binDirectory, leaf.name), null, 'global_migration_absent_leaf_appeared');
       if (baseline.npmManagement.absent) assert.equal(guard.observe(globalRoot, '.package-lock.json'), null, 'global_migration_absent_management_appeared');
     };
-    const verify = async () => { verifyProtected(); await processCheck(); verifyProtected(); };
+    scope.protection = () => {
+      verifyProtected();
+      let current;
+      if (preservation) current = preservation.processProtection();
+      else {
+        assert.deepEqual(snapshotGlobalTree(baseline.packageRoot, { observeOnly: true, opaqueExternalLinks: true }), baseline.packageTree, 'global_migration_process_original_changed');
+        for (const leaf of leaves) assert.deepEqual(guard.observe(binDirectory, leaf.name), leaf.identity, 'global_migration_process_leaf_changed');
+        current = { objects: [...processProtectionTree(scope.packageRoot!, baseline.packageTree.map(row => ({ relativePath: row.relativePath, identity: row }))),
+          ...leaves.flatMap(row => row.identity ? processProtectionTree(join(binDirectory, row.name), [{ relativePath: '', identity: row.identity }]) : [])],
+          absent: leaves.filter(row => !row.identity).map(row => join(binDirectory, row.name)), postMutation: false };
+      }
+      return { ...current, absent: [...new Set([...current.absent, ...leaves.filter(row => !row.identity && !current.objects.some(value => value.path === join(binDirectory, row.name))).map(row => join(binDirectory, row.name))])], objects: [...current.objects, ...managedNodeProcessObjects(nodeProof),
+        ...processProtectionTree(npmRoot, baseline.npm.tree.map(row => ({ relativePath: row.relativePath, identity: row }))),
+        ...protectedObjects.flatMap(row => processProtectionTree(row.path, row.rows))] };
+    };
+    const verify = async () => { await processCheck(); };
     phase = 'initial-preflight'; await verify();
     // Repeat the complete initial package view immediately before creating any private run state.
     assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_initial_snapshot_changed');
@@ -160,7 +176,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
         const objects: GlobalPreservationObject[] = [{ step: 'package', role: 'package', directory: globalRoot, name: 'caveat-cli', backupDirectory: runDirectory, backupName: 'original-package' }];
         if (!baseline.npmManagement.absent) objects.push({ step: 'management', role: 'npm-management', directory: globalRoot, name: '.package-lock.json', backupDirectory: runDirectory, backupName: 'original-management' });
         for (const leaf of leaves) if (leaf.identity) objects.push({ step: leaf.name.replaceAll('.', '-'), role: 'leaf', directory: binDirectory, name: leaf.name, backupDirectory: runDirectory, backupName: 'original-' + leaf.name });
-        const engine = prepareGlobalObjectPreservation(guard, journal, objects, verify, new Map(originalTrees.map(row => [row.step, row.tree])));
+        const engine = preservation = prepareGlobalObjectPreservation(guard, journal, objects, verify, new Map(originalTrees.map(row => [row.step, row.tree])));
         for (const row of engine.manifest().objects) assert.deepEqual(row.rows, originalObjects.find(value => value.step === row.step)!.rows, 'global_migration_original_seed_changed');
         const userConfig = join(runDirectory, 'user.npmrc'), globalConfig = join(runDirectory, 'global.npmrc');
         const userToken = guard.createJournal(runDirectory, 'user.npmrc', Buffer.from('\n')), globalToken = guard.createJournal(runDirectory, 'global.npmrc', Buffer.from('\n'));

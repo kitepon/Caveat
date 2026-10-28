@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { GlobalGuardTree, GlobalGuardTreeRow, openGlobalPathGuard } from './managedGlobalGuard.js';
+import { processProtectionTree } from './managedGlobalProcesses.js';
 import type { GlobalNpmReceipt } from './managedGlobalNpm.js';
 import type { GlobalJournalOperation, createGlobalMutationJournal } from './managedGlobalJournal.js';
 
@@ -74,6 +75,7 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     return { item, tree, rows, working: null as null | { status: 'known' | 'released' | 'after-known' | 'absent' | 'unknown' | 'quarantined'; rows: GlobalGuardTreeRow[] | null; stagingName: string }, state: 'original' as 'original' | 'preserved' | 'restored' | 'unknown' };
   });
   const workingTrees = new Map<string, GlobalGuardTree>();
+  const generated = new Map<string, { tree: GlobalGuardTree; rows: GlobalGuardTreeRow[] }>();
   let stopped = false;
   const initial = journal.read();
   assert.equal(initial.status, 'ready', 'global_preservation_fresh_journal_required');
@@ -88,14 +90,14 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
   const manifest = () => ({ schema: 'caveat.global_original_objects.v1' as const,
     objects: saved.map(row => ({ ...row.item, state: row.state, working: structuredClone(row.working), rows: structuredClone(row.rows), stateSha256: sha(row.rows) })),
     originalEvidence: structuredClone(originalEvidence), originalsReconstructed: false as const, automaticRecovery: false as const });
-  const verify = async () => {
-    await verifyBeforeMutation();
+  const verifyRetained = () => {
     assert.equal(createHash('sha256').update(guard.readPersistedJournal(evidenceDirectory, originalEvidence.name)).digest('hex'), originalEvidence.sha256, 'global_preservation_original_evidence_changed');
     for (const known of saved) {
       assert.deepEqual(guard.readTree(known.tree), known.rows, 'global_preservation_original_changed');
       if (known.working?.status === 'known' || known.working?.status === 'after-known' || known.working?.status === 'quarantined') assert.deepEqual(guard.readTree(workingTrees.get(known.item.step)!), known.working.rows, 'global_preservation_working_changed');
     }
   };
+  const verify = async () => { await verifyBeforeMutation(); verifyRetained(); };
   const record = (step: string, operation: GlobalJournalOperation, outcome: 'confirmed' | 'unknown', result: unknown, errorSha256?: string) => {
     const evidence = persist('state-' + initial.header.runId + '-' + journal.read().nextSequence + '.json', {
       schema: 'caveat.global_preservation_state.v1', planSha256: initial.header.planSha256, runId: initial.header.runId,
@@ -133,7 +135,40 @@ export function prepareGlobalObjectPreservation(guard: Guard, journal: Journal, 
     return { status: outcome, resultRecorded: true, result, ...(errorSha256 ? { errorSha256 } : {}), manifest: manifest() };
   };
   return {
-    manifest,
+    manifest, verifyNative: verifyRetained,
+    ownsGeneratedPath(path: string) { const value = generated.get(path); if (value) assert.deepEqual(guard.readTree(value.tree), value.rows, 'global_preservation_generated_changed'); return !!value; },
+    confirmGeneratedTree(path: string, tree: GlobalGuardTree, previousPath?: string) {
+      const current = journal.read(), last = current.records.at(-1);
+      assert.ok(current.status === 'ready' && last?.kind === 'result' && last.outcome === 'confirmed' && ['wrapper', 'manifest'].includes(last.operation), 'global_preservation_generated_unconfirmed');
+      assert.ok(isAbsolute(path) && (!previousPath || generated.has(previousPath)), 'global_preservation_generated_location_invalid');
+      const rows = guard.readTree(tree);
+      if (previousPath) generated.delete(previousPath);
+      generated.set(path, { tree, rows });
+    },
+    processProtection() {
+      assert.ok(['ready', 'complete'].includes(journal.read().status), 'global_preservation_process_journal_unconfirmed');
+      verifyRetained();
+      const objects = [], absent: string[] = [], mutationPaths: string[] = [];
+      for (const [path, value] of generated) {
+        assert.deepEqual(guard.readTree(value.tree), value.rows, 'global_preservation_generated_changed');
+        objects.push(...processProtectionTree(path, value.rows)); mutationPaths.push(path);
+      }
+      for (const row of saved) {
+        assert.ok(row.state !== 'unknown', 'global_preservation_process_object_unknown');
+        const original = join(row.item.directory, row.item.name), current = row.state === 'preserved' ? join(row.item.backupDirectory, row.item.backupName) : original;
+        mutationPaths.push(original, current); objects.push(...processProtectionTree(current, row.rows, original));
+        if (row.working && ['known', 'after-known', 'quarantined'].includes(row.working.status)) {
+          const path = row.working.status === 'quarantined' ? join(row.item.backupDirectory, 'used-' + row.working.stagingName) : original;
+          mutationPaths.push(path); objects.push(...processProtectionTree(path, row.working.rows!));
+        } else assert.ok(!row.working || row.working.status === 'absent', 'global_preservation_process_working_unknown');
+        if (row.state === 'preserved' && (!row.working || ['absent', 'quarantined'].includes(row.working.status))) {
+          const replacement = generated.get(original);
+          if (replacement) assert.deepEqual(guard.observe(row.item.directory, row.item.name), replacement.rows[0]!.identity, 'global_preservation_process_generated_changed');
+          else { assert.equal(guard.observe(row.item.directory, row.item.name), null, 'global_preservation_process_unknown_entry'); absent.push(original); }
+        }
+      }
+      return { objects, absent, mutationPaths: [...new Set(mutationPaths)], postMutation: saved.some(row => row.state !== 'original' || !!row.working) };
+    },
     async verifyCurrent() {
       assert.ok(!stopped, 'global_preservation_not_known');
       try { await verify(); } catch (error) { stopped = true; throw error; }

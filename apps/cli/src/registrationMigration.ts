@@ -4,8 +4,8 @@ import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve, relative, sep } from 'node:path';
 import { openGlobalPathGuard, createGlobalMutationJournal, parseGlobalMutationJournal, writeGlobalPrivateEvidence,
   snapshotGlobalTree, managedDeploymentPaths, readManagedDeploymentAtRoot, resolveManagedNode, bindManagedNodeProof,
-  managedNodeDirectories, managedNodePaths, preflightGlobalProcesses,
-  type GlobalGuardTree, type GlobalGuardTreeRow, type ManagedNodeProof, type ProcessProbeEvent, type GlobalProcessScope } from '@caveat/core';
+  managedNodeDirectories, managedNodePaths, managedNodeProcessObjects, processProtectionTree, preflightGlobalProcesses,
+  type GlobalGuardTree, type GlobalGuardTreeRow, type ManagedNodeProof, type ProcessProbeEvent, type GlobalProcessScope, type GlobalProcessProtection } from '@caveat/core';
 import { editRegistrationNodeBytes } from './registrationNodeCodec.js';
 import { registrationFileSpecs, type RegistrationSources } from './registrationProjection.js';
 
@@ -101,11 +101,30 @@ function scope(plan: Plan, roots: string[]): GlobalProcessScope {
     ...plan.files.map(row => row.path), ...plan.protected.map(row => row.path), ...roots,
   ])] };
 }
-async function freshProcesses(plan: Plan, roots: string[], preflight: Preflight, emit: Emit) {
-  const result = await preflight(scope(plan, roots), event => emit({ phase: event.phase, event: event.event, pid: event.pid, runId: null }));
-  if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true });
+async function freshProcesses(plan: Plan, roots: string[], preflight: Preflight, emit: Emit, protection: () => GlobalProcessProtection) {
+  const result = await preflight({ ...scope(plan, roots), retainedRoots: roots, protection }, event => emit({ phase: event.phase, event: event.event, pid: event.pid, runId: null }));
+  if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: !('protectionFailure' in result && result.protectionFailure && !result.protectionFailure.readOnly) });
   return result;
 }
+function registrationProcessProtection(plan: Plan, verify: () => void, model?: Model, origin?: string): () => GlobalProcessProtection {
+  return () => {
+    verify();
+    const objects = [...managedNodeProcessObjects(plan.node), ...plan.protected.flatMap(row => processProtectionTree(row.path, row.rows))], absent: string[] = [];
+    for (const [index, file] of plan.files.entries()) {
+      const item = model?.[index];
+      if (!item) objects.push(...processProtectionTree(file.path, file.original));
+      else {
+        for (const replacement of [false, true]) {
+          const place = location(plan, origin!, index, item, replacement);
+          objects.push(...processProtectionTree(join(place.directory, place.name), replacement ? item.replacement.rows : item.original.rows, file.path));
+        }
+        if (item.original.place !== 'config' && item.replacement.place !== 'config') absent.push(file.path);
+      }
+    }
+    return { objects, absent, postMutation: !!model, mutationPaths: objects.filter(row => plan.files.some(file => row.originalPath === file.path)).map(row => row.path) };
+  };
+}
+
 function bindCurrent(plan: Plan, seed: Seed, model: Model, roots: string[], guard: Guard) {
   const specs = validatePlan(plan, plan.home); modelKeys(model, plan, seed.origin, roots);
   const protectedVerify = bindProtected(plan, guard);
@@ -185,7 +204,7 @@ export async function bindRegistrationAdmission(input: RegistrationInput, emit: 
       for (const row of protectedObjects) assert.deepEqual(guard.readTree(row.token), protectedRows.find(value => value.path === row.path)!.rows, 'registration_protected_changed');
       for (const row of originals) guard.readTree(row.token);
     };
-    verify(); await freshProcesses(plan, [], preflight, emit); verify();
+    await freshProcesses(plan, [], preflight, emit, registrationProcessProtection(plan, verify));
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
     return { plan, planSha256: hash(plan), guard, originals, verify, close, preflight, clientsClosed: input.clientsClosed === true, processAssessment: () => processAssessment };
   } catch (error) { close(); throw error; }
@@ -300,7 +319,7 @@ export async function planRegistrationRecovery(home: string, run: string, planSh
   return withCurrent(home, run, planSha256, async (history, current, guard) => {
     const paths = managedDeploymentPaths(home);
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
-    current.verify(); const processAssessment = await freshProcesses(history.plan, history.roots.map(run => join(paths.root, run)), preflight, emit); current.verify(); history.verify();
+    const processAssessment = await freshProcesses(history.plan, history.roots.map(run => join(paths.root, run)), preflight, emit, registrationProcessProtection(history.plan, () => { current.verify(); history.verify(); }, history.model, history.seed.origin));
     assert.equal(guard.observe(paths.root, 'installer.lock'), null, 'registration_installer_busy');
     const evidenceSha256 = hash({ source: evidenceHash(history.refs), state: history.model, directories: guard.directoryBindings() });
     return { status: history.model.some(item => item.original.place === 'backup') ? 'ready' as const : 'already-original' as const,
@@ -391,7 +410,7 @@ export async function executeRegistrationAdmission(admission: Awaited<ReturnType
     assert.equal(admission.clientsClosed, true, 'registration_clients_must_be_closed');
     const { plan, guard, preflight } = admission, paths = managedDeploymentPaths(plan.home);
     assert.equal(hash(plan), admission.planSha256, 'registration_plan_changed'); assert.equal(admission.planSha256, expectedPlanSha256, 'registration_expected_plan_changed');
-    admission.verify(); await freshProcesses(plan, [], preflight, emit); admission.verify();
+    await freshProcesses(plan, [], preflight, emit, registrationProcessProtection(plan, admission.verify));
     phase = 'prepare'; run = 'registration-migration-' + randomBytes(16).toString('hex'); emit({ phase, event: 'issued', runId: run });
     attempt = openAttempt(guard, plan, run);
     const staged = admission.originals.map((row, index) => {
@@ -407,7 +426,7 @@ export async function executeRegistrationAdmission(admission: Awaited<ReturnType
     const journal = createGlobalMutationJournal(guard, attempt.directory, 'journal.jsonl', expectedPlanSha256);
     const held = admission.originals.map((row, index) => ({ original: row.token, replacement: staged[index]! }));
     const verifySync = () => { admission.verify(); attempt!.verifyLock(); verifyModel(guard, plan, seed, model, held, run!); };
-    const verify = async () => { verifySync(); await freshProcesses(plan, [attempt!.directory], preflight, emit); verifySync(); };
+    const verify = async () => { await freshProcesses(plan, [attempt!.directory], preflight, emit, registrationProcessProtection(plan, () => { assert.ok(['ready', 'complete'].includes(journal.read().status), 'registration_process_journal_unconfirmed'); verifySync(); }, model, seed.origin)); };
     for (let index = 0; index < 7; index++) {
       await verify();
       // Keep process probes and promise scheduling outside the same-file rename pair.
@@ -440,7 +459,7 @@ export async function executeRegistrationRecovery(home: string, sourceRun: strin
     assert.equal(clientsClosed, true, 'registration_clients_must_be_closed');
     return await withCurrent(home, sourceRun, planSha256, async (history, current, guard) => {
       const { plan, seed: oldSeed, model } = history, paths = managedDeploymentPaths(home);
-      current.verify(); history.verify(); await freshProcesses(plan, history.roots.map(run => join(paths.root, run)), preflight, emit); current.verify(); history.verify();
+      await freshProcesses(plan, history.roots.map(run => join(paths.root, run)), preflight, emit, registrationProcessProtection(plan, () => { current.verify(); history.verify(); }, model, oldSeed.origin));
       const evidenceSha256 = hash({ source: evidenceHash(history.refs), state: model, directories: guard.directoryBindings() });
       assert.equal(evidenceSha256, expectedEvidenceSha256, 'registration_expected_evidence_changed');
       assert.ok(model.some(item => item.original.place === 'backup'), 'registration_already_original');
@@ -451,7 +470,7 @@ export async function executeRegistrationRecovery(home: string, sourceRun: strin
         writeGlobalPrivateEvidence(guard, attempt.directory, 'seed.json', seed);
         const journal = createGlobalMutationJournal(guard, attempt.directory, 'journal.jsonl', planSha256);
         const verifySync = () => { current.verify(); history.verify(); attempt.verifyLock(); verifyModel(guard, plan, seed, model, current.held, run!); };
-        const verify = async () => { verifySync(); await freshProcesses(plan, [...history.roots.map(run => join(paths.root, run)), attempt.directory], preflight, emit); verifySync(); };
+        const verify = async () => { await freshProcesses(plan, [...history.roots.map(run => join(paths.root, run)), attempt.directory], preflight, emit, registrationProcessProtection(plan, () => { assert.ok(['ready', 'complete'].includes(journal.read().status), 'registration_process_journal_unconfirmed'); verifySync(); }, model, seed.origin)); };
         for (let index = 0; index < 7; index++) {
           await verify();
           if (model[index]!.replacement.place === 'config') { phase = 'quarantine.' + index; performMove(guard, journal, plan, seed, model, current.held, run, 'quarantine', index, verifySync, emit); }

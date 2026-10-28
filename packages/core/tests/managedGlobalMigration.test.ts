@@ -201,7 +201,7 @@ describe('product-owned shell publication and known-only rollback', () => {
       expect((await session.shell.quarantineKnown()).status).toBe('quarantined');
       for (const row of session.engine.manifest().objects) expect((await session.engine.restoreKnown(row.step)).status).toBe('confirmed');
       expect(existsSync(join(f.binDirectory, 'caveat'))).toBe(false);
-      writeFileSync(join(f.binDirectory, 'caveat'), 'new foreign wrapper'); await expect(session.verify()).rejects.toThrow('absent_leaf_appeared');
+      writeFileSync(join(f.binDirectory, 'caveat'), 'new foreign wrapper'); await expect(session.verify()).rejects.toMatchObject({ preflight: { status: 'stopped', errors: ['protected_objects_observation_unconfirmed'] } });
     } finally { session.close(); }
   });
   it('retains known partial publication when preflight stops before the manifest and permits only a fresh known quarantine', { timeout: 120000 }, async () => {
@@ -345,7 +345,7 @@ describe('read-only admission and native-v2 independent status', () => {
     try {
       expect(admission.plan.absences).toMatchObject([{ path: absent, parent: f.profile }]);
       mkdirSync(dirname(absent));
-      await expect(admission.prepare(admission.planSha256)).rejects.toThrow('absence_changed'); expect(existsSync(f.paths.lock)).toBe(false);
+      await expect(admission.prepare(admission.planSha256)).rejects.toMatchObject({ preflight: { status: 'stopped', errors: ['protected_objects_observation_unconfirmed'] } }); expect(existsSync(f.paths.lock)).toBe(false);
     } finally { admission.close(); }
   });
   it('reopens native-v2 status after release and detects a missing wrapper without altering it', { timeout: 120000 }, async () => {

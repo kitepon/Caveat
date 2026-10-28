@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assessGlobalProcesses, preflightGlobalProcesses } from '../src/managedGlobalProcesses.js';
+import { assessGlobalProcesses, preflightGlobalProcesses, type GlobalProcessProtection } from '../src/managedGlobalProcesses.js';
 import { decodeWindowsProcessTables, ownedProcessProbe, parseLinuxProcessStat, parseWindowsProcessArguments, parseMacTextImages, readLinuxProcessTables, readMacProcessTables, WINDOWS_PROCESS_PROBE, type NativeProcessRecord, type NativeProcessTables, type ProcessProbeEvent } from '../src/managedProcessNative.js';
 import { globalNpmEnvironment, isWindows, quoteWindowsArgument } from '../src/platform.js';
 
@@ -73,6 +73,14 @@ describe('global process assessment', () => {
     const row = { ...record(20), executable: null, argv: null, reason: 'EACCES' };
     const result = assessGlobalProcesses(scope, tables(row));
     expect(result.status).toBe('stopped'); expect(result.unknown).toBe(1);
+    expect(result.records[1]?.resolution?.action).toBe('unresolved'); expect(result.unresolvedStops).toBe(1);
+  });
+  it('gives the identified consumer and npm writer distinct normal completion steps', () => {
+    const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', scope.packageRoot + '/dist/caveat.js', 'mcp-server']),
+      record(21, '/runtime/node', ['node', scope.npmRoot + '/bin/npm-cli.js', 'uninstall'])));
+    expect(result.records[1]?.resolution).toMatchObject({ action: 'close-process', instruction: expect.stringContaining('PID 20') });
+    expect(result.records[2]?.resolution).toMatchObject({ action: 'finish-npm-operation', instruction: expect.stringContaining('PID 21') });
+    expect(result.unresolvedStops).toBe(0); expect(result.status).toBe('stopped'); expect(result.existingProcessOperations).toBe(0);
   });
   it.each(['birth', 'executable'] as const)('stops on changed process %s', field => {
     const value = tables(record(20));
@@ -192,6 +200,34 @@ describe('global process assessment', () => {
     expect(row.observation?.nativeIssues).toContain('windows-metadata:executable-null:null');
     expect(JSON.stringify(result)).not.toContain('private-argument');
   });
+  it('admits a same-owner unresolvable image only with bracketed identity and independent object proof', async () => {
+    const image: NativeProcessRecord = { ...record(20), executable: null, ownerProof: 'darwin-kinfo-proc', imageIdentityBound: true,
+      kernelFailure: { stage: 'image-proc-pidpath', nativeCode: 2 }, text: { status: 'unreadable', identities: [], stage: 'region-read', nativeCode: 1 } };
+    const proof: GlobalProcessProtection = { objects: [scope.packageRoot, scope.npmRoot, ...scope.binAliases].map((path, i) => ({ path, originalPath: path, dev: '2', ino: String(i + 1) })), absent: [], postMutation: false };
+    expect(assessGlobalProcesses(scope, tables(image), proof)).toMatchObject({ status: 'ready', counts: { 'same-uid-unresolvable-image': 1 } });
+    for (const kind of ['missing-proof', 'missing-bracket', 'wrong-errno', 'missing-argv', 'owner-change', 'birth-change', 'literal', 'protected-text']) {
+      const data = tables(structuredClone(image));
+      if (kind === 'missing-bracket') delete data.before[1]!.imageIdentityBound;
+      if (kind === 'wrong-errno') data.before[1]!.kernelFailure!.nativeCode = 13;
+      if (kind === 'missing-argv') data.before[1]!.argv = null;
+      if (kind === 'owner-change') data.after[1]!.uid = 999;
+      if (kind === 'birth-change') data.after[1]!.birth = 'changed';
+      if (kind === 'literal') data.before[1]!.argv!.push(scope.packageRoot);
+      if (kind === 'protected-text') data.after[1]!.text!.identities.push({ dev: '2', ino: '1' });
+      expect(assessGlobalProcesses(scope, data, kind === 'missing-proof' ? undefined : proof).status, kind).toBe('stopped');
+    }
+    let probes = 0;
+    const changed = await preflightGlobalProcesses({ ...scope, protection: () => { const p = structuredClone(proof); p.objects[0]!.ino = String(++probes); return p; } }, () => {}, async () => tables(image));
+    expect(changed.status).toBe('stopped'); expect(changed.errors).toContain('protected_objects_observation_unconfirmed');
+  });
+  it('stops a retained executable or script even when its original scope literal is absent', () => {
+    const retained = '/private/run/original-package', proof: GlobalProcessProtection = { objects: [
+      { path: retained, originalPath: scope.packageRoot, dev: '2', ino: '1' },
+      { path: scope.npmRoot, originalPath: scope.npmRoot, dev: '2', ino: '2' },
+    ], absent: scope.binAliases, postMutation: true };
+    expect(assessGlobalProcesses(scope, tables(record(20, retained + '/bin/custom', ['custom'])), proof)).toMatchObject({ status: 'stopped', consumers: 1 });
+    expect(assessGlobalProcesses({ ...scope, retainedRoots: ['/private/run'] }, tables(record(20, '/usr/bin/node', ['node', retained + '/consumer.cjs'])), proof).consumers).toBe(1);
+  });
   it('does not retain arbitrary arguments or executable paths in public projections', () => {
     const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', 'secret-argument-value'])));
     expect(JSON.stringify(result)).not.toContain('secret-argument-value');
@@ -236,6 +272,12 @@ describe('native process parsers and owned transport', () => {
     expect(assessGlobalProcesses(scope, readLinuxProcessTables(root)).status).toBe('stopped');
     const exited = readLinuxProcessTables(root, pid => pid === gonePid);
     expect(exited.confirmedExitedDuringRead).toBe(2); expect(assessGlobalProcesses(scope, exited).status).toBe('ready');
+    // A process can lose argv/image before its final stat read without producing an outer ENOENT.
+    const gone = join(root, String(gonePid));
+    writeFileSync(join(gone, 'stat'), gonePid + ' (exiting fixture) ' + fields.join(' '));
+    writeFileSync(join(gone, 'status'), 'Uid: 1000 1000 1000 1000\n'); writeFileSync(join(gone, 'cmdline'), '');
+    expect(assessGlobalProcesses(scope, readLinuxProcessTables(root)).status).toBe('stopped');
+    expect(assessGlobalProcesses(scope, readLinuxProcessTables(root, pid => pid === gonePid)).status).toBe('ready');
     rmSync(join(live, 'cmdline'));
     expect(assessGlobalProcesses(scope, readLinuxProcessTables(root, pid => pid === gonePid)).status).toBe('stopped');
   });
@@ -281,6 +323,12 @@ describe('native process parsers and owned transport', () => {
     const result = await ownedProcessProbe(value => events.push(value))(process.execPath, ['-e', code], 'cim', Date.now() + 5000);
     expect(events.map(value => value.phase + ':' + value.event)).toEqual(['cim:issued', 'cim:started', 'cim:before:completed', 'cim:completed']);
     expect(result.stdout).toContain('private-payload'); expect(JSON.stringify(events)).not.toContain('private-payload');
+  });
+  it('passes bounded private UTF-8 input through an owned pipe without adding it to argv', async () => {
+    const input = Buffer.from(JSON.stringify({ files: ['C:\\非ASCII\\private.js'] }));
+    const result = await ownedProcessProbe(() => {}, { input })(process.execPath, ['-e', 'process.stdin.pipe(process.stdout)'], 'fixture', Date.now() + 5000);
+    expect(result.stdout).toBe(input.toString());
+    await expect(ownedProcessProbe(() => {}, { input: Buffer.alloc(8 * 1024 * 1024 + 1) })(process.execPath, [], 'fixture', Date.now() + 5000)).rejects.toThrow('process_probe_input_bound');
   });
   it('bounds a hung child and never retries it', async () => {
     const events: ProcessProbeEvent[] = [];

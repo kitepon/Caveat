@@ -8,10 +8,11 @@ import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
 export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; identityBound?: true; decodeReason?: string };
+export type MacTextObservation = { status: 'read' | 'unreadable'; identities: { dev: string; ino: string }[]; stage: string; nativeCode: number | null };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
   executable: ProcessExecutable | null; argv: string[] | null; state?: string;
-  ownerProof?: 'darwin-kinfo-proc'; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
+  ownerProof?: 'darwin-kinfo-proc'; imageIdentityBound?: true; text?: MacTextObservation; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 /** A denied size query is usable only after kinfo has bound the call on both sides. */
 export function isMacForeignArgumentDenial(row: NativeProcessRecord) {
@@ -60,12 +61,13 @@ function executable(file: string, path = file): ProcessExecutable {
 }
 
 /** Only the child created here may be terminated. Close, not exit, completes the probe. */
-export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = () => {}, options: { env?: NodeJS.ProcessEnv; cwd?: string; outputLimit?: number } = {}): ProcessProbeRun {
+export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = () => {}, options: { env?: NodeJS.ProcessEnv; cwd?: string; outputLimit?: number; input?: Buffer } = {}): ProcessProbeRun {
   return (command, args, phase, deadline) => new Promise((resolve, reject) => {
     const timeout = deadline - Date.now();
     if (timeout <= 0) { reject(Error('process_probe_deadline')); return; }
+    if (options.input && options.input.length > 8 * 1024 * 1024) { reject(Error('process_probe_input_bound')); return; }
     onEvent({ phase, event: 'issued' });
-    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, env: options.env ?? { ...process.env, LC_ALL: 'C' }, ...(options.cwd ? { cwd: options.cwd } : {}) });
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: options.env ?? { ...process.env, LC_ALL: 'C' }, ...(options.cwd ? { cwd: options.cwd } : {}) });
     const chunks: Buffer[] = []; let size = 0, failure: Error | undefined, settled = false, progress = '', spawned = false, exited = false, terminationRequested = false;
     const observedFailure = (error: Error, closed: boolean) => Object.assign(error, { ownedProbe: {
       pid: child.pid ?? null, spawned, exitObserved: child.exitCode !== null || child.signalCode !== null,
@@ -78,12 +80,13 @@ export function ownedProcessProbe(onEvent: (event: ProcessProbeEvent) => void = 
       teardown = setTimeout(() => {
         if (settled) return;
         settled = true;
-        child.stdout.destroy(); child.stderr.destroy(); child.unref();
+        child.stdin?.destroy(); child.stdout.destroy(); child.stderr.destroy(); child.unref();
         try { onEvent({ phase, event: 'stopped', pid: child.pid }); } catch { /* Teardown still rejects. */ }
         reject(observedFailure(Error('process_probe_close_unconfirmed', { cause: failure }), false));
       }, 1000);
     };
     const timer = setTimeout(() => stop(Error('process_probe_timeout')), timeout);
+    child.stdin.on('error', () => stop(Error('process_probe_input_failed'))); child.stdin.end(options.input);
     const emit = (value: ProcessProbeEvent) => {
       try { onEvent(value); }
       catch { stop(Error('process_probe_receipt_failed')); }
@@ -192,7 +195,7 @@ export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number)
       const row = linuxRecord(procRoot, pid);
       total += Buffer.byteLength(JSON.stringify(row));
       assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
-      if (row.reason === 'ENOENT' && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedDuringRead++; return null; }
+      if ((row.reason === 'ENOENT' || !row.argv || !row.executable) && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedDuringRead++; return null; }
       return row;
     }).filter((row): row is NativeProcessRecord => row !== null);
   };
@@ -275,7 +278,7 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
     // lsof corroborates executable identity; the two kernel tables define the observation scope.
     const filtered = rows.filter(row => !owned.has(row.pid));
     return filtered.map(row => {
-      if (row.reason || row.state === 'Z' || row.kernel) return row;
+      if (row.reason || row.state === 'Z' || row.kernel || row.imageIdentityBound && !row.executable) return row;
       const image = row.executable;
       if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
         const callerUid = before.find(value => value.pid === process.pid)?.uid;

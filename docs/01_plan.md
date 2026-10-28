@@ -547,18 +547,50 @@ succeeds and the actual read fails with EINVAL, or the size query itself fails
 with EINVAL and equal kinfo PID, birth and uid bracket that call. Both births and kernel executable
 identities must agree, with a readable image in each observation. Argument access
 alone may vary. Readable literals and bound paths are checked first. Unobservable
-runtimes, missing owners, same-uid gaps, other errno/stages and changed birth/image
-remain stopped. The exception does not prove the absence of foreign non-runtime
+Node identities, missing owners, unclassified same-uid gaps, other errno/stages and changed birth/image
+remain stopped. Other foreign interpreters/helpers retain runtime classification
+but may use the foreign-user exception when they are outside package/npm roots. The exception does not prove the absence of foreign non-runtime
 consumers or writers, or administrator/root exclusivity.
 
-Windows keeps metadata refusal intact. Owner failures report their native stage
-and error code. A bounded ordinary CIM GetOwnerSid attempt may corroborate a SID
-only after matching the process birth again; denial never proves a foreign user.
-Windows normal-host readiness is not accepted in this release. CI requires a
-typed stopped result with no unexplained unknowns, plus literal-consumer and
-same-owner metadata-fault refusal; this does not authorize migration. No debug privilege or elevation is enabled. The twenty-second owned-child deadline
-and verified close remain mandatory. Real-runner receipts aggregate metadata gaps
-by owner relationship and native stage without exposing argv, image paths or SIDs.
+Darwin can also classify `same-uid-unresolvable-image` for exact proc_pidpath
+ENOENT/ESRCH, matching kinfo PID/birth/uid around each call and across observations,
+and complete decoded argv outside literal/bound scope. A caller must independently
+verify every protected object before and after the same process collection:
+original package/npm/aliases and read-only Node/libnode identities, or current
+locations admitted by confirmed native journals. Original slots must be absent or
+contain only the confirmed working copy or confirmed npm remainder, with the full
+tree, kind, mode, bytes and device/inode unchanged and no unknown entry. Pending,
+torn and unknown journal paths grant no classification. Both retained and working
+locations participate in literal and executable/script binding checks.
+
+The native reader attempts bounded executable-text-region device/inode reads
+through documented libproc.h APIs; matching any protected object stops the
+process. Unreadable text is reported explicitly. Post-mutation use of the
+unreadable-text inference requires the real Mac runner's owned executable-directory
+rename check: the kernel must report the quarantine path and the process must be
+stopped by executable binding. Failed qualification leaves Mac postchecks
+unaccepted. An unlinked same-owner Node can still import the old global later;
+quarantine makes that import fail. Foreign processes not bound to Node identities
+can still read or copy it, and root/administrator exclusion is not proven.
+
+Windows global migration remains incomplete until a non-privileged, documented
+object-based observation provides a reachable ready state. Typed access denial
+alone is not acceptance. The intended gate retains observable argv/exe checks,
+queries users of protected package/npm/alias resources, refuses a fixture holder,
+and returns to ready after that holder closes. Debug privilege, elevation, ACL
+changes, undocumented APIs and process-name exclusions are forbidden. Every stop
+must identify an actionable resolution; unresolved ordinary-host unknowns leave
+that OS incomplete. Fox read-only observation requires separate owner approval. The current resource-query
+qualification uses an owned, bounded PowerShell child and stdin for private file
+paths. It imports only RmStartSession/RmRegisterResources/RmGetList/RmEndSession;
+these may update the OS-managed session registry but do not modify resource files.
+A real holder/release fixture and a read-only system-module query report actual
+coverage. They do not enable a metadata-denial bypass or qualify product readiness
+until foreign-user, service and elevated-user coverage is established. The query
+reports whether its observer token is administrative; an administrative runner's
+diagnostic result cannot establish ordinary-user coverage. Consumer stops identify
+the PID to close normally, while writer stops require the npm operation to finish.
+Other unknowns explicitly report that no supported resolution is established.
 
 Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
 the executable with lsof text-file device/inode data. Darwin argv decoding uses

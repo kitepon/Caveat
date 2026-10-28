@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { openGlobalPathGuard, GlobalGuardTree, GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import type { createGlobalMutationJournal } from './managedGlobalJournal.js';
@@ -46,11 +47,10 @@ export function prepareGlobalShellInstallation(guard: Guard, journal: Journal, e
     catch (error) { return { status: 'stopped' as const, errorSha256: errorSha(error), shell: snapshot() }; }
     const step = (restore ? 'retire.generated.' : 'publish.generated.') + row.name;
     journal.intent(step, operation, sha(snapshot()));
-    let result: unknown, errorSha256: string | undefined, stoppedAfterCheck = false;
-    try { result = mutate(); await verify(); verifyOwned(); }
+    let result: unknown, errorSha256: string | undefined;
+    try { result = mutate(); engine.verifyNative(); verifyOwned(); }
     catch (error) {
-      stoppedAfterCheck = result !== undefined && !!(error as { readOnlyCheckFailed?: boolean })?.readOnlyCheckFailed;
-      if (!stoppedAfterCheck) { uncertain = true; row.status = 'unknown'; }
+      uncertain = true; row.status = 'unknown';
       errorSha256 = errorSha(error);
       const observe = (directory: string, name: string) => { try { const identity = guard.observe(directory, name); return identity ? { state: 'present', identity } : { state: 'absent' }; } catch { return { state: 'unknown' }; } };
       result = { operationResult: (error as { operationResult?: unknown })?.operationResult ?? result,
@@ -60,7 +60,20 @@ export function prepareGlobalShellInstallation(guard: Guard, journal: Journal, e
     const outcome = uncertain ? 'unknown' : 'confirmed';
     try { record(step, operation, outcome, result, errorSha256); }
     catch (error) { uncertain = true; return { status: 'unknown' as const, resultRecorded: false, errorSha256: errorSha(error), shell: snapshot() }; }
-    if (stoppedAfterCheck) { uncertain = true; return { status: 'stopped' as const, errorSha256, shell: snapshot(), recovery: 'fresh-known-only-plan-required' as const }; }
+    if (outcome === 'confirmed') {
+      const original = join(row === manifest ? root : plan.binDir, row.name), current = restore ? join(runDirectory, 'used-' + row.backupName) : original;
+      try { engine.confirmGeneratedTree(current, held.get(row.name)!, restore ? original : undefined); await verify(); verifyOwned(); }
+      catch (error) {
+        uncertain = true;
+        const readOnly = !!(error as { readOnlyCheckFailed?: boolean })?.readOnlyCheckFailed;
+        if (!readOnly) {
+          row.status = 'unknown';
+          const check = 'verify.' + step; journal.intent(check, operation, sha(snapshot()));
+          record(check, operation, 'unknown', { verificationFailed: true }, errorSha(error));
+        }
+        return { status: readOnly ? 'stopped' as const : 'unknown' as const, resultRecorded: true, errorSha256: errorSha(error), shell: snapshot(), recovery: 'fresh-known-only-plan-required' as const };
+      }
+    }
     return { status: outcome, shell: snapshot() };
   };
   return {

@@ -8,6 +8,7 @@ import { prepareGlobalObjectPreservation, type GlobalPreservationObject } from '
 import { globalFilesystemNativeSpec, isWindows } from '../src/platform.js';
 import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
 import { createWindowsGlobalGuard } from '../src/managedWindowsGuard.js';
+import { preflightGlobalProcesses } from '../src/managedGlobalProcesses.js';
 import { runOwnedGlobalNpm } from '../src/managedGlobalNpm.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 const roots: string[] = [], plan = 'c'.repeat(64);
@@ -75,6 +76,24 @@ describe('held original trees and known-only preservation', () => {
       const evidence = readFileSync(join(backup, 'state-' + final.header.runId + '-' + last.sequence + '.json'));
       expect(JSON.parse(evidence.toString()).manifest.objects[0].state).toBe('restored');
       expect(engine.manifest().objects[0]!.state).toBe('restored'); expect(journal.read().status).toBe('ready');
+    } finally { guard.close(); }
+  });
+  it.each(['unknown-file', 'rewritten-file'])('stops the process observation when a confirmed working copy changes: %s', async kind => {
+    const { source, backup, objects, pkg } = fixture(), guard = await openGlobalPathGuard([source, backup]);
+    try {
+      const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
+      expect((await engine.preserveAll()).status).toBe('preserved'); expect((await engine.createWorkingCopies()).status).toBe('working');
+      const image = statSync(process.execPath, { bigint: true }), executable = { path: realpathSync(process.execPath), dev: String(image.dev), ino: String(image.ino) };
+      const self = { pid: process.pid, ppid: process.ppid, birth: 'fixture', uid: 1000, executable, argv: [process.execPath] };
+      const tables = () => ({ before: [self], after: [structuredClone(self)], errors: [], selfPid: process.pid, selfExecutable: executable, caseInsensitive: false });
+      const scope = { protectedPaths: [pkg], binAliases: [], protection: () => engine.processProtection() };
+      expect((await preflightGlobalProcesses(scope, () => {}, async () => tables())).status).toBe('ready');
+      const result = await preflightGlobalProcesses(scope, () => {}, async () => {
+        if (kind === 'unknown-file') writeFileSync(join(pkg, 'unreviewed.js'), 'unknown');
+        else writeFileSync(join(pkg, 'node_modules/dep/index.js'), 'foreign rewrite');
+        return tables();
+      });
+      expect(result.status).toBe('stopped'); expect(result.errors).toContain('protected_objects_observation_unconfirmed');
     } finally { guard.close(); }
   });
   it('stops before intent or original mutation for an unknown process/writer from the mandatory caller check', async () => {

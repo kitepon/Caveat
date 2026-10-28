@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { realpathSync } from 'node:fs';
-import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacProcessArguments } from '../src/managedMacProcessNative.js';
+import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacProcessArguments, readMacTextRegions } from '../src/managedMacProcessNative.js';
 import { isWindows } from '../src/platform.js';
 
 describe('native process bridge and Darwin layouts', () => {
@@ -52,6 +52,18 @@ describe('native process bridge and Darwin layouts', () => {
     expect(readMacProcessArguments(42, () => -1, () => 22)).toEqual({ argv: null, failure: { stage: 'size', nativeCode: 22, sizeQuerySucceeded: false } });
     expect(readMacProcessArguments(42, (_mib, _count, _bytes, length) => { length[0] = 2 ** 30; return 0; }, () => 0).failure?.stage).toBe('size-bound');
     expect(readMacProcessArguments(42, (_mib, _count, bytes, length) => { length[0] = 128; return bytes ? -1 : 0; }, () => 13).failure?.nativeCode).toBe(13);
+  });
+  it('reads text vnode device/inode without substituting paths and retains partial failures', () => {
+    let calls = 0;
+    const result = readMacTextRegions(42, (_pid, flavor, address, bytes) => {
+      expect(flavor).toBe(8); calls++;
+      if (address > 0n) return 0;
+      bytes.writeUInt32LE(5, 0); bytes.writeBigUInt64LE(4096n, 88);
+      bytes.writeUInt32LE(123, 96); bytes.writeBigUInt64LE(987n, 104); return bytes.length;
+    }, () => 22);
+    expect(calls).toBe(2); expect(result).toMatchObject({ status: 'read', identities: [{ dev: '123', ino: '987' }] });
+    expect(readMacTextRegions(42, () => 0, () => 1)).toMatchObject({ status: 'unreadable', nativeCode: 1, identities: [] });
+    expect(readMacTextRegions(42, (_pid, _flavor, _address, bytes) => bytes.length, () => 0)).toMatchObject({ status: 'unreadable', stage: 'region-bound' });
   });
   it('checks the BSD ABI size, PID and microsecond birth instead of the process name', () => {
     const bytes = Buffer.alloc(136); bytes.writeUInt32LE(42, 12); bytes.writeUInt32LE(1, 16); bytes.writeUInt32LE(501, 20);
