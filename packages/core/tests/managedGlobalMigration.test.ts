@@ -17,7 +17,9 @@ import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platfor
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 import type { NativeProcessTables } from '../src/managedProcessNative.js';
 import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
-import { openGlobalPathGuard } from '../src/managedGlobalGuard.js';
+import { bindGlobalPathGuard, openGlobalPathGuard } from '../src/managedGlobalGuard.js';
+import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
+import { globalFilesystemNativeSpec } from '../src/platform.js';
 import { snapshotGlobalTree } from '../src/managedGlobalSnapshot.js';
 import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
@@ -364,7 +366,10 @@ describe('read-only admission and native-v2 independent status', () => {
   });
   it.skipIf(isWindows())('rejects a writable npm parent before creating private run state', { timeout: 60000 }, async () => {
     const f = fixture(), before = readdirSync(f.paths.root); chmodSync(dirname(dirname(f.input.snapshot.npmAlias)), 0o770);
-    await expect(bindGlobalAdmission(f.input, () => {}, async () => tables())).rejects.toThrow('global_guard_writable_parent');
+    await expect(bindGlobalAdmission(f.input, () => {}, async () => tables(), async paths => bindGlobalPathGuard(paths,
+      await createPosixGlobalGuard(globalFilesystemNativeSpec(), { user: () => 'fixture-owner',
+        group: gid => ({ name: 'shared-workers', gid, members: ['another-user'] }), namedGroup: () => null,
+        primaryUsers: () => ({ uids: [process.geteuid!()] }) })))).rejects.toThrow('global_guard_writable_parent');
     expect(readdirSync(f.paths.root)).toEqual(before); expect(existsSync(f.paths.lock)).toBe(false); expect(existsSync(f.packageRoot)).toBe(true);
   });
   it('binds absent settings and their nearest existing parent before mutation', { timeout: 60000 }, async () => {
@@ -449,6 +454,18 @@ describe('coordinator readback changes after close', () => {
 });
 
 describe('built product global CLI', () => {
+  it.skipIf(isWindows()).each(['global-plan', 'global-migrate'])('prints actionable parent diagnostics for %s without writes', { timeout: 60000 }, mode => {
+    const f = fixture(); chmodSync(f.prefix, 0o777); const before = readdirSync(f.paths.root);
+    const args = ['deployment', mode, '--global-root', f.globalRoot, '--npm-cli', f.input.snapshot.npmAlias, '--json'];
+    if (mode === 'global-migrate') args.push('--expected-plan-sha256', '0'.repeat(64));
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url)), ...args],
+      { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 60000 });
+    expect(cli.status, cli.stderr).toBe(1);
+    const result = JSON.parse(cli.stdout.trim().split('\n').at(-1)!);
+    expect(result).toMatchObject({ status: 'stopped', reason: 'global_guard_writable_parent', filesystemWrites: 0, existingProcessOperations: 0,
+      diagnostic: { path: f.prefix, mode: '0777', uid: String(process.getuid!()), gid: String(statSync(f.prefix).gid), remedy: expect.stringContaining('chmod o-w') } });
+    expect(result.errorSha256).toMatch(/^[a-f0-9]{64}$/); expect(readdirSync(f.paths.root)).toEqual(before);
+  });
   it('derives protected settings and accepts a real normal table without private run writes', { timeout: 120000 }, async () => {
     const f = fixture(), { globalMigrationInput } = await import('../../../apps/cli/src/commands/globalMigration.js');
     const options = { globalRoot: f.globalRoot, npmCli: f.input.snapshot.npmAlias };

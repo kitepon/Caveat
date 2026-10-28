@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { win32 } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 
@@ -32,8 +33,8 @@ export function verifyGuardAcl(bytes: Buffer, trusted: Set<string>, mutation: bo
   assert.ok(offset <= bytes.length, 'global_guard_invalid_acl');
 }
 
-type Ref = { handle: unknown; mutation: boolean };
-export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
+type Ref = { handle: unknown; mutation: boolean; pin?: boolean; path: string };
+export async function createWindowsGlobalGuard(readOwner: (path: string, nativeSid: string) => string = (_path, sid) => sid): Promise<NativeGuardDriver> {
   const koffi = await import('koffi');
   assert.equal(koffi.sizeof('void *'), 8, 'global_guard_64_bit_windows_required');
   const kernel = koffi.load('kernel32.dll'), native = koffi.load('ntdll.dll'), security = koffi.load('advapi32.dll');
@@ -51,6 +52,13 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
   const getSecurity = security.func('uint32_t __stdcall GetSecurityInfo(void *handle, int type, uint32_t requested, _Out_ void **owner, _Out_ void **group, _Out_ void **dacl, void *sacl, _Out_ void **descriptor)');
   const descriptorControl = security.func('int __stdcall GetSecurityDescriptorControl(const void *descriptor, _Out_ uint16_t *control, _Out_ uint32_t *revision)');
   const toString = security.func('int __stdcall ConvertSecurityDescriptorToStringSecurityDescriptorW(const void *descriptor, uint32_t revision, uint32_t requested, _Out_ void **text, _Out_ uint32_t *length)');
+  const lookupAccount = security.func('int __stdcall LookupAccountSidW(str16 system, const void *sid, _Out_ void *name, _Inout_ uint32_t *nameSize, _Out_ void *domain, _Inout_ uint32_t *domainSize, _Out_ uint32_t *use)');
+  const ownerName = (sid: unknown) => {
+    const name = Buffer.alloc(2048), domain = Buffer.alloc(2048), nameSize = [1024], domainSize = [1024], use = [0];
+    if (!lookupAccount(null, sid, name, nameSize, domain, domainSize, use)) return null;
+    const text = (bytes: Buffer, length: number) => bytes.subarray(0, length * 2).toString('utf16le').replace(/\0+$/, '');
+    return text(domain, domainSize[0]!) + '\\' + text(name, nameSize[0]!);
+  };
   const localFree = kernel.func('void * __stdcall LocalFree(void *memory)');
   const currentProcess = kernel.func('void * __stdcall GetCurrentProcess()');
   const openToken = security.func('int __stdcall OpenProcessToken(void *process, uint32_t access, _Out_ void **token)');
@@ -87,8 +95,12 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
     const owner: unknown[] = [null], group: unknown[] = [null], dacl: unknown[] = [null], sd: unknown[] = [null];
     assert.equal(getSecurity(ref.handle, 1, 7, owner, group, dacl, null, sd), 0, 'global_guard_security_unavailable');
     try {
-      const ownerSid = sidAt(owner[0]), groupSid = sidAt(group[0]);
-      assert.ok(isGuardTrustedOwner(ownerSid, currentSid, ref.mutation), 'global_guard_foreign_owner');
+      const ownerSid = readOwner(ref.path, sidAt(owner[0])), groupSid = sidAt(group[0]);
+      if (!isGuardTrustedOwner(ownerSid, currentSid, ref.mutation)) {
+        throw Object.assign(new assert.AssertionError({ message: 'global_guard_foreign_owner' }), { diagnostic: {
+          reason: 'global_guard_foreign_owner', path: ref.path, ownerSid, ownerName: ownerName(owner[0]),
+          remedy: 'Review this object owner and use the original owning account; protected pins trust the user and Windows system trustees.' } });
+      }
       assert.ok(dacl[0], 'global_guard_null_dacl');
       if (privateFile) {
         const control = [0], revision = [0];
@@ -96,7 +108,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
         assert.ok((Number(control[0]) & 0x1000) !== 0, 'global_journal_dacl_unprotected');
       }
       const header = bytesAt(dacl[0], 8), size = header.readUInt16LE(2);
-      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.mutation, privateFile ? currentSid : undefined);
+      assert.ok(size >= 8 && size <= 65535, 'global_guard_acl_bound'); verifyGuardAcl(bytesAt(dacl[0], size), trusted, ref.pin || ref.mutation, privateFile ? currentSid : undefined);
       const text: unknown[] = [null], length = [0];
       assert.notEqual(toString(sd[0], 1, 7, text, length), 0, 'global_guard_security_unavailable');
       try {
@@ -134,15 +146,15 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       mtime: String(basic.readBigInt64LE(16)), ctime: String(basic.readBigInt64LE(24)), mode: basic.readUInt32LE(32), ...descriptor(ref), ...(contentSha256 ? { contentSha256 } : {}) };
   };
   const openChild = (parent: object, name: string, purpose: Parameters<NativeGuardDriver['openChild']>[2], creating: false | 'file' | 'directory' = false): Ref | null => {
-    const mutation = purpose === 'mutation';
+    const mutation = purpose === 'mutation', pin = mutation || purpose === 'protected';
     const nameBuffer = Buffer.from(name + '\0', 'utf16le'), unicode = Buffer.alloc(16), attributes = Buffer.alloc(48), status = Buffer.alloc(16), handle: unknown[] = [null];
     const sd = creating ? journalSecurity() : null;
     unicode.writeUInt16LE(nameBuffer.length - 2); unicode.writeUInt16LE(nameBuffer.length, 2); unicode.writeBigUInt64LE(koffi.address(nameBuffer), 8);
     attributes.writeUInt32LE(48); attributes.writeBigUInt64LE(koffi.address((parent as Ref).handle), 8); attributes.writeBigUInt64LE(koffi.address(unicode), 16); attributes.writeUInt32LE(0x1040, 24);
     if (sd) attributes.writeBigUInt64LE(koffi.address(sd), 32);
     // Observations must share our already-held DELETE access; the original pin still denies foreign writes/deletes.
-    const share = creating === 'directory' ? 3 : mutation ? 1 : purpose === 'parent' ? 3 : 7;
-    const access = 0x00120081 | (mutation && creating !== 'directory' ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
+    const share = creating === 'directory' ? 3 : pin ? 1 : purpose === 'parent' ? 3 : 7;
+    const access = 0x00120081 | (pin && creating !== 'directory' ? 0x10000 : 0) | (creating ? 0x40000000 : 0);
     const result = Number(openRelative(handle, access, attributes, status, null, creating === 'directory' ? 0x10 : creating ? 0x80 : 0, share, creating ? 2 : 1, creating === 'directory' ? 0x23 : 0x00200020 | (creating ? 0x42 : 0), null, 0));
     // Keep nested buffers alive across the native call; raw addresses do not root them for GC.
     assert.equal(unicode.readUInt16LE(0), nameBuffer.length - 2); assert.equal(nameBuffer.readUInt16LE(nameBuffer.length - 2), 0);
@@ -151,7 +163,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       if (!creating && (result === -1073741772 || result === -1073741766)) return null;
       throw Object.assign(Error('global_guard_relative_open_failed_' + (result >>> 0).toString(16)), { nativeCode: result >>> 0 });
     }
-    const ref = { handle: handle[0], mutation }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
+    const ref = { handle: handle[0], mutation, pin, path: win32.join((parent as Ref).path, name) }; if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
   };
   const readFile = (ref: object, limit: number) => {
     const value = ref as Ref, buffer = Buffer.alloc(65536), chunks: Buffer[] = []; let size = 0;
@@ -168,7 +180,7 @@ export async function createWindowsGlobalGuard(): Promise<NativeGuardDriver> {
       assert.match(path, /^[a-z]:[\\/]$/i, 'global_guard_local_volume_required');
       const handle = create(path, 0x00120081, 3, null, 3, 0x02200000, null);
       assert.ok(handle && koffi.address(handle) !== 0xffffffffffffffffn, 'global_guard_root_open_failed');
-      return { handle, mutation: false };
+      return { handle, mutation: false, path };
     },
     openChild,
     snapshot,

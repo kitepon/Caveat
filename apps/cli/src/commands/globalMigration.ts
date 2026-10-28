@@ -48,7 +48,8 @@ export async function runGlobalMigrationCommand(mode: 'plan' | 'execute', option
       output({ ...result }); if (result.status !== 'completed') process.exitCode = 1;
     }
   } catch (error) {
-    output({ schema: 'caveat.global_migration_result.v1', status: 'stopped', phase: 'input-or-preflight', processAssessment: (error as { preflight?: unknown }).preflight ?? null,
+    output({ schema: 'caveat.global_migration_result.v1', status: 'stopped', phase: 'input-or-preflight',
+      reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? null, processAssessment: (error as { preflight?: unknown }).preflight ?? null,
       errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'),
       ...(mode === 'plan' ? { filesystemWrites: 0 } : {}), existingProcessOperations: 0 }); process.exitCode = 1;
   }

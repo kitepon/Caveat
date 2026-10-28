@@ -33,7 +33,7 @@ export async function planGlobalMigration(input: GlobalMigrationInput, onEvent: 
 }
 
 /** Internal fixture binder; public commands always use the real native collector. */
-export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
+export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables, openGuard = openGlobalPathGuard) {
   onEvent({ phase: 'global-preflight', event: 'issued' });
   input = structuredClone(input);
   assert.equal(basename(input.snapshot.pointer), 'active.json', 'global_migration_active_pointer_required');
@@ -60,7 +60,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
   const aliases = [...new Set([input.binDirectory, globalRoot, layout.prefix, layout.binDirectory, root, input.snapshot.npmAlias,
     input.snapshot.packageRoot, input.snapshot.pointer, ...input.snapshot.protectedFiles])].map(path => ({ path: resolve(path), canonical: realpathSync(path) }));
   let guard: Awaited<ReturnType<typeof openGlobalPathGuard>>;
-  try { guard = await openGlobalPathGuard([...new Set([globalRoot, layout.prefix, layout.binDirectory, input.binDirectory, binDirectory, root, npmRoot, ...absences.map(row => row.parent), ...protectedRoots.map(dirname)])]); }
+  try { guard = await openGuard([...new Set([globalRoot, layout.prefix, layout.binDirectory, input.binDirectory, binDirectory, root, npmRoot, ...absences.map(row => row.parent), ...protectedRoots.map(dirname)])]); }
   catch (error) { throw error; }
   let ownedLock: ReturnType<typeof guard.createJournal> | null = null, lockAtRoot = false, closed = false;
   let preservation: ReturnType<typeof prepareGlobalObjectPreservation> | undefined;
@@ -80,7 +80,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
     assert.equal(guard.observe(root, 'installer.lock'), null, 'global_migration_installer_busy');
     assert.equal(guard.observe(root, 'shell'), null, 'global_migration_shell_already_installed');
     const protectedObjects = protectedRoots.map(path => {
-      const token = guard.retainTree(dirname(path), basename(path)); return { path, token, rows: guard.readTree(token) };
+      const token = guard.retainTree(dirname(path), basename(path), 'protected'); return { path, token, rows: guard.readTree(token) };
     });
     const payloadObject = protectedObjects.find(row => row.path === payload); assert.ok(payloadObject, 'global_migration_payload_not_captured');
     const payloadFiles = payloadObject.rows.filter(row => row.identity.kind !== 'directory').map(row => {
