@@ -595,6 +595,13 @@ reports whether its observer token is administrative; an administrative runner's
 diagnostic result cannot establish ordinary-user coverage. Consumer stops identify
 the PID to close normally, while writer stops require the npm operation to finish.
 Other unknowns explicitly report that no supported resolution is established.
+The exclusive-open qualification measures read, read/delete and read/write access
+with sharing disabled, without writing bytes. It distinguishes an owned open-file
+holder, a mapped view after source handles close, and a privately copied loaded
+DLL; each holder receives a normal close request and the fixture bytes are
+rechecked. These observations do not replace the product guard. A successful
+open alone is not treated as proof against all mappings, future imports or use
+by another security context.
 
 Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
 the executable with lsof text-file device/inode data. Darwin argv decoding uses

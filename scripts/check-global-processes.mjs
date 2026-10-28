@@ -8,6 +8,7 @@ import { assessGlobalProcesses, processProtectionTree } from '../packages/core/d
 import { snapshotGlobalTree } from '../packages/core/dist/managedGlobalSnapshot.js';
 import { isWindows } from '../packages/core/dist/platform.js';
 import { checkWindowsResourceUsers } from './check-windows-resource-users.mjs';
+import { checkWindowsObjectOwnership } from './check-windows-object-ownership.mjs';
 import { checkMacProcessRename } from './check-mac-process-rename.mjs';
 import { nativeGlobalProcessTables } from '../packages/core/dist/managedProcessNative.js';
 
@@ -51,6 +52,8 @@ async function check() {
     if (isWindows()) {
       try { await checkWindowsResourceUsers(root); }
       catch (error) { resourceFailure = error; process.stdout.write('CAVEAT_WINDOWS_RESOURCE_QUALIFICATION {"status":"failed","productReadiness":"not-qualified"}\n'); }
+      try { await checkWindowsObjectOwnership(root); }
+      catch (error) { resourceFailure ??= error; process.stdout.write('CAVEAT_WINDOWS_OBJECT_QUALIFICATION {"status":"failed","productReadiness":"not-qualified"}\n'); }
     }
     const initial = await observe(), normal = assessGlobalProcesses(scope, initial.tables, initial.protection); proof('normal-real-table', normal, initial.tables);
     if (initial.tables.before.some(row => row.ownerProof === 'darwin-kinfo-proc')) await checkMacProcessRename(root, scope, nativeGlobalProcessTables, protectionFor);
