@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { realpathSync } from 'node:fs';
-import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo } from '../src/managedMacProcessNative.js';
+import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacProcessArguments } from '../src/managedMacProcessNative.js';
 import { isWindows } from '../src/platform.js';
 
 describe('native process bridge and Darwin layouts', () => {
@@ -26,6 +26,26 @@ describe('native process bridge and Darwin layouts', () => {
     expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0unterminated')]))).toThrow('mac_argument_unterminated');
     expect(() => decodeMacArguments(Buffer.concat([count, Buffer.from('/node\0node\0SECRET_KEY=unrequested-value\0')]))).toThrow('mac_argument_environment_shaped');
     expect(() => decodeMacArguments(Buffer.alloc(1024 * 1024 + 1))).toThrow('mac_arguments_bound');
+  });
+  it('decodes only the LP64 kinfo PID, birth and effective uid used for the foreign-owner proof', () => {
+    const bytes = Buffer.alloc(648); bytes.writeInt32LE(42, 40); bytes.writeUInt32LE(501, 420);
+    bytes.writeBigInt64LE(1700000000n, 0); bytes.writeInt32LE(123456, 8);
+    expect(decodeMacKinfoIdentity(bytes, 42)).toEqual({ uid: 501, birth: '1700000000:123456', kernel: false });
+    expect(() => decodeMacKinfoIdentity(bytes, 43)).toThrow('pid_changed');
+    expect(() => decodeMacKinfoIdentity(bytes.subarray(0, 640), 42)).toThrow('lp64_size');
+    bytes.writeInt32LE(0, 40); bytes.writeUInt32LE(0x200, 32);
+    expect(decodeMacKinfoIdentity(bytes, 0).kernel).toBe(true);
+  });
+  it('retains exact size-query success and real-read errno without inventing foreign-owner permission', () => {
+    let calls = 0;
+    const denied = readMacProcessArguments(42, (_mib, _count, bytes, length) => {
+      calls++; if (!bytes) { length[0] = 128; return 0; } return -1;
+    }, () => 22);
+    expect(denied).toEqual({ argv: null, failure: { stage: 'read', nativeCode: 22, sizeQuerySucceeded: true } });
+    expect(calls).toBe(2);
+    expect(readMacProcessArguments(42, () => -1, () => 22)).toEqual({ argv: null, failure: { stage: 'size', nativeCode: 22, sizeQuerySucceeded: false } });
+    expect(readMacProcessArguments(42, (_mib, _count, _bytes, length) => { length[0] = 2 ** 30; return 0; }, () => 0).failure?.stage).toBe('size-bound');
+    expect(readMacProcessArguments(42, (_mib, _count, bytes, length) => { length[0] = 128; return bytes ? -1 : 0; }, () => 13).failure?.nativeCode).toBe(13);
   });
   it('checks the BSD ABI size, PID and microsecond birth instead of the process name', () => {
     const bytes = Buffer.alloc(136); bytes.writeUInt32LE(42, 12); bytes.writeUInt32LE(1, 16); bytes.writeUInt32LE(501, 20);

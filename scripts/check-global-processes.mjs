@@ -12,9 +12,12 @@ async function check() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'caveat-process-runner-'))), old = join(root, 'old-global');
   mkdirSync(old);
   const scope = { packageRoot: old, npmRoot: join(root, 'npm'), binAliases: [join(root, 'bin/caveat')] };
+  const tally = values => { const counts = {}; for (const value of values) counts[value] = (counts[value] ?? 0) + 1; return counts; };
   const proof = (name, result) => {
     process.stdout.write('CAVEAT_PROCESS_RUNNER_PROOF ' + JSON.stringify({ name, status: result.status, counts: result.counts, errors: result.errors,
-      unknownReasons: result.records.filter(row => row.classification === 'unknown').map(row => row.reason),
+      unknownReasons: tally(result.records.filter(row => row.classification === 'unknown').map(row => row.reason)),
+      metadataByOwner: tally(result.records.map(row => row.observation.owner + ':' + (row.observation.missing.join(',') || 'complete'))),
+      nativeIssues: tally(result.records.flatMap(row => row.observation.nativeIssues)),
       filesystemWrites: result.filesystemWrites, existingProcessOperations: result.existingProcessOperations }) + '\n');
   };
   let child;

@@ -534,12 +534,28 @@ mutation. Post-check failure retains a confirmed native move in the journal and
 stops further operations; fresh recovery admission must verify all protected state
 again. No runtime file is changed or repaired.
 
-`node scripts/check-global-processes.mjs` runs serially after mutation fixtures on
+`node scripts/check-global-processes.mjs` runs serially after build and before mutation fixtures on
 each real CI runner. It records normal-table readiness and a stopped real literal
 consumer. A reader fault withholds metadata for that real same-owner child to
 prove refusal; this third case is explicit fault injection over a native table,
 not a claim that host access permissions were changed. The check owns only its
 fixture child and files; observation never signals existing processes.
+
+Darwin additionally classifies `foreign-user-unobservable` only for a non-root
+caller and a different uid proven by LP64 `kinfo_proc`, when argument size querying
+succeeds and the actual read fails with EINVAL. Both births and kernel executable
+identities must agree, with a readable image in each observation. Argument access
+alone may vary. Readable literals and bound paths are checked first. Unobservable
+runtimes, missing owners, same-uid gaps, other errno/stages and changed birth/image
+remain stopped. The exception does not prove the absence of foreign non-runtime
+consumers or writers, or administrator/root exclusivity.
+
+Windows keeps metadata refusal intact. Owner failures report their native stage
+and error code. A bounded ordinary CIM GetOwnerSid attempt may corroborate a SID
+only after matching the process birth again; denial never proves a foreign user.
+No debug privilege or elevation is enabled. The twenty-second owned-child deadline
+and verified close remain mandatory. Real-runner receipts aggregate metadata gaps
+by owner relationship and native stage without exposing argv, image paths or SIDs.
 
 Linux reads bounded procfs records. macOS uses kernel process APIs and corroborates
 the executable with lsof text-file device/inode data; environment-shaped arguments

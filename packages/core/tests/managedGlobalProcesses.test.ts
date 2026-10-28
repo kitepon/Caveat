@@ -138,6 +138,36 @@ describe('global process assessment', () => {
       expect(assessGlobalProcesses(affected, tables(record(20, node, argv))).status).toBe('stopped');
     }
   });
+  it('admits only the exact Darwin foreign-owner argv denial, including readable/unreadable observation transitions', () => {
+    const foreign: NativeProcessRecord = { ...record(20), uid: 2000, ownerProof: 'darwin-kinfo-proc', argv: null,
+      argumentFailure: { stage: 'read', nativeCode: 22, sizeQuerySucceeded: true }, imageBinding: 'kernel-path' };
+    const data = tables(foreign);
+    expect(assessGlobalProcesses(scope, data)).toMatchObject({ status: 'ready', counts: { 'foreign-user-unobservable': 1 } });
+    data.before[1]!.argv = ['/usr/bin/native-tool']; delete data.before[1]!.argumentFailure;
+    data.before[1]!.imageBinding = 'kernel-and-text';
+    expect(assessGlobalProcesses(scope, data).status).toBe('ready');
+    data.before[1]!.argv = ['/usr/bin/native-tool', scope.packageRoot];
+    expect(assessGlobalProcesses(scope, data).status).toBe('stopped');
+  });
+  it.each(['same-owner', 'unknown-owner', 'root-caller', 'missing-kinfo', 'size-failed', 'wrong-errno', 'unknown-image', 'changed-image', 'changed-birth', 'node', 'protected-runtime'])(
+    'refuses an unobservable process without the complete Darwin exception: %s', kind => {
+      const foreign: NativeProcessRecord = { ...record(20), uid: 2000, ownerProof: 'darwin-kinfo-proc', argv: null,
+        argumentFailure: { stage: 'read', nativeCode: 22, sizeQuerySucceeded: true }, imageBinding: 'kernel-path' };
+      let affected = scope;
+      if (kind === 'same-owner') foreign.uid = 1000;
+      if (kind === 'unknown-owner') foreign.uid = null;
+      if (kind === 'missing-kinfo') delete foreign.ownerProof;
+      if (kind === 'size-failed') foreign.argumentFailure!.sizeQuerySucceeded = false;
+      if (kind === 'wrong-errno') foreign.argumentFailure!.nativeCode = 13;
+      if (kind === 'unknown-image') foreign.executable = null;
+      if (kind === 'node') foreign.executable!.path = '/usr/bin/node';
+      if (kind === 'protected-runtime') affected = { ...scope, runtimeExecutables: [foreign.executable!.path] };
+      const data = tables(foreign);
+      if (kind === 'root-caller') { data.before[0]!.uid = 0; data.after[0]!.uid = 0; }
+      if (kind === 'changed-birth') data.after[1]!.birth = 'changed';
+      if (kind === 'changed-image') data.after[1]!.executable!.ino = '77777';
+      expect(assessGlobalProcesses(affected, data).status).toBe('stopped');
+    });
   it('does not retain arbitrary arguments or executable paths in public projections', () => {
     const result = assessGlobalProcesses(scope, tables(record(20, '/runtime/node', ['node', 'secret-argument-value'])));
     expect(JSON.stringify(result)).not.toContain('secret-argument-value');
@@ -179,12 +209,16 @@ describe('native process parsers and owned transport', () => {
     expect(() => parseWindowsProcessArguments('"unterminated')).toThrow('unterminated_quote');
   });
   it('requires CIM child PID/parent/birth binding and rejects duplicate or missing table entries', () => {
-    const row = { uid: 'S-1-5-21-1000', pid: 99999, ppid: process.pid, birth: '2026-01-01T00:00:00.000Z', exe: 'C:\\Windows\\probe.exe', command: 'probe' };
+    const row = { uid: 'S-1-5-21-1000' as string | null, pid: 99999, ppid: process.pid, birth: '2026-01-01T00:00:00.000Z', exe: 'C:\\Windows\\probe.exe', command: 'probe' };
     const doc = { before: [row], after: [row], probePid: row.pid, probeBirth: row.birth };
     const frames = (value: typeof doc) => [
       ['bootstrap', 'started', 0], ['before', 'started', 0], ['before', 'completed', value.before.length], ['after', 'started', 0], ['after', 'completed', value.after.length],
     ].map(([phase, event, count]) => JSON.stringify({ schema: 'caveat.process_probe_phase.v1', phase, event, count })).join('\n') + '\n' + JSON.stringify(value);
     expect(decodeWindowsProcessTables(frames(doc), row.pid).before).toHaveLength(1);
+    const diagnostic = { ...row, uid: null, ownerStage: 'token-open', ownerError: 5, ownerMethodStage: 'denied', ownerMethodReturn: 2 };
+    expect(decodeWindowsProcessTables(frames({ ...doc, before: [diagnostic], after: [diagnostic] }), row.pid).before[0]?.ownerError).toBe(5);
+    expect(() => decodeWindowsProcessTables(frames({ ...doc, before: [{ ...diagnostic, uid: row.uid }], after: [diagnostic] }), row.pid)).toThrow('owner_proof_missing');
+    expect(() => decodeWindowsProcessTables(frames({ ...doc, before: [{ ...diagnostic, ownerStage: 'private-arbitrary-text' }], after: [diagnostic] }), row.pid)).toThrow('owner_diagnostic');
     expect(() => decodeWindowsProcessTables(frames(doc), row.pid + 1)).toThrow('process_probe_binding');
     expect(() => decodeWindowsProcessTables(frames({ ...doc, after: [row, row] }), row.pid)).toThrow('invalid_process_pid');
     expect(() => decodeWindowsProcessTables(frames({ ...doc, after: [] }), row.pid)).toThrow('process_table_bound');

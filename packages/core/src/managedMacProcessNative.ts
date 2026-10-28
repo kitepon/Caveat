@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { statSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
-import type { NativeProcessRecord, ProcessExecutable } from './managedProcessNative.js';
+import type { NativeProcessRecord, ProcessExecutable, MacArgumentFailure } from './managedProcessNative.js';
 
 const MAX_ARGUMENT_BYTES = 1024 * 1024;
 const BSD_INFO_BYTES = 136;
@@ -40,6 +40,34 @@ export function decodeMacBsdInfo(bytes: Buffer, pid: number) {
     ...(pid === 0 && (bytes.readUInt32LE(0) & 1) ? { kernel: 'darwin-kernel-task' as const } : {}) };
 }
 
+/** Darwin LP64 kinfo_proc: extern_proc(296), two pointers(16), _pcred(104), then _ucred.cr_uid(+4). */
+export function decodeMacKinfoIdentity(bytes: Buffer, pid: number) {
+  assert.equal(bytes.length, 648, 'mac_kinfo_lp64_size');
+  assert.equal(bytes.readInt32LE(40), pid, 'mac_kinfo_pid_changed');
+  const seconds = bytes.readBigInt64LE(0), micros = bytes.readInt32LE(8);
+  assert.ok(seconds >= 0n && micros >= 0 && micros < 1000000, 'mac_kinfo_birth_invalid');
+  return { uid: bytes.readUInt32LE(420), birth: seconds + ':' + micros,
+    kernel: pid === 0 && (bytes.readUInt32LE(32) & 0x200) !== 0 };
+}
+
+type MacSysctl = (mib: Buffer, count: number, buffer: Buffer | null, length: number[], value: null, size: number) => number;
+/** Exact size/read failures are retained separately; decoding never exposes the environment segment. */
+export function readMacProcessArguments(pid: number, query: MacSysctl, errno: () => number): { argv: string[] | null; failure?: MacArgumentFailure } {
+  const mib = Buffer.alloc(12); [1, 49, pid].forEach((value, index) => mib.writeInt32LE(value, index * 4));
+  const length = [0];
+  if (query(mib, 3, null, length, null, 0) !== 0) return { argv: null, failure: { stage: 'size', nativeCode: errno(), sizeQuerySucceeded: false } };
+  const size = Number(length[0]);
+  if (!Number.isSafeInteger(size) || size < 6 || size > MAX_ARGUMENT_BYTES) return { argv: null, failure: { stage: 'size-bound', nativeCode: null, sizeQuerySucceeded: true } };
+  const buffer = Buffer.alloc(size);
+  try {
+    if (query(mib, 3, buffer, length, null, 0) !== 0) return { argv: null, failure: { stage: 'read', nativeCode: errno(), sizeQuerySucceeded: true } };
+    const used = Number(length[0]);
+    if (!Number.isSafeInteger(used) || used < 6 || used > buffer.length) return { argv: null, failure: { stage: 'read-bound', nativeCode: null, sizeQuerySucceeded: true } };
+    try { return { argv: decodeMacArguments(buffer.subarray(0, used)).argv }; }
+    catch { return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true } }; }
+  } finally { buffer.fill(0); }
+}
+
 /** Native loading is lazy: ordinary hooks never load a C bridge or inspect processes. */
 export async function createMacKernelReader() {
   const koffi = await import('koffi');
@@ -50,7 +78,7 @@ export async function createMacKernelReader() {
   const sysctl = libc.func('int sysctl(const int *name, uint32_t namelen, _Out_ void *oldp, _Inout_ size_t *oldlenp, const void *newp, size_t newlen)');
   const bsd = (pid: number) => {
     const buffer = Buffer.alloc(BSD_INFO_BYTES);
-    assert.equal(info(pid, 3, 0, buffer, buffer.length), BSD_INFO_BYTES, 'mac_process_info_unavailable');
+    if (Number(info(pid, 3, 0, buffer, buffer.length)) !== BSD_INFO_BYTES) throw Object.assign(Error('mac_process_info_unavailable'), { nativeCode: koffi.errno() });
     return decodeMacBsdInfo(buffer, pid);
   };
   const image = (pid: number): ProcessExecutable => {
@@ -61,32 +89,42 @@ export async function createMacKernelReader() {
     const stat = statSync(name, { bigint: true }); assert.ok(stat.isFile(), 'mac_process_image_nonregular');
     return { path: name, dev: String(stat.dev), ino: String(stat.ino) };
   };
-  const args = (pid: number) => {
-    const mib = Buffer.alloc(12); [1, 49, pid].forEach((value, index) => mib.writeInt32LE(value, index * 4));
-    const length: number[] = [0];
-    assert.equal(sysctl(mib, 3, null, length, null, 0), 0, 'mac_arguments_size_unavailable');
-    const size = Number(length[0]);
-    assert.ok(Number.isSafeInteger(size) && size >= 6 && size <= MAX_ARGUMENT_BYTES, 'mac_arguments_bound');
-    const buffer = Buffer.alloc(size);
-    try {
-      assert.equal(sysctl(mib, 3, buffer, length, null, 0), 0, 'mac_arguments_unavailable');
-      const used = Number(length[0]); assert.ok(used >= 6 && used <= buffer.length, 'mac_arguments_changed');
-      return decodeMacArguments(buffer.subarray(0, used)).argv;
-    } finally { buffer.fill(0); }
+  assert.equal(koffi.sizeof('void *'), 8, 'mac_kinfo_lp64_required');
+  const kinfo = (pid: number) => {
+    const mib = Buffer.alloc(16); [1, 14, 1, pid].forEach((value, index) => mib.writeInt32LE(value, index * 4));
+    const buffer = Buffer.alloc(648), length = [buffer.length];
+    if (Number(sysctl(mib, 4, buffer, length, null, 0)) !== 0) throw Object.assign(Error('mac_kinfo_unavailable'), { nativeCode: koffi.errno() });
+    assert.equal(Number(length[0]), buffer.length, 'mac_kinfo_lp64_size');
+    return decodeMacKinfoIdentity(buffer, pid);
   };
+  const args = (pid: number) => readMacProcessArguments(pid, (...values) => Number(sysctl(...values)), () => koffi.errno());
   const readProcess = (pid: number): NativeProcessRecord => {
+    let phase = 'kinfo';
+    const code = (error: unknown) => { const value = error as { nativeCode?: number; errno?: number }; return value.nativeCode ?? value.errno ?? null; };
     let row: NativeProcessRecord = { pid, ppid: null, uid: null, birth: null, executable: null, argv: null };
     try {
-      const first = bsd(pid); row = { ...row, ...first };
+      const owner = kinfo(pid);
+      if (owner.kernel) return { ...row, ppid: 0, uid: owner.uid, birth: owner.birth, kernel: 'darwin-kernel-task', ownerProof: 'darwin-kinfo-proc' };
+      phase = 'bsd'; const first = bsd(pid); row = { ...row, ...first };
+      assert.equal(owner.uid, first.uid, 'mac_kinfo_uid_changed'); assert.equal(owner.birth, first.birth, 'mac_kinfo_birth_changed');
+      row.ownerProof = 'darwin-kinfo-proc';
       if (!first.kernel && first.state !== 'Z') {
-        try { row.argv = args(pid); } catch { /* Preserve the independently observed owner and birth. */ }
-        try { row.executable = image(pid); } catch { /* Foreign processes may deny executable metadata. */ }
+        phase = 'arguments'; const argument = args(pid); row.argv = argument.argv; if (argument.failure) row.argumentFailure = argument.failure;
+        phase = 'image';
+        try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase, nativeCode: code(error) }; }
+        phase = 'image-recheck';
         if (row.executable) assert.deepEqual(image(pid), row.executable, 'mac_process_image_changed');
-        if (row.argv) assert.ok(isDeepStrictEqual(args(pid), row.argv), 'mac_process_arguments_changed');
+        phase = 'arguments-recheck';
+        if (row.argv) {
+          const current = args(pid);
+          if (!current.argv && current.failure?.stage === 'read' && current.failure.nativeCode === 22) { row.argumentFailure = current.failure; }
+          else assert.ok(isDeepStrictEqual(current.argv, row.argv), 'mac_process_arguments_changed');
+        }
       }
-      assert.deepEqual(bsd(pid), first, 'mac_process_birth_changed');
+      phase = 'bsd-recheck'; assert.deepEqual(bsd(pid), first, 'mac_process_birth_changed');
+      phase = 'kinfo-recheck'; assert.deepEqual(kinfo(pid), owner, 'mac_kinfo_identity_changed');
       return row;
-    } catch { return { ...row, reason: 'mac_kernel_metadata_unverified' }; }
+    } catch (error) { return { ...row, reason: 'mac_kernel_metadata_unverified', kernelFailure: { stage: phase, nativeCode: code(error) } }; }
   };
   return {
     readProcess,

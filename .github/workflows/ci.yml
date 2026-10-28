@@ -48,9 +48,9 @@ jobs:
         node scripts/ci-toolchain.mjs version &&
         corepack pnpm build &&
         node scripts/ci-toolchain.mjs native &&
+        node scripts/check-global-processes.mjs &&
         corepack pnpm typecheck &&
         corepack pnpm check:release-smoke &&
         corepack pnpm test:claude-fresh-session-smoke &&
         corepack pnpm test &&
-        node scripts/check-global-processes.mjs &&
         node scripts/managed-native-hash-proof.mjs

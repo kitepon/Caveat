@@ -5,8 +5,8 @@ import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
 export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
-type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'foreign-user' | 'ancestor' | 'transient' | 'outside-observed-scope';
-export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string; imageDeleted?: boolean; runtime?: boolean };
+type Classification = 'self' | 'non-executing' | 'consumer' | 'writer' | 'unknown' | 'foreign-user' | 'foreign-user-unobservable' | 'ancestor' | 'transient' | 'outside-observed-scope';
+export type GlobalProcessAssessment = { pid: number; birth: string | null; classification: Classification; reason: string; executableSha256?: string; imageDeleted?: boolean; runtime?: boolean; observation?: { owner: 'same' | 'foreign' | 'unknown'; missing: string[]; nativeIssues: string[] } };
 const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, '');
   return fold ? slash.toLowerCase() : slash;
@@ -42,6 +42,7 @@ function hasLiteral(value: string, path: string) {
 export const globalProcessResidualRisks = [
   'process tables cannot exclude a later dynamic import of the old global by an outside-scope script or helper, including ELECTRON_RUN_AS_NODE',
   'a later import may fail after the old global is retained in quarantine; existing data is never overwritten',
+  'foreign-user non-runtime processes with OS-restricted argv may already use or write the old global; root or administrator exclusivity is not proven',
 ] as const;
 
 /** Observation scope is explicit; outside-scope classification is not proof against future dynamic imports. */
@@ -54,7 +55,8 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const records: GlobalProcessAssessment[] = [], errors = [...tables.errors];
   const before = new Map(tables.before.map(row => [row.pid, row])), after = new Map(tables.after.map(row => [row.pid, row]));
   if (!before.size || !after.size || before.size !== tables.before.length || after.size !== tables.after.length) errors.push('process_table_empty_or_duplicate');
-  const stable = ({ argv: _, reason: __, ...value }: NativeProcessRecord) => ({ ...value, state: value.state === 'Z' ? 'Z' : 'live' });
+  const stable = ({ pid, ppid, birth, uid, executable, state, kernel, ownerProof }: NativeProcessRecord) =>
+    ({ pid, ppid, birth, uid, executable, state: state === 'Z' ? 'Z' : 'live', kernel, ownerProof });
   const unchanged = (first: NativeProcessRecord | undefined, last: NativeProcessRecord | undefined) => !!first && !!last && isDeepStrictEqual(stable(first), stable(last));
   const ancestors = new Set<number>(), visited = new Set([tables.selfPid]);
   let parent = before.get(tables.selfPid)?.ppid;
@@ -69,6 +71,12 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   for (const pid of new Set([...before.keys(), ...after.keys()])) {
     const first = before.get(pid), last = after.get(pid), row = first ?? last!;
     const result: GlobalProcessAssessment = { pid, birth: row.birth, classification: 'unknown', reason: 'process_identity_unverified' };
+    result.observation = { owner: row.uid === null || ownUid === null || ownUid === undefined ? 'unknown' : row.uid === ownUid ? 'same' : 'foreign',
+      missing: ['uid', 'birth', 'ppid', 'executable', 'argv'].filter(key => row[key as keyof NativeProcessRecord] === null),
+      nativeIssues: [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode : null,
+        row.ownerFailure ? 'windows-owner:' + row.ownerFailure.stage + ':' + row.ownerFailure.nativeCode : null,
+        row.ownerMethod ? 'windows-owner-method:' + row.ownerMethod.stage + ':' + row.ownerMethod.returnValue : null,
+        row.kernelFailure ? 'darwin-kernel:' + row.kernelFailure.stage + ':' + row.kernelFailure.nativeCode : null].filter((value): value is string => value !== null) };
     records.push(result);
     // Check every observed argv, including foreign, ancestor, transient and inline commands.
     const image = row.executable ? norm(row.executable.path).replace(/ \(deleted\)$/, '') : null;
@@ -97,7 +105,24 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       && row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
     if (self) { result.classification = 'self'; result.reason = 'current_pid_birth_uid_and_kernel_executable_bound'; continue; }
     if (literal) { result.reason = 'scope_literal_outside_bound_script'; continue; }
-    if (first && last && (!unchanged(first, last) || first.reason || last.reason || !first.argv !== !last.argv)) { result.reason = 'process_identity_or_arguments_changed'; continue; }
+    const foreignArgvDenied = (entry: NativeProcessRecord) => entry.ownerProof === 'darwin-kinfo-proc'
+      && entry.argumentFailure?.stage === 'read' && entry.argumentFailure.nativeCode === 22 && entry.argumentFailure.sizeQuerySucceeded;
+    if (first && last && typeof ownUid === 'number' && ownUid !== 0 && typeof first.uid === 'number' && first.uid !== ownUid
+      && unchanged(first, last) && first.executable && last.executable && !first.reason && !last.reason
+      && first.ownerProof === 'darwin-kinfo-proc' && last.ownerProof === 'darwin-kinfo-proc'
+      && (foreignArgvDenied(first) || foreignArgvDenied(last)) && (first.argv || foreignArgvDenied(first)) && (last.argv || foreignArgvDenied(last))) {
+      if (isRuntime) { result.reason = 'foreign_runtime_arguments_unavailable'; continue; }
+      result.classification = 'foreign-user-unobservable'; result.reason = 'darwin_foreign_uid_bound_image_read_einval'; continue;
+    }
+    if (first && last && (!unchanged(first, last) || first.reason || last.reason || !first.argv !== !last.argv)) {
+      if (first.birth !== last.birth) result.reason = 'process_birth_changed';
+      else if (first.executable && last.executable && !isDeepStrictEqual(first.executable, last.executable)) result.reason = 'process_executable_changed';
+      else if (!first.executable !== !last.executable) result.reason = 'process_executable_observation_incomplete';
+      else if (first.uid !== last.uid) result.reason = 'process_owner_changed';
+      else if (first.ppid !== last.ppid) result.reason = 'process_parent_changed';
+      else result.reason = 'process_metadata_observation_incomplete';
+      continue;
+    }
     if (row.reason || !row.birth || row.ppid === null) { result.reason = row.reason ?? 'process_birth_or_parent_missing'; continue; }
     if (first && last && (row.kernel || first.state === 'Z' && last.state === 'Z')) {
       result.classification = 'non-executing'; result.reason = row.kernel ?? 'same_birth_kernel_zombie'; continue;
@@ -112,7 +137,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     result.reason = !first || !last ? 'single_observation_without_scope_reference' : ancestors.has(pid) ? 'finite_pid_birth_executable_ancestor_chain' : 'observed_executable_and_arguments_outside_scope';
   }
   if (!records.some(row => row.classification === 'self')) errors.push('current_process_not_bound');
-  const counts: Record<Classification, number> = { self: 0, 'non-executing': 0, consumer: 0, writer: 0, unknown: 0, 'foreign-user': 0, ancestor: 0, transient: 0, 'outside-observed-scope': 0 };
+  const counts: Record<Classification, number> = { self: 0, 'non-executing': 0, consumer: 0, writer: 0, unknown: 0, 'foreign-user': 0, 'foreign-user-unobservable': 0, ancestor: 0, transient: 0, 'outside-observed-scope': 0 };
   for (const row of records) counts[row.classification]++;
   const consumers = counts.consumer, writers = counts.writer, unknown = counts.unknown;
   return { schema: 'caveat.global_process_preflight.v1' as const,

@@ -7,9 +7,11 @@ import { createMacKernelReader } from './managedMacProcessNative.js';
 import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
+export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
-  executable: ProcessExecutable | null; argv: string[] | null; state?: string; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
+  executable: ProcessExecutable | null; argv: string[] | null; state?: string;
+  ownerProof?: 'darwin-kinfo-proc'; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
@@ -261,9 +263,14 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
       if (row.reason || row.state === 'Z' || row.kernel) return row;
       const image = row.executable;
       if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
-        return { ...row, executable: null, ...(row.uid === before.find(value => value.pid === process.pid)?.uid ? { reason: 'kernel_text_image_unbound' } : {}) };
+        const callerUid = before.find(value => value.pid === process.pid)?.uid;
+        if (image && typeof callerUid === 'number' && callerUid !== 0 && typeof row.uid === 'number' && row.uid !== callerUid
+          && row.ownerProof === 'darwin-kinfo-proc' && (row.argv || row.argumentFailure?.stage === 'read' && row.argumentFailure.nativeCode === 22 && row.argumentFailure.sizeQuerySucceeded)) {
+          return { ...row, imageBinding: 'kernel-path' as const };
+        }
+        return { ...row, executable: null, ...(row.uid === callerUid ? { reason: 'kernel_text_image_unbound' } : {}) };
       }
-      return row;
+      return { ...row, imageBinding: 'kernel-and-text' as const };
     });
   };
   return { before: convert(before, imagesBefore), after: convert(after, imagesAfter), errors,
@@ -282,18 +289,22 @@ using System;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 public static class CaveatProcessOwner {
-  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
-  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
-  [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr handle, out long created, out long exited, out long kernel, out long user);
-  [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
-  public static string Read(int pid, long expectedBirth) {
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool GetProcessTimes(IntPtr handle, out long created, out long exited, out long kernel, out long user);
+  [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  public sealed class Result { public string Sid; public string Stage; public int Code; public Result(string sid, string stage, int code) { Sid=sid; Stage=stage; Code=code; } }
+  static Result Failed(string stage, int code) { return new Result(null, stage, code); }
+  public static Result Read(int pid, long expectedBirth) {
     IntPtr process = OpenProcess(0x1000, false, pid), token = IntPtr.Zero;
-    if (process == IntPtr.Zero) return null;
+    if (process == IntPtr.Zero) return Failed("process-open", Marshal.GetLastWin32Error());
     try {
       long created, exited, kernel, user;
-      if (!GetProcessTimes(process, out created, out exited, out kernel, out user) || Math.Abs(created - expectedBirth) > 9 || !OpenProcessToken(process, 8, out token)) return null;
-      using (WindowsIdentity identity = new WindowsIdentity(token)) { return identity.User.Value; }
-    } catch { return null; }
+      if (!GetProcessTimes(process, out created, out exited, out kernel, out user)) return Failed("process-times", Marshal.GetLastWin32Error());
+      if (Math.Abs(created - expectedBirth) > 9) return Failed("birth", 0);
+      if (!OpenProcessToken(process, 8, out token)) return Failed("token-open", Marshal.GetLastWin32Error());
+      using (WindowsIdentity identity = new WindowsIdentity(token)) { return new Result(identity.User.Value, "known", 0); }
+    } catch (Exception error) { return Failed("token-sid", error.HResult); }
     finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }
   }
 }
@@ -301,9 +312,22 @@ public static class CaveatProcessOwner {
 $tables=@()
 foreach($phase in @('before','after')){
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"started","count":0}')
-  $rows=@(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine -ErrorAction Stop | ForEach-Object {
-    $owner=if($null -eq $_.CreationDate){$null}else{[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())}
-    @{uid=$owner;pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
+  $ownerBudget=16
+  $rows=@(Get-CimInstance -ClassName Win32_Process -Property ProcessId,ParentProcessId,CreationDate,ExecutablePath,CommandLine -ErrorAction Stop | Sort-Object ProcessId | ForEach-Object {
+    $owner=if($null -eq $_.CreationDate){[pscustomobject]@{Sid=$null;Stage='birth-missing';Code=0}}else{[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())}
+    $sid=$owner.Sid;$methodStage='not-attempted';$methodReturn=$null
+    if($null -eq $sid -and $ownerBudget -gt 0 -and $_.ProcessId -gt 4 -and $null -ne $_.CreationDate){
+      $ownerBudget--
+      try {
+        $method=Invoke-CimMethod -InputObject $_ -MethodName GetOwnerSid -ErrorAction Stop
+        $methodReturn=[int]$method.ReturnValue
+        if($methodReturn -eq 0 -and $method.Sid -match '^S-1-(?:[0-9]+-)*[0-9]+$'){
+          $again=[CaveatProcessOwner]::Read([int]$_.ProcessId,$_.CreationDate.ToUniversalTime().ToFileTimeUtc())
+          if(($again.Stage -eq 'known' -and $again.Sid -eq $method.Sid) -or $again.Stage -eq 'token-open'){$sid=$method.Sid;$methodStage='known'}elseif($again.Stage -eq 'known'){$methodStage='owner-changed'}else{$methodStage='birth-unconfirmed'}
+        }else{$methodStage='denied'}
+      }catch{$methodStage='unavailable'}
+    }
+    @{uid=$sid;ownerStage=$owner.Stage;ownerError=[int]$owner.Code;ownerMethodStage=$methodStage;ownerMethodReturn=$methodReturn;pid=[int]$_.ProcessId;ppid=[int]$_.ParentProcessId;birth=if($null -eq $_.CreationDate){$null}else{$_.CreationDate.ToUniversalTime().ToString('O')};exe=$_.ExecutablePath;command=$_.CommandLine}
   })
   $tables+=,@($rows)
   [Console]::Out.WriteLine('{"schema":"caveat.process_probe_phase.v1","phase":"'+$phase+'","event":"completed","count":'+$rows.Count+'}')
@@ -311,7 +335,7 @@ foreach($phase in @('before','after')){
 $value=@{before=$tables[0];after=$tables[1];probePid=$PID;probeBirth=$ownStart}
 [Console]::Out.Write((ConvertTo-Json -InputObject $value -Depth 6 -Compress))`;
 
-type WindowsRow = { uid: string | null; pid: number; ppid: number; birth: string | null; exe: string | null; command: string | null };
+type WindowsRow = { uid: string | null; ownerStage?: string; ownerError?: number; ownerMethodStage?: string; ownerMethodReturn?: number | null; pid: number; ppid: number; birth: string | null; exe: string | null; command: string | null };
 export function decodeWindowsProcessTables(text: string, ownedPid: number): { before: WindowsRow[]; after: WindowsRow[]; probeBirth: string } {
   const lines = text.trim().split(/\r?\n/);
   assert.equal(lines.length, 6, 'process_probe_frame_count');
@@ -330,6 +354,14 @@ export function decodeWindowsProcessTables(text: string, ownedPid: number): { be
       assert.ok(Number.isSafeInteger(row.pid) && row.pid >= 0 && !ids.has(row.pid), 'invalid_process_pid'); ids.add(row.pid);
       assert.ok(Number.isSafeInteger(row.ppid) && row.ppid >= 0, 'invalid_process_parent');
       assert.ok(row.birth === null || typeof row.birth === 'string' && !Number.isNaN(Date.parse(row.birth)), 'invalid_process_birth');
+      if (row.ownerStage !== undefined) {
+        assert.ok(['known', 'birth-missing', 'process-open', 'process-times', 'birth', 'token-open', 'token-sid'].includes(row.ownerStage)
+          && Number.isSafeInteger(row.ownerError), 'invalid_process_owner_diagnostic');
+        assert.ok(['not-attempted', 'known', 'denied', 'birth-unconfirmed', 'owner-changed', 'unavailable'].includes(row.ownerMethodStage!)
+          && (row.ownerMethodReturn === null || Number.isSafeInteger(row.ownerMethodReturn)), 'invalid_process_owner_method_diagnostic');
+        if (row.uid !== null) assert.ok(row.ownerStage === 'known' || row.ownerMethodStage === 'known' && row.ownerMethodReturn === 0, 'process_owner_proof_missing');
+        if (row.ownerStage === 'known') assert.ok(row.uid !== null && row.ownerError === 0, 'process_owner_proof_missing');
+      }
       assert.ok(row.uid === null || typeof row.uid === 'string' && /^S-1-(?:\d+-)*\d+$/.test(row.uid), 'invalid_process_owner');
       assert.ok(row.exe === null || typeof row.exe === 'string', 'invalid_process_executable');
       assert.ok(row.command === null || typeof row.command === 'string', 'invalid_process_command');
@@ -346,7 +378,9 @@ export async function readWindowsProcessTables(command: string, run: ProcessProb
   const result = await run(command, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROCESS_PROBE, 'utf16le').toString('base64')], 'cim', Date.now() + 20000);
   const tables = decodeWindowsProcessTables(result.stdout, result.pid);
   const convert = (rows: WindowsRow[]): NativeProcessRecord[] => rows.filter(row => row.pid !== result.pid).map(row => {
-    const base: NativeProcessRecord = { pid: row.pid, ppid: row.ppid, birth: row.birth, uid: row.uid, executable: null, argv: null };
+    const base: NativeProcessRecord = { pid: row.pid, ppid: row.ppid, birth: row.birth, uid: row.uid, executable: null, argv: null,
+      ...(row.ownerStage && row.ownerStage !== 'known' ? { ownerFailure: { stage: row.ownerStage, nativeCode: row.ownerError ?? null } } : {}),
+      ...(row.ownerMethodStage && row.ownerMethodStage !== 'not-attempted' ? { ownerMethod: { stage: row.ownerMethodStage, returnValue: row.ownerMethodReturn ?? null } } : {}) };
     // Windows reserves these process IDs for kernel work; never infer this from the image name.
     if ((row.pid === 0 || row.pid === 4) && row.ppid === 0 && !row.exe && !row.command) {
       return { ...base, birth: row.birth ?? 'windows-idle-boot', kernel: 'windows-kernel-process' };
@@ -356,10 +390,6 @@ export async function readWindowsProcessTables(command: string, run: ProcessProb
     return base;
   });
   const before = convert(tables.before), after = convert(tables.after);
-  for (const row of before) {
-    const later = after.find(value => value.pid === row.pid);
-    if (later && !isDeepStrictEqual(row, later)) row.reason = 'process_identity_changed';
-  }
   return { before, after, errors: [], selfPid: process.pid,
     selfExecutable: executable(process.execPath), caseInsensitive: true };
 }
