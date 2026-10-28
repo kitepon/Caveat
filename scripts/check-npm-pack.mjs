@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+import { isolatedPackSmoke } from './isolated-pack-smoke.mjs';
 import { spawnCommandSync } from './process-command.mjs';
 import { measureManagedHookTiming } from './managed-hook-timing.mjs';
 import { waitForFixtureWorkers } from './fixture-workers.mjs';
@@ -22,6 +22,7 @@ try {
   if (!manifestEntry) throw new Error('packed tarball does not contain package/package.json');
 
   const manifest = JSON.parse(manifestEntry.data.toString('utf8'));
+  await isolatedPackSmoke(entries, tempDir, manifest.version);
   assertEqual(manifest.name, 'caveat-cli', 'manifest.name');
   assertEqual(manifest.bin?.caveat, 'dist/caveat.js', 'manifest.bin.caveat');
   assertEqual(manifest.dependencies?.commander, '^14.0.3', 'manifest.dependencies.commander');
