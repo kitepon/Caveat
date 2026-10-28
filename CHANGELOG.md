@@ -2,6 +2,12 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.10] — 2026-10-28
+
+### Fixed
+- Bundle the CLI runtime dependencies into managed payloads so staged releases start without external `node_modules`.
+- Run isolated packed-package version and MCP initialize checks in the release gate on all three supported operating systems.
+
 ## [0.21.9] — 2026-10-28 (candidate)
 
 - Add product-owned global-to-fixed-entry migration, identity-preserving quarantine and existing journal-based known-only recovery. Readable old-global consumers and external npm writers stop with PID, parent app and close/retry instructions; unreadable processes are counted. All three OS runners exercise ready, literal consumer stopped, and ready after close.

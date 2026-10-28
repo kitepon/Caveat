@@ -59,7 +59,7 @@ export default defineConfig({
   target: 'node22',
   platform: 'node',
   bundle: true,
-  noExternal: ['@caveat/core', '@caveat/mcp', '@caveat/web'],
+  noExternal: ['@caveat/core', '@caveat/mcp', '@caveat/web', 'commander', 'smol-toml', 'jsonc-parser', 'ajv'],
   esbuildPlugins: [{
     name: 'managed-native-assets',
     setup(build) {
