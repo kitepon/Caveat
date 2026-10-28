@@ -168,6 +168,21 @@ describe('global process assessment', () => {
       if (kind === 'changed-image') data.after[1]!.executable!.ino = '77777';
       expect(assessGlobalProcesses(affected, data).status).toBe('stopped');
     });
+  it('accepts foreign size EINVAL only with a successful kinfo identity bracket', () => {
+    const foreign: NativeProcessRecord = { ...record(20), uid: 2000, ownerProof: 'darwin-kinfo-proc', argv: null,
+      argumentFailure: { stage: 'size', nativeCode: 22, sizeQuerySucceeded: false, identityBound: true }, imageBinding: 'kernel-path' };
+    expect(assessGlobalProcesses(scope, tables(foreign)).status).toBe('ready');
+    for (const kind of ['unbound', 'same-owner', 'changed-birth', 'changed-owner', 'missing-after', 'node']) {
+      const data = tables(structuredClone(foreign));
+      if (kind === 'unbound') delete data.before[1]!.argumentFailure!.identityBound;
+      if (kind === 'same-owner') { data.before[1]!.uid = 1000; data.after[1]!.uid = 1000; }
+      if (kind === 'changed-birth') data.after[1]!.birth = 'changed';
+      if (kind === 'changed-owner') data.after[1]!.uid = 3000;
+      if (kind === 'missing-after') data.after.pop();
+      if (kind === 'node') { data.before[1]!.executable!.path = '/usr/bin/node'; data.after[1]!.executable!.path = '/usr/bin/node'; }
+      expect(assessGlobalProcesses(scope, data).status, kind).toBe('stopped');
+    }
+  });
   it('retains a typed metadata refusal from the second observation without exposing argv', () => {
     const data = tables(record(20, '/runtime/node', ['node', 'private-argument']));
     data.after[1]!.executable = null;

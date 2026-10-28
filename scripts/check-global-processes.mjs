@@ -31,7 +31,7 @@ async function check() {
       assert.ok(unknown.length > 0, 'windows_typed_refusal_required');
       assert.ok(unknown.every(row => row.observation.nativeIssues.some(issue => /^(?:windows-owner:|windows-metadata:|windows-owner-method:)/.test(issue))), 'windows_unclassified_unknown');
       process.stdout.write('CAVEAT_PROCESS_RUNNER_ACCEPTANCE ' + JSON.stringify({ normal: 'windows-typed-stopped', ready: 'not-accepted', typedRefusals: unknown.length, unclassifiedUnknown: 0 }) + '\n');
-    } else assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');
+    }
     const script = join(old, 'consumer.cjs');
     writeFileSync(script, 'process.send("ready");setInterval(()=>{},1000)');
     child = spawn(process.execPath, [script], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true });
@@ -53,6 +53,7 @@ async function check() {
     const unavailable = assessGlobalProcesses(scope, tables); proof('real-same-owner-child-metadata-fault', unavailable);
     assert.equal(unavailable.status, 'stopped');
     assert.equal(unavailable.records.find(row => row.pid === child.pid)?.classification, 'unknown');
+    if (!isWindows()) assert.equal(normal.status, 'ready', 'normal_real_runner_not_ready');
   } finally {
     if (child && child.exitCode === null && child.signalCode === null) { const closed = once(child, 'close'); child.kill(); await closed; }
     rmSync(root, { recursive: true, force: true });

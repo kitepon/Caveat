@@ -23,7 +23,9 @@ export function decodeMacArguments(bytes: Buffer) {
     assert.ok(end >= cursor && end < bytes.length, 'mac_argument_unterminated');
     // shortcut: environment-shaped arguments are rejected until argv boundaries can be proven without exec-path padding ambiguity.
     const equals = bytes.indexOf(61, cursor);
-    assert.ok(equals < cursor || equals >= end || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(bytes.subarray(cursor, equals).toString('ascii')), 'mac_argument_environment_shaped');
+    if (!(equals < cursor || equals >= end || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(bytes.subarray(cursor, equals).toString('ascii')))) {
+      throw Object.assign(Error('mac_argument_environment_shaped'), { decodePosition: index === 0 ? 'argv0' : 'later' });
+    }
     argv.push(decode(bytes.subarray(cursor, end))); cursor = end + 1;
   }
   assert.ok(argv[0], 'mac_argv0_unavailable');
@@ -68,7 +70,9 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
     catch (error) {
       const message = error instanceof Error ? error.message : '';
       const decodeReason = ['mac_argument_count', 'mac_saved_executable_missing', 'mac_saved_executable_invalid', 'mac_argument_unterminated', 'mac_argument_environment_shaped', 'mac_argv0_unavailable'].find(reason => message.includes(reason)) ?? 'utf8-or-invalid';
-      return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true, decodeReason } };
+      const position = (error as { decodePosition?: string })?.decodePosition;
+      return { argv: null, failure: { stage: 'decode', nativeCode: null, sizeQuerySucceeded: true, decodeReason,
+        ...(position === 'argv0' || position === 'later' ? { decodePosition: position } : {}) } };
     }
   } finally { buffer.fill(0); }
 }
@@ -88,10 +92,13 @@ export async function createMacKernelReader() {
   };
   const image = (pid: number): ProcessExecutable => {
     const buffer = Buffer.alloc(4096), length = Number(path(pid, buffer, buffer.length)), end = buffer.indexOf(0);
-    if (!(length > 0 && length <= buffer.length && end > 0 && end <= length)) throw Object.assign(Error('mac_process_path_unavailable'), { nativeCode: koffi.errno() });
+    if (!(length > 0 && length <= buffer.length && end > 0 && end <= length)) throw Object.assign(Error('mac_process_path_unavailable'), { nativeCode: koffi.errno(), nativeStage: length > 0 ? 'invalid-result' : 'proc-pidpath' });
     const name = decode(buffer.subarray(0, end));
     assert.ok(name.startsWith('/') && !/[\r\n]/.test(name), 'mac_process_path_invalid');
-    const stat = statSync(name, { bigint: true }); assert.ok(stat.isFile(), 'mac_process_image_nonregular');
+    let stat;
+    try { stat = statSync(name, { bigint: true }); }
+    catch (error) { throw Object.assign(error as Error, { nativeStage: 'stat' }); }
+    assert.ok(stat.isFile(), 'mac_process_image_nonregular');
     return { path: name, dev: String(stat.dev), ino: String(stat.ino) };
   };
   assert.equal(koffi.sizeof('void *'), 8, 'mac_kinfo_lp64_required');
@@ -117,7 +124,7 @@ export async function createMacKernelReader() {
       if (!owner.kernel && owner.state !== 'Z') {
         phase = 'arguments'; const argument = args(pid); row.argv = argument.argv; if (argument.failure) row.argumentFailure = argument.failure;
         phase = 'image';
-        try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase, nativeCode: code(error) }; }
+        try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase + '-' + ((error as { nativeStage?: string }).nativeStage ?? 'unverified'), nativeCode: code(error) }; }
         phase = 'image-recheck';
         if (row.executable) assert.deepEqual(image(pid), row.executable, 'mac_process_image_changed');
         phase = 'arguments-recheck';
@@ -128,6 +135,7 @@ export async function createMacKernelReader() {
         }
       }
       phase = 'kinfo-recheck'; assert.deepEqual(kinfo(pid), owner, 'mac_kinfo_identity_changed');
+      if (row.argumentFailure?.nativeCode === 22 && (row.argumentFailure.stage === 'size' || row.argumentFailure.stage === 'read')) row.argumentFailure.identityBound = true;
       return row;
     } catch (error) { return { ...row, reason: 'mac_kernel_metadata_unverified', kernelFailure: { stage: phase, nativeCode: code(error) } }; }
   };

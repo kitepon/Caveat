@@ -543,7 +543,8 @@ fixture child and files; observation never signals existing processes.
 
 Darwin additionally classifies `foreign-user-unobservable` only for a non-root
 caller and a different uid proven by LP64 `kinfo_proc`, when argument size querying
-succeeds and the actual read fails with EINVAL. Both births and kernel executable
+succeeds and the actual read fails with EINVAL, or the size query itself fails
+with EINVAL and equal kinfo PID, birth and uid bracket that call. Both births and kernel executable
 identities must agree, with a readable image in each observation. Argument access
 alone may vary. Readable literals and bound paths are checked first. Unobservable
 runtimes, missing owners, same-uid gaps, other errno/stages and changed birth/image

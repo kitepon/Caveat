@@ -7,12 +7,20 @@ import { createMacKernelReader } from './managedMacProcessNative.js';
 import { collectNativeGlobalProcesses } from './platform.js';
 
 export type ProcessExecutable = { path: string; dev: string; ino: string };
-export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; decodeReason?: string };
+export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read-bound' | 'decode'; nativeCode: number | null; sizeQuerySucceeded: boolean; identityBound?: true; decodeReason?: string; decodePosition?: 'argv0' | 'later' };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
   executable: ProcessExecutable | null; argv: string[] | null; state?: string;
   ownerProof?: 'darwin-kinfo-proc'; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
+/** A denied size query is usable only after kinfo has bound the call on both sides. */
+export function isMacForeignArgumentDenial(row: NativeProcessRecord) {
+  const failure = row.argumentFailure;
+  return row.ownerProof === 'darwin-kinfo-proc' && failure?.nativeCode === 22
+    && (failure.stage === 'read' && failure.sizeQuerySucceeded
+      || failure.stage === 'size' && !failure.sizeQuerySucceeded && failure.identityBound === true);
+}
+
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
   selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean; confirmedExitedDuringRead?: number;
@@ -272,7 +280,7 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
       if (!image || !images.get(row.pid)?.some(value => value.path === image.path && value.dev === image.dev && value.ino === image.ino)) {
         const callerUid = before.find(value => value.pid === process.pid)?.uid;
         if (image && typeof callerUid === 'number' && callerUid !== 0 && typeof row.uid === 'number' && row.uid !== callerUid
-          && row.ownerProof === 'darwin-kinfo-proc' && (row.argv || row.argumentFailure?.stage === 'read' && row.argumentFailure.nativeCode === 22 && row.argumentFailure.sizeQuerySucceeded)) {
+          && row.ownerProof === 'darwin-kinfo-proc' && (row.argv || isMacForeignArgumentDenial(row))) {
           return { ...row, imageBinding: 'kernel-path' as const };
         }
         return { ...row, executable: null, ...(row.uid === callerUid ? { reason: 'kernel_text_image_unbound' } : {}) };

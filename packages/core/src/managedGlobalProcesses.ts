@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
-import { nativeGlobalProcessTables } from './managedProcessNative.js';
+import { isMacForeignArgumentDenial, nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
 export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; runtimeExecutables?: string[] };
@@ -76,7 +76,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     result.observation = {
       owner: knownOwner && observed.every(entry => entry.uid === ownUid) ? 'same' : knownOwner && observed.every(entry => entry.uid !== ownUid) ? 'foreign' : 'unknown',
       missing: [...new Set(observed.flatMap(entry => ['uid', 'birth', 'ppid', 'executable', 'argv'].filter(key => entry[key as keyof NativeProcessRecord] === null)))],
-      nativeIssues: [...new Set(observed.flatMap(row => [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode + (row.argumentFailure.decodeReason ? ':' + row.argumentFailure.decodeReason : '') : null,
+      nativeIssues: [...new Set(observed.flatMap(row => [row.argumentFailure ? 'darwin-argv:' + row.argumentFailure.stage + ':' + row.argumentFailure.nativeCode + (row.argumentFailure.decodeReason ? ':' + row.argumentFailure.decodeReason : '') + (row.argumentFailure.decodePosition ? ':' + row.argumentFailure.decodePosition : '') : null,
         row.ownerFailure ? 'windows-owner:' + row.ownerFailure.stage + ':' + row.ownerFailure.nativeCode : null,
         row.ownerMethod ? 'windows-owner-method:' + row.ownerMethod.stage + ':' + row.ownerMethod.returnValue : null,
         row.kernelFailure ? 'darwin-kernel:' + row.kernelFailure.stage + ':' + row.kernelFailure.nativeCode : null,
@@ -111,14 +111,12 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       && row.executable.dev === tables.selfExecutable.dev && row.executable.ino === tables.selfExecutable.ino;
     if (self) { result.classification = 'self'; result.reason = 'current_pid_birth_uid_and_kernel_executable_bound'; continue; }
     if (literal) { result.reason = 'scope_literal_outside_bound_script'; continue; }
-    const foreignArgvDenied = (entry: NativeProcessRecord) => entry.ownerProof === 'darwin-kinfo-proc'
-      && entry.argumentFailure?.stage === 'read' && entry.argumentFailure.nativeCode === 22 && entry.argumentFailure.sizeQuerySucceeded;
     if (first && last && typeof ownUid === 'number' && ownUid !== 0 && typeof first.uid === 'number' && first.uid !== ownUid
       && unchanged(first, last) && first.executable && last.executable && !first.reason && !last.reason
       && first.ownerProof === 'darwin-kinfo-proc' && last.ownerProof === 'darwin-kinfo-proc'
-      && (foreignArgvDenied(first) || foreignArgvDenied(last)) && (first.argv || foreignArgvDenied(first)) && (last.argv || foreignArgvDenied(last))) {
+      && (isMacForeignArgumentDenial(first) || isMacForeignArgumentDenial(last)) && (first.argv || isMacForeignArgumentDenial(first)) && (last.argv || isMacForeignArgumentDenial(last))) {
       if (isRuntime) { result.reason = 'foreign_runtime_arguments_unavailable'; continue; }
-      result.classification = 'foreign-user-unobservable'; result.reason = 'darwin_foreign_uid_bound_image_read_einval'; continue;
+      result.classification = 'foreign-user-unobservable'; result.reason = 'darwin_foreign_uid_bound_image_einval'; continue;
     }
     if (first && last && (!unchanged(first, last) || first.reason || last.reason || !first.argv !== !last.argv)) {
       if (first.birth !== last.birth) result.reason = 'process_birth_changed';
