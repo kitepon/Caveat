@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { realpathSync } from 'node:fs';
-import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacProcessArguments, readMacTextRegions } from '../src/managedMacProcessNative.js';
+import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacKinfoIdentity, confirmMacInitialExit, readMacProcessArguments, readMacTextRegions } from '../src/managedMacProcessNative.js';
 import { isWindows } from '../src/platform.js';
 
 describe('native process bridge and Darwin layouts', () => {
@@ -52,6 +52,27 @@ describe('native process bridge and Darwin layouts', () => {
     expect(readMacProcessArguments(42, () => -1, () => 22)).toEqual({ argv: null, failure: { stage: 'size', nativeCode: 22, sizeQuerySucceeded: false } });
     expect(readMacProcessArguments(42, (_mib, _count, _bytes, length) => { length[0] = 2 ** 30; return 0; }, () => 0).failure?.stage).toBe('size-bound');
     expect(readMacProcessArguments(42, (_mib, _count, bytes, length) => { length[0] = 128; return bytes ? -1 : 0; }, () => 13).failure?.nativeCode).toBe(13);
+  });
+  it('requires successful zero-byte initial kinfo plus independent ESRCH before classifying an exit', () => {
+    const row = { pid: 42, ppid: null, birth: null, uid: null, argv: null, executable: null };
+    let absent: unknown;
+    try { readMacKinfoIdentity(42, (_mib, count, _bytes, length) => { expect(count).toBe(4); length[0] = 0; return 0; }, () => 1); }
+    catch (error) { absent = error; }
+    expect(absent).toMatchObject({ initialKinfoAbsent: true, nativeCode: 0 });
+    expect(confirmMacInitialExit(row, 'kinfo', absent, pid => { expect(pid).toBe(42); return { result: -1, nativeCode: 3 }; })).toBe(true);
+    for (const group of [{ result: 7, nativeCode: 0 }, { result: 7, nativeCode: 3 }, { result: -1, nativeCode: 1 }, { result: -1, nativeCode: 22 }]) {
+      expect(confirmMacInitialExit(row, 'kinfo', absent, () => group)).toBe(false);
+    }
+    for (const [result, length, errno] of [[-1, 0, 1], [-1, 0, 3], [0, 1, 0], [0, 640, 0]]) {
+      let failure: unknown;
+      try { readMacKinfoIdentity(42, (_mib, _count, _bytes, size) => { size[0] = length!; return result!; }, () => errno!); }
+      catch (error) { failure = error; }
+      expect(confirmMacInitialExit(row, 'kinfo', failure, () => { throw Error('must_not_query_exit'); })).toBe(false);
+    }
+    for (const retained of [{ ...row, argv: ['node', '/old-global/caveat.js'] }, { ...row, executable: { path: '/old-global/node', dev: '1', ino: '2' } }, { ...row, birth: 'old-birth' }]) {
+      expect(confirmMacInitialExit(retained, 'kinfo', absent, () => { throw Error('must_not_drop_observed_scope'); })).toBe(false);
+    }
+    expect(confirmMacInitialExit(row, 'kinfo-recheck', absent, () => { throw Error('must_not_drop_identity_change'); })).toBe(false);
   });
   it('reads text vnode device/inode without substituting paths and retains partial failures', () => {
     let calls = 0;

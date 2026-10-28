@@ -576,6 +576,11 @@ Complete same-owner kernel observations present in only one table retain their
 kernel image for literal/bound checks before transient classification, even if
 the process falls outside the separate lsof snapshots. Stable same-owner images
 still require text corroboration; incomplete metadata remains stopped.
+Darwin drops a listed PID as confirmed exited only when the first kinfo sysctl
+succeeds with zero returned bytes and an independent subsequent getpgid reports
+ESRCH, before any argv or image has been read. Counts and PIDs are retained in
+the result. Live or reused PIDs, EPERM, invalid lengths, later identity failures
+and already observed scope references do not qualify.
 
 Windows global migration remains incomplete until a non-privileged, documented
 object-based observation provides a reachable ready state. Typed access denial

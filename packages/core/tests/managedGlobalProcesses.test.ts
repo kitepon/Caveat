@@ -282,6 +282,7 @@ describe('native process parsers and owned transport', () => {
     expect(assessGlobalProcesses(scope, readLinuxProcessTables(root)).status).toBe('stopped');
     const exited = readLinuxProcessTables(root, pid => pid === gonePid);
     expect(exited.confirmedExitedDuringRead).toBe(2); expect(assessGlobalProcesses(scope, exited).status).toBe('ready');
+    expect(exited.confirmedExitedPids).toEqual([gonePid, gonePid]);
     // A process can lose argv/image before its final stat read without producing an outer ENOENT.
     const gone = join(root, String(gonePid));
     writeFileSync(join(gone, 'stat'), gonePid + ' (exiting fixture) ' + fields.join(' '));
@@ -388,6 +389,10 @@ describe('native process parsers and owned transport', () => {
     expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, argv: ['native', scope.packageRoot!] })).status).toBe('stopped');
     expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, executable: { ...records[1]!.executable!, path: scope.packageRoot + '/native' } })).consumers).toBe(1);
     expect(assessGlobalProcesses(scope, await transient({ ...records[1]!, argv: null })).status).toBe('stopped');
+    const gone = { pid: fakePid + 2, ppid: null, uid: null, birth: null, argv: null, executable: null, confirmedExited: 'darwin-kinfo-empty-getpgid-esrch' as const };
+    const confirmed = await readMacProcessTables(run, () => structuredClone([...records, gone]));
+    expect(confirmed.confirmedExitedPids).toEqual([gone.pid, gone.pid]);
+    expect(assessGlobalProcesses(scope, confirmed)).toMatchObject({ status: 'ready', confirmedExitedDuringRead: 2, confirmedExitedPids: [gone.pid, gone.pid] });
   });
   it.skipIf(!isWindows())('executes the exact Windows probe with a scoped fake CIM cmdlet and validates its phase protocol', async () => {
     const command = join(process.env.SystemRoot!, 'System32/WindowsPowerShell/v1.0/powershell.exe');

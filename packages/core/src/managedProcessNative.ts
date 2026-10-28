@@ -11,7 +11,7 @@ export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read
 export type MacTextObservation = { status: 'read' | 'unreadable'; identities: { dev: string; ino: string }[]; stage: string; nativeCode: number | null };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
-  executable: ProcessExecutable | null; argv: string[] | null; state?: string;
+  executable: ProcessExecutable | null; argv: string[] | null; state?: string; confirmedExited?: 'darwin-kinfo-empty-getpgid-esrch';
   ownerProof?: 'darwin-kinfo-proc'; imageIdentityBound?: true; text?: MacTextObservation; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 /** A denied size query is usable only after kinfo has bound the call on both sides. */
@@ -24,7 +24,7 @@ export function isMacForeignArgumentDenial(row: NativeProcessRecord) {
 
 export type NativeProcessTables = {
   before: NativeProcessRecord[]; after: NativeProcessRecord[]; errors: string[];
-  selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean; confirmedExitedDuringRead?: number;
+  selfPid: number; selfExecutable: ProcessExecutable; caseInsensitive: boolean; confirmedExitedDuringRead?: number; confirmedExitedPids?: number[];
 };
 export type ProcessProbeEvent = { phase: string; event: 'issued' | 'started' | 'completed' | 'stopped'; pid?: number };
 export type ProcessProbeRun = (command: string, args: string[], phase: string, deadline: number) => Promise<{ stdout: string; pid: number }>;
@@ -184,7 +184,7 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
 }
 
 export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number) => boolean = () => false): NativeProcessTables {
-  let confirmedExitedDuringRead = 0;
+  const confirmedExitedPids: number[] = [];
   const deadline = Date.now() + 20000;
   const readTable = () => {
     const pids = readdirSync(procRoot).filter(name => /^\d+$/.test(name)).map(Number).sort((a, b) => a - b);
@@ -195,12 +195,12 @@ export function readLinuxProcessTables(procRoot = '/proc', exited: (pid: number)
       const row = linuxRecord(procRoot, pid);
       total += Buffer.byteLength(JSON.stringify(row));
       assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
-      if ((row.reason === 'ENOENT' || !row.argv || !row.executable) && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedDuringRead++; return null; }
+      if ((row.reason === 'ENOENT' || !row.argv || !row.executable) && Number.isInteger(pid) && pid > 0 && pid <= 0x7fffffff && exited(pid)) { confirmedExitedPids.push(pid); return null; }
       return row;
     }).filter((row): row is NativeProcessRecord => row !== null);
   };
   const before = readTable(), after = readTable();
-  return { before, after, errors: [], selfPid: process.pid, confirmedExitedDuringRead,
+  return { before, after, errors: [], selfPid: process.pid, confirmedExitedDuringRead: confirmedExitedPids.length, confirmedExitedPids,
     selfExecutable: executable(process.execPath), caseInsensitive: false };
 }
 
@@ -275,9 +275,9 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
     catch { errors.push('owned_probe_identity_changed'); }
   }
   const convert = (rows: NativeProcessRecord[], images: Map<number, ProcessExecutable[]>, other: NativeProcessRecord[]) => {
-    const otherPids = new Set(other.map(row => row.pid));
+    const otherPids = new Set(other.filter(row => !row.confirmedExited).map(row => row.pid));
     // lsof corroborates executable identity; the two kernel tables define the observation scope.
-    const filtered = rows.filter(row => !owned.has(row.pid));
+    const filtered = rows.filter(row => !owned.has(row.pid) && !row.confirmedExited);
     return filtered.map(row => {
       if (row.reason || row.state === 'Z' || row.kernel || row.imageIdentityBound && !row.executable) return row;
       const image = row.executable;
@@ -296,7 +296,8 @@ export async function readMacProcessTables(run: ProcessProbeRun, kernelTable?: (
       return { ...row, imageBinding: 'kernel-and-text' as const };
     });
   };
-  return { before: convert(before, imagesBefore, after), after: convert(after, imagesAfter, before), errors,
+  const confirmedExitedPids = [...before, ...after].filter(row => row.confirmedExited === 'darwin-kinfo-empty-getpgid-esrch').map(row => row.pid);
+  return { before: convert(before, imagesBefore, after), after: convert(after, imagesAfter, before), errors, confirmedExitedPids, confirmedExitedDuringRead: confirmedExitedPids.length,
     selfPid: process.pid, selfExecutable: executable(realpathSync(process.execPath)), caseInsensitive: false };
 }
 

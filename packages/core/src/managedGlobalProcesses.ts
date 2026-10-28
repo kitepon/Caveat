@@ -193,7 +193,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const consumers = counts.consumer, writers = counts.writer, unknown = counts.unknown;
   return { schema: 'caveat.global_process_preflight.v1' as const,
     status: errors.length || consumers || writers || unknown ? 'stopped' as const : 'ready' as const,
-    observedAt: new Date().toISOString(), consumers, writers, unknown, counts, errors, records, unresolvedStops: records.filter(row => row.resolution?.action === 'unresolved').length + errors.length, confirmedExitedDuringRead: tables.confirmedExitedDuringRead ?? 0,
+    observedAt: new Date().toISOString(), consumers, writers, unknown, counts, errors, records, unresolvedStops: records.filter(row => row.resolution?.action === 'unresolved').length + errors.length, confirmedExitedDuringRead: tables.confirmedExitedDuringRead ?? 0, confirmedExitedPids: tables.confirmedExitedPids ?? [],
     protectedObjectObservation: protection ? { status: 'confirmed' as const, objects: protection.objects.length, absent: protection.absent.length, postMutation: protection.postMutation } : { status: 'not-supplied' as const },
     stopScope: { oldPackage: !!scope.packageRoot, npm: !!scope.npmRoot, aliases: scope.binAliases.length, protectedPaths: scope.protectedPaths?.length ?? 0,
       retainedPaths: retainedRoots.length, readOnlyRuntimePathsExcluded: (scope.runtimeExecutables ?? []).every(path => !(scope.protectedPaths ?? []).some(protectedPath => norm(protectedPath) === norm(path))), runtimeProofRequiredAtEveryMutation: true },
