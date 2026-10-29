@@ -2,6 +2,11 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Missing own knowledge repositories return `NOT_A_REPO` instead of an opaque MCP sync failure, with guidance to confirm the intended repository and client context.
+
 ## [0.21.12] — 2026-10-29
 
 ### Fixed

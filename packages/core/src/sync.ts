@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import type { Logger } from './db.js';
@@ -141,11 +141,18 @@ async function assertPrivateRemotes(
   return worst;
 }
 
+function requireOwnDirectory(ownDir: string): void {
+  if (!statSync(ownDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new SyncError('NOT_A_REPO', 'own knowledge directory is missing or not a directory; configure the intended repository for this client context before syncing');
+  }
+}
+
 /** Validate that ownDir is exactly the checked-out worktree root and safe to push. */
 export async function preflightSync(
   ownDir: string,
   opts: PreflightSyncOptions = {},
 ): Promise<SyncPreflight> {
+  requireOwnDirectory(ownDir);
   const git = createGit(ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
   if (!(await git.checkIsRepo())) {
     throw new SyncError('NOT_A_REPO', 'own knowledge directory is not a git repository; run `caveat sync --init` first');
@@ -203,6 +210,7 @@ export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   if (!indexLock) throw new SyncError('SYNC_BUSY', 'reindex is already running; retry later');
   let repoLock: FileLock | null = null;
   try {
+    requireOwnDirectory(opts.ownDir);
     const git = createGit(opts.ownDir, { timeoutMs: opts.gitTimeoutMs, githubUser: opts.githubUser });
     if (await git.checkIsRepo()) {
       const common = realpathSync.native(resolve(opts.ownDir, (await git.raw(['rev-parse', '--git-common-dir'])).trim()));

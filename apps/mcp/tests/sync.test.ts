@@ -52,3 +52,19 @@ it('keeps a slow push alive after MCP client timeout, rejects overlap and persis
 
  }finally{await mcp.close();rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});expect(existsSync(root)).toBe(false);}
 },20000);
+
+it('reports a missing own repository as NOT_A_REPO and persists the terminal result without initializing it',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'caveat-mcp-missing-')),home=join(root,'home'),caveatHome=join(home,'.caveat'),own=join(caveatHome,'own');
+ mkdirSync(home,{recursive:true});
+ for(const key of Object.keys(process.env))if(/^GIT_CONFIG/i.test(key))vi.stubEnv(key,undefined);
+ for(const [key,value]of Object.entries(isolatedGitEnv(home)))vi.stubEnv(key,/^GIT_CONFIG/i.test(key)?undefined:value);
+ const mcp=await syncClient({userHome:home,caveatHome,onEntryWritten:()=>{}});
+ try{
+  const result=await mcp.client.callTool({name:'caveat_sync',arguments:{}});
+  expect(result.isError).toBe(true);expect(JSON.stringify(result)).toContain('NOT_A_REPO');
+  expect(readMcpSyncState(caveatHome)).toMatchObject({status:'failed',code:'NOT_A_REPO',finishedAt:expect.any(String)});
+  expect(existsSync(own)).toBe(false);
+  const tool=(await mcp.client.listTools()).tools.find(row=>row.name==='caveat_sync');
+  expect(tool?.description).toContain('never initialize or infer a remote automatically');
+ }finally{await mcp.close();rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+});
