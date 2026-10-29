@@ -13,7 +13,7 @@ export type GlobalGuardIdentity = {
 };
 export type NativeGuardDriver = {
   openRoot(path: string): object;
-  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'mutation' | 'journal-read'): object | null;
+  openChild(parent: object, name: string, purpose: 'parent' | 'observe-parent' | 'observe' | 'protected' | 'mutation' | 'journal-read'): object | null;
   snapshot(ref: object, metadataOnly?: boolean): GlobalGuardIdentity;
   listDirectory(ref: object): string[];
   assertPrivateDirectory(ref: object): void;
@@ -33,7 +33,7 @@ export type GlobalGuardTreeRow = { relativePath: string; identity: GlobalGuardId
 export type GlobalGuardTree = Readonly<{ tree: true; sha256: string }>;
 export type GlobalGuardJournal = Readonly<{ journal: true }>;
 type Directory = { ref: object; initial: GlobalGuardIdentity; parent?: Directory; name?: string };
-type Entry = { ref: object; directory: Directory; name: string; expected: GlobalGuardIdentity };
+type Entry = { ref: object; directory: Directory; name: string; expected: GlobalGuardIdentity; mutation: boolean };
 const leaf = (name: string) => assert.ok(typeof name === 'string' && name.length > 0 && name.length <= 255
   && !['.', '..'].includes(name) && !/[\\/\x00-\x1f:]/.test(name), 'global_guard_simple_name_required');
 const directoryBinding = ({ dev, ino, kind, owner, group, mode, securitySha256 }: GlobalGuardIdentity) => ({ dev, ino, kind, owner, group, mode, ...(securitySha256 ? { securitySha256 } : {}) });
@@ -141,7 +141,7 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
       assert.ok(expected.kind === 'file' && expected.links === '1', 'global_journal_invalid_created_file');
       assert.deepEqual(driver.readJournal(ref), bytes, 'global_journal_readback_changed');
       assert.deepEqual(inspect(parent.ref, name), expected, 'global_journal_name_changed'); checkDirectories();
-      const token = Object.freeze({ journal: true as const }); journals.set(token, { ref, directory: parent, name, expected, bytes, failed: false }); return token;
+      const token = Object.freeze({ journal: true as const }); journals.set(token, { ref, directory: parent, name, expected, bytes, failed: false, mutation: true }); return token;
     },
     moveJournalNoReplace(token: GlobalGuardJournal, path: string, name: string) {
       guard.readJournal(token); const journal = journals.get(token)!;
@@ -234,8 +234,8 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
     directoryIdentity(path: string) { checkDirectories(); return driver.snapshot(directory(path).ref); },
     canonicalDirectory(path: string) { checkDirectories(); directory(path); return aliases.get(path)!; },
     observe(path: string, name: string) { leaf(name); checkDirectories(); const parent = directory(path); return inspect(parent.ref, name); },
-    retainTree(path: string, name: string): GlobalGuardTree {
-      const entry = guard.retain(path, name), held = entries.get(entry)!;
+    retainTree(path: string, name: string, purpose: 'mutation' | 'protected' = 'mutation'): GlobalGuardTree {
+      const entry = guard.retain(path, name, purpose), held = entries.get(entry)!;
       const rows = treeInventory(held.ref, held.expected.dev);
       assert.deepEqual(rows[0]!.identity, held.expected, 'global_guard_tree_changed'); checkDirectories();
       const token = Object.freeze({ tree: true as const, sha256: createHash('sha256').update(JSON.stringify(rows)).digest('hex') });
@@ -368,16 +368,17 @@ export function bindGlobalPathGuard(paths: string[], driver: NativeGuardDriver) 
           rootMove: result, treeObserved: observed, errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'), automaticRecovery: false as const };
       }
     },
-    retain(path: string, name: string): GlobalGuardEntry {
+    retain(path: string, name: string, purpose: 'mutation' | 'protected' = 'mutation'): GlobalGuardEntry {
       leaf(name); checkDirectories(); const parent = directory(path);
-      const ref = driver.openChild(parent.ref, name, 'mutation'); assert.ok(ref, 'global_guard_leaf_missing'); keep(ref);
+      const ref = driver.openChild(parent.ref, name, purpose); assert.ok(ref, 'global_guard_leaf_missing'); keep(ref);
       const expected = driver.snapshot(ref); assert.ok(expected.kind === 'directory' || expected.links === '1', 'global_guard_shared_leaf');
       assert.deepEqual(inspect(parent.ref, name), expected, 'global_guard_leaf_changed');
-      const token = Object.freeze({ identity: Object.freeze({ ...expected }) }); entries.set(token, { ref, directory: parent, name, expected });
+      const token = Object.freeze({ identity: Object.freeze({ ...expected }) }); entries.set(token, { ref, directory: parent, name, expected, mutation: purpose === 'mutation' });
       return token;
     },
     moveNoReplace(token: GlobalGuardEntry, path: string, name: string) {
       leaf(name); checkDirectories(); const entry = entries.get(token); assert.ok(entry, 'global_guard_foreign_entry');
+      assert.ok(entry.mutation, 'global_guard_protected_move_forbidden');
       const target = directory(path);
       assert.deepEqual(driver.snapshot(entry.ref), entry.expected, 'global_guard_leaf_changed');
       assert.deepEqual(inspect(entry.directory.ref, entry.name), entry.expected, 'global_guard_leaf_name_changed');

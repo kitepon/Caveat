@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import fs from 'node:fs';import path from 'node:path';import os from 'node:os';import http from 'node:http';import https from 'node:https';import net from 'node:net';
 import { spawnSync } from 'node:child_process';import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,10 +39,11 @@ async function fixture(run: (f: { root: string; home: string; own: string; cavea
 if(process.argv[3]==='get')try{process.stdout.write(namedGithubCredential(fs.readFileSync(0,'utf8'),process.argv[2],process.env,(args,env)=>{
  if(!args.includes('--no-refresh')||env.GH_DEBUG||['GH_TOKEN','GITHUB_TOKEN','GH_ENTERPRISE_TOKEN','GITHUB_ENTERPRISE_TOKEN'].some(k=>env[k]))throw Error('fixture_scope_broken');
  fs.appendFileSync(${JSON.stringify(marker)},JSON.stringify({user:process.argv[2],args})+'\\n');return{status:1,stdout:'',stderr:'no oauth token found',error:undefined};}));}catch(e){process.stderr.write((e.code??'fixture_failed')+'\\n');process.exitCode=2;}`);
-  for(const[k,v]of Object.entries({HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,CLAUDE_CONFIG_DIR:path.join(home,'.claude'),CODEX_HOME:path.join(home,'.codex'),GROK_HOME:path.join(home,'.grok'),CURSOR_HOME:path.join(home,'.cursor'),XDG_STATE_HOME:path.join(home,'state'),LOCALAPPDATA:path.join(home,'state'),GH_CONFIG_DIR:path.join(home,'gh'),GIT_SSL_NO_VERIFY:'true',NO_PROXY:'',no_proxy:'',GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid',GIT_TERMINAL_PROMPT:'0'}))vi.stubEnv(k,v);
+  for(const[k,v]of Object.entries({HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,CLAUDE_CONFIG_DIR:path.join(home,'.claude'),CODEX_HOME:path.join(home,'.codex'),GROK_HOME:path.join(home,'.grok'),CURSOR_HOME:path.join(home,'.cursor'),XDG_STATE_HOME:path.join(home,'state'),LOCALAPPDATA:path.join(home,'state'),GH_CONFIG_DIR:path.join(home,'gh'),GIT_SSL_NO_VERIFY:'true',NO_PROXY:'',no_proxy:'',GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid',GIT_TERMINAL_PROMPT:'0'}))vi.stubEnv(k,/^GIT_CONFIG/i.test(k)?undefined:v);
   for(const k of Object.keys(process.env))if(k.toUpperCase().startsWith('GIT_CONFIG'))vi.stubEnv(k,undefined);
+  for(const[k,v]of Object.entries(isolatedGitEnv(home)))vi.stubEnv(k,/^GIT_CONFIG/i.test(k)?undefined:v);
   vi.stubGlobal('fetch',vi.fn(async()=>new Response('',{status:401})));
-  const git=(args:string[])=>{const r=spawnSync('git',['-C',own,...args],{encoding:'utf8',timeout:10000,windowsHide:true});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
+  const git=(args:string[])=>{const r=spawnSync('git',['-C',own,...args],{env:{...process.env,...isolatedGitEnv(home)},encoding:'utf8',timeout:10000,windowsHide:true});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
   fs.writeFileSync(path.join(home,'.caveatrc.json'),JSON.stringify({knowledgeRepo:own,githubUser:'fixture-target'}));
   const ctx=buildContext(log,{userHome:home,caveatHome});
   try{await run({root,home,own,caveatHome,marker,forbidden,ctx,git});}

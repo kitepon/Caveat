@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { isolatedGitEnv } from '../../scripts/test-git-env.mjs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -75,10 +76,11 @@ interface GitFx {
 
 function gitFx(): GitFx {
   const root = mkdtempSync(join(tmpdir(), 'caveat-precommit-'));
-  execFileSync('git', ['init', '-q'], { cwd: root });
-  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
-  execFileSync('git', ['config', 'user.name', 'test'], { cwd: root });
-  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { cwd: root });
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(root, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
+  execFileSync('git', ['init', '-q'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: root });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: root });
+  execFileSync('git', ['config', 'user.name', 'test'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: root });
+  execFileSync('git', ['config', 'commit.gpgsign', 'false'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: root });
   mkdirSync(join(root, 'entries'), { recursive: true });
   return { root };
 }
@@ -87,7 +89,7 @@ function stageFile(cwd: string, relPath: string, content: string): void {
   const full = join(cwd, relPath);
   mkdirSync(dirname(full), { recursive: true });
   writeFileSync(full, content, 'utf-8');
-  execFileSync('git', ['add', '--', relPath], { cwd });
+  execFileSync('git', ['add', '--', relPath], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd });
 }
 
 function runGate(cwd: string): { status: number; stderr: string } {
@@ -137,8 +139,10 @@ describe('pre-commit-visibility-gate.mjs (integration)', () => {
 
   it('ignores staged non-md files and md files outside entries/', () => {
     writeFileSync(join(fx.root, 'README.md'), sampleMd('private'), 'utf-8');
-    execFileSync('git', ['add', '--', 'README.md'], { cwd: fx.root });
+    execFileSync('git', ['add', '--', 'README.md'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: fx.root });
     const { status } = runGate(fx.root);
     expect(status).toBe(0);
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });

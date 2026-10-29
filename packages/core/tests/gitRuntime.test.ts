@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { createServer, type Server, type ServerResponse } from 'node:http';
@@ -20,6 +21,7 @@ afterEach(() => {
 
 function makeTmpDir(): string {
   tmpDir = mkdtempSync(join(tmpdir(), 'caveat-git-runtime-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(tmpDir, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   return tmpDir;
 }
 

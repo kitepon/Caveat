@@ -48,7 +48,7 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
   const bindings = new Map<string, Binding>();
   for (const [index, object] of plan.protectedObjects.entries()) {
     const binding: Binding = { directory: dirname(object.path), name: basename(object.path), rows: object.rows, tree: null };
-    try { binding.tree = guard.retainTree(binding.directory, binding.name); } catch { /* Unknown remains a permanent failed binding. */ }
+    try { binding.tree = guard.retainTree(binding.directory, binding.name, 'protected'); } catch { /* Unknown remains a permanent failed binding. */ }
     bindings.set('protected.' + index, binding);
   }
   const observe = () => {

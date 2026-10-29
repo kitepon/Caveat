@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,11 +14,12 @@ const denied = async () => ({ kind: 'denied' as const, status: 404 });
 const roots: string[] = [];
 process.env.GIT_AUTHOR_NAME = process.env.GIT_COMMITTER_NAME = 'Caveat Test';
 process.env.GIT_AUTHOR_EMAIL = process.env.GIT_COMMITTER_EMAIL = 'fixture@example.invalid';
-const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 const entry = (text: string) => `---\nid: periodic-entry\ntitle: Periodic reception fixture\nvisibility: private\nconfidence: confirmed\ntags: [periodic]\nenvironment: {}\ncreated_at: 2026-10-15\nupdated_at: 2026-10-15\n---\n\n## Symptom\n${text}\n`;
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'caveat-periodic-')); roots.push(root);
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(root, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   const bare = join(root, 'remote.git'); const ownDir = join(root, 'own'); const peer = join(root, 'peer');
   git(root, 'init', '--bare', '-b', 'main', bare);
   git(root, 'init', '-b', 'main', ownDir);
@@ -120,3 +122,5 @@ describe('periodic reception with isolated Git and SQLite', { timeout: 60_000 },
     expect(readPeriodicSyncState(f.opts.caveatHome)?.last_attempt).toEqual(attempt);
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });

@@ -230,3 +230,108 @@ describe('Windows native security layouts', () => {
     expect(() => verifyGuardAcl(acl(1), new Set(['S-1-5-18']), true, 'S-1-5-21-1234')).toThrow('foreign_acl_reader');
   });
 });
+
+
+describe.skipIf(process.platform === 'win32')('native POSIX parent group admission', () => {
+  for (const [label, mode, members, allowed] of [
+    ['private group', 0o775, [], true], ['private group 0770', 0o770, [], true], ['ordinary group with another member', 0o775, ['other'], false], ['other writable', 0o777, [], false],
+  ] as const) it(label, async () => {
+    const f = fixture(); chmodSync(f.source, mode);
+    const uid = process.geteuid!(), gid = process.getegid!();
+    const driver = await createPosixGlobalGuard(globalFilesystemNativeSpec(), { user: () => 'fixture-user',
+      group: () => ({ name: 'fixture-user', gid, members: [...members] }), namedGroup: () => null, primaryUsers: () => ({ uids: [uid] }) });
+    if (allowed) { const guard = bindGlobalPathGuard([f.source], driver); guard.close(); }
+    else {
+      try { bindGlobalPathGuard([f.source], driver); throw Error('admission unexpectedly succeeded'); }
+      catch (error) { expect(error).toMatchObject({ message: 'global_guard_writable_parent', diagnostic: { path: f.source,
+        mode: '0' + mode.toString(8), uid: String(uid), gid: String(gid), group: 'fixture-user', remedy: expect.stringContaining('chmod') } }); }
+    }
+  });
+});
+
+
+describe.skipIf(process.platform !== 'win32')('Windows retained protected owner', () => {
+  for (const [label, owner, purpose, allowed] of [
+    ['Administrators protected', 'S-1-5-32-544', 'protected', true],
+    ['foreign protected', 'S-1-5-21-111-222-333-444', 'protected', false],
+    ['Administrators mutation', 'S-1-5-32-544', 'mutation', false],
+  ] as const) it(label, async () => {
+    const f = fixture(), driver = await createWindowsGlobalGuard((path, sid) => path === join(f.source, 'leaf') ? owner : sid);
+    const guard = bindGlobalPathGuard([f.source, f.backup], driver);
+    try {
+      if (!allowed) expect(() => guard.retainTree(f.source, 'leaf', purpose)).toThrow('global_guard_foreign_owner');
+      else {
+        const held = guard.retainTree(f.source, 'leaf', purpose);
+        expect(guard.readRetainedFile(held)).toEqual(Buffer.from('original bytes'));
+        expect(() => guard.moveTreeNoReplace(held, f.backup, 'must-not-move')).toThrow('global_guard_protected_move_forbidden');
+        expect(existsSync(join(f.source, 'leaf'))).toBe(true);
+      }
+    } finally { guard.close(); }
+  });
+});
+
+
+describe.skipIf(process.platform === 'win32')('POSIX protected file pins', () => {
+  const groups = () => ({ user: () => 'fixture-owner', group: (gid: number) => ({ name: 'fixture-owner', gid, members: [] }),
+    namedGroup: () => null, primaryUsers: () => ({ uids: [process.geteuid!()] }) });
+  it.each([0o664, 0o666, 0o1666])('checks protected file mode %o without sticky exemption', async mode => {
+    const f = fixture(); chmodSync(join(f.source, 'leaf'), mode);
+    const guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), groups()));
+    try {
+      if (mode === 0o664) expect(guard.readRetainedFile(guard.retainTree(f.source, 'leaf', 'protected')).toString()).toBe('original bytes');
+      else expect(() => guard.retainTree(f.source, 'leaf', 'protected')).toThrow('global_guard_writable_leaf');
+    } finally { guard.close(); }
+  });
+  it('rejects a protected file owned by another ordinary user', async () => {
+    const f = fixture(), guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), groups(),
+      (path, uid) => path === join(f.source, 'leaf') ? 12345 : uid));
+    try { expect(() => guard.retainTree(f.source, 'leaf', 'protected')).toThrow('global_guard_foreign_leaf'); }
+    finally { guard.close(); }
+  });
+  it('memoizes membership once per gid while checking every object mode', async () => {
+    const f = fixture(); chmodSync(f.source, 0o775); chmodSync(join(f.source, 'leaf'), 0o664);
+    let groupCalls = 0, primaryCalls = 0; const data = groups();
+    const driver = await createPosixGlobalGuard(globalFilesystemNativeSpec(), { ...data,
+      group(gid) { groupCalls++; return data.group(gid); }, primaryUsers() { primaryCalls++; return data.primaryUsers(); } });
+    const parent = driver.openRoot(f.source), file = driver.openChild(parent, 'leaf', 'protected')!;
+    try {
+      driver.snapshot(parent); driver.snapshot(file); driver.snapshot(parent);
+      chmodSync(join(f.source, 'leaf'), 0o666); expect(() => driver.snapshot(file)).toThrow('global_guard_writable_leaf');
+      chmodSync(join(f.source, 'leaf'), 0o664); driver.snapshot(file);
+      chmodSync(f.source, 0o777); expect(() => driver.snapshot(parent)).toThrow('global_guard_writable_parent');
+      chmodSync(f.source, 0o775); driver.snapshot(parent);
+      expect(groupCalls).toBe(1); expect(primaryCalls).toBe(1);
+    } finally { driver.close(file); driver.close(parent); }
+  });
+});
+
+
+describe.skipIf(process.platform === 'win32')('POSIX mutation root group admission', () => {
+  it.each([
+    ['directory', 0o775, [], true], ['directory', 0o777, [], false], ['directory', 0o775, ['another-user'], false],
+    ['file', 0o664, [], true], ['file', 0o666, [], false], ['file', 0o1666, [], false],
+  ] as const)('checks %s mode %o and members %j', async (kind, mode, members, allowed) => {
+    const f = fixture(), file = kind === 'directory' ? f.source : join(f.source, 'leaf'); chmodSync(file, mode);
+    const parent = kind === 'directory' ? f.root : f.source, name = kind === 'directory' ? 'source' : 'leaf';
+    const guard = bindGlobalPathGuard([parent, f.backup], await createPosixGlobalGuard(globalFilesystemNativeSpec(), {
+      user: () => 'fixture-owner', group: gid => ({ name: 'fixture-owner', gid, members: [...members] }),
+      namedGroup: () => null, primaryUsers: () => ({ uids: [process.geteuid!()] }),
+    }));
+    try {
+      if (allowed) {
+        const held = guard.retainTree(parent, name);
+        expect(guard.moveTreeNoReplace(held, f.backup, 'original').status).toBe('moved');
+        expect(statSync(join(f.backup, 'original')).mode & 0o7777).toBe(mode);
+      } else {
+        try { guard.retainTree(parent, name); throw Error('accepted unsafe mutation'); }
+        catch (error) { expect(error).toMatchObject({ message: 'global_guard_writable_leaf', diagnostic: { path: file, mode: '0' + mode.toString(8) } }); }
+      }
+    } finally { guard.close(); }
+  });
+  it('still rejects a mutation object owned by another user', async () => {
+    const f = fixture(), guard = bindGlobalPathGuard([f.source], await createPosixGlobalGuard(globalFilesystemNativeSpec(), undefined,
+      (path, uid) => path === join(f.source, 'leaf') ? process.getuid!() + 1 : uid));
+    try { expect(() => guard.retainTree(f.source, 'leaf')).toThrow('global_guard_foreign_leaf'); }
+    finally { guard.close(); }
+  });
+});

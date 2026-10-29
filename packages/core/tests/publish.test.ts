@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -45,7 +46,7 @@ interface Fixture {
 }
 
 function git(args: string[], cwd?: string): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync('git', args, { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 async function startKeyServer(keys: Map<string, Buffer>): Promise<KeyServer> {
@@ -82,6 +83,7 @@ function entry(id: string, visibility: string, body = 'symptom text', showcase?:
 
 async function makeFixture(): Promise<Fixture> {
   const root = mkdtempSync(join(tmpdir(), 'caveat-publish-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(root, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   const remote = join(root, 'remote.git');
   git(['init', '--bare', remote]);
   const caveatHome = join(root, 'home');
@@ -499,3 +501,5 @@ describe('verifySealedMirror', () => {
       .toThrow(/README\.md content changed/i);
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });

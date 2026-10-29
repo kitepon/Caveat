@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +29,7 @@ interface Fixture {
 }
 
 function git(args: string[], cwd?: string): string {
-  return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+  return execFileSync('git', args, { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 function makeFixture(): Fixture {
@@ -39,7 +40,7 @@ function makeFixture(): Fixture {
   const gitHome = join(root, 'git-home'); mkdirSync(gitHome, { mode: 0o700 });
   // All direct Git and simple-git children use only this fixture's global configuration.
   for (const key of Object.keys(process.env)) if (/^GIT_CONFIG/i.test(key)) vi.stubEnv(key, undefined);
-  vi.stubEnv('HOME', gitHome); vi.stubEnv('USERPROFILE', gitHome); vi.stubEnv('XDG_CONFIG_HOME', join(gitHome, 'config'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(gitHome))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   git(['init', '--bare', remote]);
   return {
     root, remote, own, home,

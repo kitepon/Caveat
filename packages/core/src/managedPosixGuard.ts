@@ -1,13 +1,47 @@
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
+import { nativePosixGroups, posixParentGroup, type PosixGroupLookup } from './managedPosixGroups.js';
 import { closeSync, constants, fstatSync, fsyncSync, fchmodSync, readSync, writeSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import type { GlobalGuardIdentity, NativeGuardDriver } from './managedGlobalGuard.js';
 type Spec = { library: string | null; closeOnExec: number; linkOpen: number; loopError: number; rename: string; noReplace: number;
   directoryRead: string; directoryNameOffset: number; xattrListTail: number[]; xattrGetTail: number[]; linkAttributesViaProc: boolean; fullSync?: number; aclType?: number };
-type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string };
+type Ref = { fd: number; mutation?: boolean; parentOnly?: boolean; parent?: Ref; name?: string; pin?: boolean; path: string };
 
-export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDriver> {
-  const koffi = await import('koffi'), lib = koffi.load(spec.library);
+/** Linux access ACL masks can hide foreign named writers behind the group mode bits. */
+export function verifyPosixAccessAcl(bytes: Buffer, path: string) {
+  const fail = (entry?: { tag: number; id: number }) => {
+    throw Object.assign(new assert.AssertionError({ message: 'global_guard_extended_acl_unclassified' }), {
+      diagnostic: { reason: 'global_guard_extended_acl_unclassified', path, entry: entry ?? null,
+        remedy: 'Review the named access ACL writers before retrying.' },
+    });
+  };
+  if (bytes.length < 4 || (bytes.length - 4) % 8 !== 0 || bytes.readUInt32LE(0) !== 2) fail();
+  for (let offset = 4; offset < bytes.length; offset += 8) {
+    const tag = bytes.readUInt16LE(offset), perm = bytes.readUInt16LE(offset + 2), id = bytes.readUInt32LE(offset + 4);
+    if (![1, 2, 4, 8, 16, 32].includes(tag) || perm > 7 || ((tag === 2 || tag === 8) && (perm & 2))) fail({ tag, id });
+  }
+}
+
+export async function createPosixGlobalGuard(spec: Spec, groupLookup?: PosixGroupLookup, readOwner: (path: string, uid: number) => number = (_path, uid) => uid): Promise<NativeGuardDriver> {
+  const koffi = await import('koffi'), lib = koffi.load(spec.library), groups = groupLookup ?? await nativePosixGroups();
+  const groupAssessments = new Map<bigint, ReturnType<typeof posixParentGroup>>();
+  const writeAssessment = (stat: Pick<import('node:fs').BigIntStats, 'mode' | 'gid'>, directory: boolean) => {
+    if ((directory && (stat.mode & 0o1000n) !== 0n) || (stat.mode & 0o022n) === 0n) return { allowed: true, group: null };
+    let assessment = groupAssessments.get(stat.gid);
+    if (!assessment) {
+      assessment = posixParentGroup({ mode: 0o020n, gid: stat.gid }, groups);
+      groupAssessments.set(stat.gid, assessment);
+    }
+    return (stat.mode & 0o002n) !== 0n ? { ...assessment, allowed: false } : assessment;
+  };
+  const permissionError = (reason: string, ref: Ref, stat: import('node:fs').BigIntStats,
+    assessment: { group: string | null; error?: string } = { group: null }) => Object.assign(new assert.AssertionError({ message: reason }), {
+    diagnostic: { reason, path: ref.path, mode: '0' + (stat.mode & 0o7777n).toString(8), uid: String(stat.uid), gid: String(stat.gid),
+      group: assessment.group, lookupError: assessment.error, remedy: reason === 'global_guard_foreign_leaf'
+        ? 'Review ownership and use the original owning account.' : (stat.mode & 0o002n) !== 0n
+          ? 'Remove other write permission with chmod o-w on this path.' : 'Review group membership or remove group write permission with chmod g-w on this path.' },
+  });
   const fullSync = spec.fullSync === undefined ? null : lib.func('int fcntl(int fd, int command)');
   const flush = (fd: number) => {
     fsyncSync(fd);
@@ -63,7 +97,9 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       const size = readValue(null, 0); assert.ok(size >= 0 && size <= 16 * 1024 * 1024, 'global_guard_xattr_value_unavailable');
       total += size; assert.ok(total <= 32 * 1024 * 1024, 'global_guard_xattr_total_bound');
       const value = Buffer.alloc(size || 1);
-      try { assert.equal(readValue(value, size), size, 'global_guard_xattr_changed'); values.push({ name, bytes: size, sha256: createHash('sha256').update(value.subarray(0, size)).digest('hex') }); }
+      try { assert.equal(readValue(value, size), size, 'global_guard_xattr_changed');
+        if (spec.linkAttributesViaProc && name === 'system.posix_acl_access') verifyPosixAccessAcl(value.subarray(0, size), ref.path);
+        values.push({ name, bytes: size, sha256: createHash('sha256').update(value.subarray(0, size)).digest('hex') }); }
       finally { value.fill(0); }
     }
     const namesAfter = Buffer.alloc(capacity || 1); assert.equal(readNames(namesAfter, capacity), length, 'global_guard_xattr_names_changed');
@@ -89,12 +125,22 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     const stat = fstatSync((value as Ref).fd, { bigint: true });
     assert.ok(stat.isDirectory() || stat.isFile() || stat.isSymbolicLink(), 'global_guard_special_leaf');
     if ((value as Ref).mutation) {
-      assert.equal(Number(stat.uid), process.getuid?.(), 'global_guard_foreign_leaf');
-      assert.ok(stat.isSymbolicLink() || (stat.mode & 0o022n) === 0n, 'global_guard_writable_leaf');
+      if (readOwner((value as Ref).path, Number(stat.uid)) !== process.getuid?.()) throw permissionError('global_guard_foreign_leaf', value as Ref, stat);
+      if (!stat.isSymbolicLink()) {
+        const assessment = writeAssessment(stat, stat.isDirectory());
+        if (!assessment.allowed) throw permissionError('global_guard_writable_leaf', value as Ref, stat, assessment);
+      }
+    }
+    if ((value as Ref).pin && stat.isFile()) {
+      const owner = readOwner((value as Ref).path, Number(stat.uid));
+      if (owner !== 0 && owner !== process.getuid?.()) throw permissionError('global_guard_foreign_leaf', value as Ref, stat);
+      const assessment = writeAssessment(stat, false);
+      if (!assessment.allowed) throw permissionError('global_guard_writable_leaf', value as Ref, stat, assessment);
     }
     if (stat.isDirectory()) {
       assert.ok(stat.uid === 0n || Number(stat.uid) === process.getuid?.(), 'global_guard_foreign_parent');
-      assert.ok((stat.mode & 0o022n) === 0n || (stat.mode & 0o1000n) !== 0n, 'global_guard_writable_parent');
+      const assessment = writeAssessment(stat, true);
+      if (!assessment.allowed) throw permissionError('global_guard_writable_parent', value as Ref, stat, assessment);
     }
     let contentSha256: string | undefined;
     if (stat.isFile() && !metadataOnly) {
@@ -133,12 +179,12 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
     return bytes;
   };
   return {
-    openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd, parentOnly: true }; },
+    openRoot(path) { const fd = Number(open(path, flags | constants.O_DIRECTORY)); assert.ok(fd >= 0, 'global_guard_root_open_failed'); return { fd, parentOnly: true, path }; },
     openChild(parent, name, purpose) {
       let fd = Number(openat((parent as Ref).fd, name, flags));
       if (fd < 0 && koffi.errno() === spec.loopError) fd = Number(openat((parent as Ref).fd, name, spec.linkOpen | constants.O_NONBLOCK | spec.closeOnExec));
       if (fd < 0) { if (koffi.errno() === 2) return null; throw Error('global_guard_child_open_failed'); }
-      const ref = { fd, mutation: purpose === 'mutation', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name };
+      const ref = { fd, mutation: purpose === 'mutation', pin: purpose === 'protected', parentOnly: purpose === 'parent' || purpose === 'observe-parent', parent: parent as Ref, name, path: join((parent as Ref).path, name) };
       if (purpose === 'journal-read') readOnlyJournals.add(ref); return ref;
     },
     snapshot,
@@ -184,7 +230,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
         fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 'int', 0o600));
       }
       assert.ok(fd >= 0, 'global_working_created_open_failed');
-      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdWorking.add(ref); return ref;
+      const ref = { fd, mutation: true, parent: parent as Ref, name, path: join((parent as Ref).path, name) }; createdWorking.add(ref); return ref;
     },
     copyWorkingFile(source, target) {
       const output = working(target), before = fstatSync((source as Ref).fd, { bigint: true }), empty = fstatSync(output.fd, { bigint: true });
@@ -212,7 +258,7 @@ export async function createPosixGlobalGuard(spec: Spec): Promise<NativeGuardDri
       // Darwin ARM64 passes variadic arguments differently from fixed arguments.
       const fd = Number(createat((parent as Ref).fd, name, constants.O_RDWR | constants.O_APPEND | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | spec.closeOnExec, 'int', 0o600));
       assert.ok(fd >= 0, 'global_journal_exclusive_create_failed');
-      const ref = { fd, mutation: true, parent: parent as Ref, name }; createdJournals.add(ref); createdWorking.add(ref); return ref;
+      const ref = { fd, mutation: true, parent: parent as Ref, name, path: join((parent as Ref).path, name) }; createdJournals.add(ref); createdWorking.add(ref); return ref;
     },
     appendJournal(ref, bytes) {
       const value = journal(ref, true); assert.ok(bytes.length <= 65536, 'global_journal_record_bound');

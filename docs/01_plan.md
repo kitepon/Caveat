@@ -663,6 +663,19 @@ no PATH PowerShell child. Legacy v1 status remains compatible; the async product
 status caller selects the manifest version without reinterpreting v1 identities.
 An unknown native read never falls back to the legacy reader.
 
+Parent admission treats sticky directories as before and rejects non-sticky
+other-writable parents. Group-writable parents require a native NSS proof of a
+private user group (including primary-group users), or an OS administrator group.
+Linux access ACLs with named user/group writers or invalid encoding are rejected;
+default inheritance ACLs do not alter the object access decision.
+Passwd enumeration stops on errors or more than 65,536 entries; directory services
+that disable enumeration cannot currently be detected. Foreign parent owners
+remain rejected. Windows read-only protected pins accept the current user and the
+existing system trustees, while objects selected for mutation require the current
+user. Both pin kinds retain the same write/delete exclusion handles. Migration
+stops report the assertion and relevant path, mode/group or owner SID/name with a
+remedy; the existing error digests remain available for receipts.
+
 The product `deployment global-plan --global-root <global-node-modules>
 --npm-cli <absolute-npm-cli.js> --json` performs read-only admission, using normal
 product settings paths and the production native process/writer collector. It

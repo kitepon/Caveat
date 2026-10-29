@@ -1,12 +1,14 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, it } from 'vitest';
+import { expect, it, vi, afterEach } from 'vitest';
 import { createGit } from '../src/gitRuntime.js';
 
 it.skipIf(process.platform !== 'win32')('Windowsで260文字を超えるentryを同期し、checkoutできる', async () => {
   const root = mkdtempSync(join(tmpdir(), 'caveat-long-path-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(root, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   try {
     const own = join(root, 'own');
     mkdirSync(own);
@@ -19,7 +21,7 @@ it.skipIf(process.platform !== 'win32')('Windowsで260文字を超えるentryを
     expect(entry.length).toBeGreaterThan(260);
     mkdirSync(join(own, 'entries', 'misc'), { recursive: true });
     writeFileSync(entry, '長いパスの同期試験\n');
-    expect(() => execFileSync('git', ['-C', own, '-c', 'core.longpaths=false', 'add', '--all'], { stdio: 'pipe' }))
+    expect(() => execFileSync('git', ['-C', own, '-c', 'core.longpaths=false', 'add', '--all'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, stdio: 'pipe' }))
       .toThrow(/Filename too long/);
 
     await git.add('--all');
@@ -32,3 +34,5 @@ it.skipIf(process.platform !== 'win32')('Windowsで260文字を超えるentryを
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }, 15_000);
+
+afterEach(() => { vi.unstubAllEnvs(); });

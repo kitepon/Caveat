@@ -22,7 +22,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
   let sequence = 0, phase = 'admission', planSha256: string | null = null, runId: string | null = null, admission: Admission | null = null;
   let processAssessment: ReturnType<Admission['processAssessment']> = null;
   let mutationStarted = false;
-  let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string; sharingViolation?: { code: number; file?: string; instruction: string; readableHolders: unknown[] } } = { status: 'unknown', phase };
+  let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string; reason?: string; diagnostic?: unknown; sharingViolation?: { code: number; file?: string; instruction: string; readableHolders: unknown[] } } = { status: 'unknown', phase };
   const event = (kind: string, pid?: number) => emit({ schema: 'caveat.global_migration_event.v1', sequence: ++sequence, phase, event: kind, planSha256, runId, ...(pid ? { pid } : {}) });
   try {
     event('issued'); assert.ok(/^[a-f0-9]{64}$/.test(expectedPlanSha256), 'global_migration_expected_hash_required');
@@ -68,7 +68,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     result = { status: 'completed', phase };
   } catch (error) {
     processAssessment = (error as { preflight?: typeof processAssessment }).preflight ?? processAssessment;
-    result = { status: phase === 'admission' ? 'stopped' : 'unknown', phase, errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) };
+    result = { status: phase === 'admission' ? 'stopped' : 'unknown', phase, reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? null, errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) };
   }
   return await finish();
 

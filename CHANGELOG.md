@@ -2,6 +2,14 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.12] — 2026-10-29
+
+### Fixed
+- Reject unclassified named write entries in Linux access ACLs, including those hidden behind a trusted group mode mask.
+- Global migration accepts POSIX private-user and administrator groups while refusing ordinary foreign writers, using native NSS membership and bounded primary-user enumeration.
+- Windows protected configuration pins accept trusted system owners while mutation targets still require the current user; retained handles keep their write/delete exclusion.
+- Global migration failures include the assertion and relevant path, permissions or owner identity, and a suggested remedy alongside the existing error digest.
+
 ## [0.21.11] — 2026-10-28
 
 ### Fixed
