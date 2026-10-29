@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import type { Logger } from './db.js';
@@ -142,8 +142,8 @@ async function assertPrivateRemotes(
 }
 
 function requireOwnDirectory(ownDir: string): void {
-  if (!existsSync(ownDir)) {
-    throw new SyncError('NOT_A_REPO', 'own knowledge directory is missing; configure the intended repository for this client context before syncing');
+  if (!statSync(ownDir, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new SyncError('NOT_A_REPO', 'own knowledge directory is missing or not a directory; configure the intended repository for this client context before syncing');
   }
 }
 

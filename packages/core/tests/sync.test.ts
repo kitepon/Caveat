@@ -72,6 +72,16 @@ describe('preflightSync', { timeout: GIT_TEST_TIMEOUT_MS }, () => {
     expect(probeImpl).not.toHaveBeenCalled();
   });
 
+  it('classifies an own path that is a file without changing it or probing a remote', async () => {
+    writeFileSync(fixture.own, 'not a repository');
+    const probeImpl = vi.fn(denied);
+    await expect(preflightSync(fixture.own, { probeImpl })).rejects.toMatchObject({
+      code: 'NOT_A_REPO', message: expect.stringContaining('missing or not a directory'),
+    });
+    expect(readFileSync(fixture.own, 'utf8')).toBe('not a repository');
+    expect(probeImpl).not.toHaveBeenCalled();
+  });
+
   it('rejects a non-repository with the init guidance', async () => {
     mkdirSync(fixture.own, { recursive: true });
     await expect(preflightSync(fixture.own, { probeImpl: denied })).rejects.toMatchObject({
