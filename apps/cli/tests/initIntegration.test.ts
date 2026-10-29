@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { execFileSync } from 'node:child_process';
 import {
   existsSync,
@@ -35,6 +36,7 @@ function makeFixture(): Fixture {
   const caveatHome = join(root, 'caveat-home');
   const messages: string[] = [];
   mkdirSync(userHome, { recursive: true });
+  for (const [key, value] of Object.entries(isolatedGitEnv(userHome))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   mkdirSync(caveatHome, { recursive: true });
   return {
     root,
@@ -126,7 +128,7 @@ describe('caveat init integrated setup', () => {
   // Windows. Match the existing Git integration budget, not a product timeout.
   it('initializes an explicit file URL without gh and syncs it on re-init', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, async () => {
     const remote = join(fx.root, 'private.git');
-    execFileSync('git', ['init', '--bare', '--initial-branch=main', remote], { timeout: 20_000 });
+    execFileSync('git', ['init', '--bare', '--initial-branch=main', remote], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, timeout: 20_000 });
     const remoteUrl = pathToFileURL(remote).href;
     const ghRunner = vi.fn(() => ({ status: 1, stdout: '', stderr: '' }));
     const confirm = vi.fn(() => true);

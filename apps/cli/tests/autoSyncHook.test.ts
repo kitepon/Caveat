@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -69,7 +70,7 @@ function git(args: string[], cwd: string, phase: string) {
     encoding: 'utf-8',
     timeout: GIT_PROCESS_TIMEOUT_MS,
     env: {
-      ...process.env,
+      ...process.env, ...isolatedGitEnv(process.env.HOME!),
       GIT_AUTHOR_NAME: 'Caveat Test',
       GIT_AUTHOR_EMAIL: 'caveat@example.com',
       GIT_COMMITTER_NAME: 'Caveat Test',
@@ -98,6 +99,7 @@ async function waitFor(path: string): Promise<void> {
 
 function fresh(): { home: string; cleanup: () => void } {
   const home = mkdtempSync(join(tmpdir(), 'caveat-auto-sync-hook-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(home, 'user')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   mkdirSync(join(home, 'own', 'entries'), { recursive: true });
   mkdirSync(join(home, 'community'), { recursive: true });
   mkdirSync(join(home, 'user'), { recursive: true });
@@ -170,3 +172,5 @@ describe('auto sync hook', { timeout: GIT_E2E_TEST_TIMEOUT_MS }, () => {
     expect(readFileSync(join(fixture.home, 'sync', '.autosync-lock'), 'utf-8')).toBe(String(process.pid));
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });

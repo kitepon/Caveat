@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +34,7 @@ function isolated() {
   const home = join(root, 'home'); const caveatHome = join(root, 'caveat');
   const configHome = join(root, 'xdg-config'); const stateHome = join(root, 'xdg-state'); const localAppData = join(root, 'local-app-data');
   mkdirSync(home, { recursive: true }); mkdirSync(caveatHome, { recursive: true });
+  for (const [key, value] of Object.entries(isolatedGitEnv(home))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   const codexHome = join(root, 'codex');
   const env = { ...process.env, CAVEAT_FACTORY_CLI_TRACE: '', HOME: home, USERPROFILE: home, LOCALAPPDATA: localAppData, CAVEAT_HOME: caveatHome, CODEX_HOME: codexHome, GROK_HOME: join(root, 'grok'), XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome, PATH: process.env.PATH ?? '' };
   const runtimeConfig = runtimeErrorsConfigPath(env);
@@ -44,9 +46,9 @@ function isolated() {
 function readyFactory(fixture: ReturnType<typeof isolated>) {
   const db = openDb({ path: join(fixture.caveatHome, 'index', 'caveat.db') }); db.close();
   const own = join(fixture.caveatHome, 'own'); const remote = join(fixture.root, 'remote.git'); mkdirSync(own, { recursive: true });
-  execFileSync('git', ['init', '--bare', remote], { stdio: 'pipe' }); execFileSync('git', ['init'], { cwd: own, stdio: 'pipe' });
-  execFileSync('git', ['config', 'user.email', 'fixture@example.test'], { cwd: own }); execFileSync('git', ['config', 'user.name', 'Fixture'], { cwd: own });
-  writeFileSync(join(own, 'README.md'), 'fixture\n'); execFileSync('git', ['add', '.'], { cwd: own }); execFileSync('git', ['commit', '-m', 'fixture'], { cwd: own, stdio: 'pipe' }); execFileSync('git', ['branch', '-M', 'main'], { cwd: own }); execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: own }); execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: own, stdio: 'pipe' });
+  execFileSync('git', ['init', '--bare', remote], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, stdio: 'pipe' }); execFileSync('git', ['init'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'fixture@example.test'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own }); execFileSync('git', ['config', 'user.name', 'Fixture'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own });
+  writeFileSync(join(own, 'README.md'), 'fixture\n'); execFileSync('git', ['add', '.'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own }); execFileSync('git', ['commit', '-m', 'fixture'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own, stdio: 'pipe' }); execFileSync('git', ['branch', '-M', 'main'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own }); execFileSync('git', ['remote', 'add', 'origin', remote], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own }); execFileSync('git', ['push', '-u', 'origin', 'main'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own, stdio: 'pipe' });
   const quoted = (value: string) => /[\s\\]/.test(value) ? `"${value}"` : value;
   const nodeCommand = quoted(process.execPath); const cliCommand = quoted(cli);
   writeFileSync(join(fixture.home, '.claude.json'), JSON.stringify({ mcpServers: { caveat: { type: 'stdio', command: process.execPath, args: ['--disable-warning=ExperimentalWarning', cli, 'mcp-server'], env: {} } } }));
@@ -301,13 +303,15 @@ describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
     expect(json(run(['factory-diagnostics', '--json'], dirty.env)).sync).toMatchObject({ status: 'not_ready', reason_code: 'worktree_dirty' });
 
     const behind = isolated(); readyFactory(behind); const remote = join(behind.root, 'remote.git'); const writer = join(behind.root, 'writer');
-    execFileSync('git', ['clone', '--branch', 'main', remote, writer], { stdio: 'pipe' }); execFileSync('git', ['config', 'user.email', 'fixture@example.test'], { cwd: writer }); execFileSync('git', ['config', 'user.name', 'Fixture'], { cwd: writer });
-    writeFileSync(join(writer, 'remote.md'), 'remote advance\n'); execFileSync('git', ['add', '.'], { cwd: writer }); execFileSync('git', ['commit', '-m', 'remote advance'], { cwd: writer, stdio: 'pipe' }); execFileSync('git', ['push'], { cwd: writer, stdio: 'pipe' });
-    execFileSync('git', ['fetch', 'origin'], { cwd: join(behind.caveatHome, 'own'), stdio: 'pipe' });
+    execFileSync('git', ['clone', '--branch', 'main', remote, writer], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, stdio: 'pipe' }); execFileSync('git', ['config', 'user.email', 'fixture@example.test'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer }); execFileSync('git', ['config', 'user.name', 'Fixture'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer });
+    writeFileSync(join(writer, 'remote.md'), 'remote advance\n'); execFileSync('git', ['add', '.'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer }); execFileSync('git', ['commit', '-m', 'remote advance'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer, stdio: 'pipe' }); execFileSync('git', ['push'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer, stdio: 'pipe' });
+    execFileSync('git', ['fetch', 'origin'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: join(behind.caveatHome, 'own'), stdio: 'pipe' });
     expect(json(run(['factory-diagnostics', '--json'], behind.env)).sync).toMatchObject({ status: 'not_ready', reason_code: 'remote_mismatch' });
 
     const unreachable = isolated(); readyFactory(unreachable); const own = join(unreachable.caveatHome, 'own');
-    execFileSync('git', ['remote', 'set-url', 'origin', join(unreachable.root, 'missing-remote.git')], { cwd: own });
+    execFileSync('git', ['remote', 'set-url', 'origin', join(unreachable.root, 'missing-remote.git')], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own });
     expect(json(run(['factory-diagnostics', '--json'], unreachable.env)).sync.status).not.toBe('ready');
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });

@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -105,7 +106,7 @@ function git(args: string[], cwd: string, phase: string): string {
       encoding: 'utf-8',
       stdio: 'pipe',
       timeout: GIT_PROCESS_TIMEOUT_MS,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
+      env: { ...process.env, ...isolatedGitEnv(process.env.HOME!), GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -115,6 +116,7 @@ function git(args: string[], cwd: string, phase: string): string {
 
 function initBareWithContent(): FakeRemote {
   const root = mkdtempSync(join(tmpdir(), 'caveat-remote-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(root, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   const bare = join(root, 'remote.git');
   const work = join(root, 'work');
 
@@ -430,3 +432,5 @@ function readdirSafe(path: string): string[] {
 function readFileSafe(path: string): string {
   return readFileSync(path, 'utf-8');
 }
+
+afterEach(() => { vi.unstubAllEnvs(); });

@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
 import { expect, it, vi, afterEach } from 'vitest';
 import { mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,rmSync,chmodSync } from 'node:fs';
 import { join } from 'node:path';import {tmpdir} from 'node:os';import {spawnSync} from 'node:child_process';
@@ -14,9 +15,9 @@ const sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms));
 it('keeps a slow push alive after MCP client timeout, rejects overlap and persists the late result',async()=>{
  const root=mkdtempSync(join(tmpdir(),'caveat-mcp-sync-')),home=join(root,'home'),own=join(home,'.caveat','own'),caveatHome=join(home,'.caveat'),remote=join(root,'remote.git');
  mkdirSync(own,{recursive:true});
- const env={...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'};
+ const env={...process.env,...Object.fromEntries(Object.entries(isolatedGitEnv(home)).map(([k,v])=>[k,/^GIT_CONFIG/i.test(k)?undefined:v])),HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,GIT_AUTHOR_NAME:'fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid'};
  for(const[k,v]of Object.entries(env))vi.stubEnv(k,v);
- const git=(cwd:string,args:string[])=>{const r=spawnSync('git',['-C',cwd,...args],{env,encoding:'utf8',windowsHide:true,timeout:10000});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
+ const git=(cwd:string,args:string[])=>{const r=spawnSync('git',['-C',cwd,...args],{env:{...env,...isolatedGitEnv(home)},encoding:'utf8',windowsHide:true,timeout:10000});expect(r.status,r.stderr).toBe(0);return r.stdout.trim();};
  git(root,['init','--bare',remote]);git(own,['init','-b','main']);writeFileSync(join(own,'README.md'),'initial\n');git(own,['add','.']);git(own,['commit','-m','initial']);git(own,['remote','add','origin',remote]);git(own,['push','-u','origin','main']);
  const entered=join(root,'entered');const delay=join(root,'delay.mjs');writeFileSync(delay,`import fs from 'node:fs';fs.writeFileSync(${JSON.stringify(entered)},'entered');setTimeout(()=>{},700);`);
  const quote=(s:string)=>"'"+s.replace(/\\/g,'/').replace(/'/g,"'\\''")+"'";

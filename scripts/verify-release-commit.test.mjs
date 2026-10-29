@@ -1,3 +1,4 @@
+import { isolatedGitEnv } from './test-git-env.mjs';
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -9,11 +10,15 @@ import cliPackage from "../apps/cli/package.json" with { type: "json" };
 import { verifyReleaseCommit } from "./verify-release-commit.mjs";
 
 function git(cwd, ...args) {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  return execFileSync("git", args, { cwd, env: { ...process.env, ...isolatedGitEnv(process.env.HOME) }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 }
 
 async function landedWorktree(t) {
   const root = await mkdtemp(path.join(tmpdir(), "caveat-release-gate-"));
+  const env = Object.fromEntries(Object.entries(isolatedGitEnv(path.join(root, 'git-home'))).map(([key, value]) => [key, /^GIT_CONFIG/i.test(key) ? undefined : value]));
+  const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   const remote = path.join(root, "origin.git");
   const work = path.join(root, "work");
   t.after(async () => rm(root, { recursive: true, force: true }));

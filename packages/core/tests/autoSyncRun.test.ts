@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { isolatedGitEnv } from '../../../scripts/test-git-env.mjs';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,7 +21,7 @@ function git(args: string[], cwd: string): void {
     cwd,
     encoding: 'utf-8',
     env: {
-      ...process.env,
+      ...process.env, ...isolatedGitEnv(process.env.HOME!),
       GIT_AUTHOR_NAME: 'Caveat Test',
       GIT_AUTHOR_EMAIL: 'caveat@example.com',
       GIT_COMMITTER_NAME: 'Caveat Test',
@@ -60,6 +61,7 @@ Pulsar drift calibration failure reports a rare anchor mismatch.
  */
 function freshOwnRepoWithUnprobeableRemote(): { home: string; paths: { dbPath: string; entriesDir: string; communityDir: string }; ownDir: string; cleanup: () => void } {
   const home = mkdtempSync(join(tmpdir(), 'caveat-autosync-run-'));
+  for (const [key, value] of Object.entries(isolatedGitEnv(join(home, 'git-home')))) vi.stubEnv(key, /^GIT_CONFIG/i.test(key) ? undefined : value);
   const ownDir = join(home, 'own');
   const entriesDir = join(ownDir, 'entries');
   mkdirSync(entriesDir, { recursive: true });
@@ -175,3 +177,5 @@ describe('runAutoSync own-sync failure escape (E-5)', () => {
     }
   });
 });
+
+afterEach(() => { vi.unstubAllEnvs(); });
