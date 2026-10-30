@@ -4,6 +4,8 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.21.13] — 2026-10-30
+
 ### Fixed
 - Match Claude Code configuration writers to the protected configuration file identity. Sessions using another HOME no longer block registration migration; unreadable environments remain counted as unknown.
 - Missing own knowledge repositories return `NOT_A_REPO` instead of an opaque MCP sync failure, with guidance to confirm the intended repository and client context.
