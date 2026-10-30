@@ -357,6 +357,16 @@ describe('persisted global migration recovery inspection', () => {
       .toMatchObject({ status: 'stopped', filesystemWrites: 0, reason: expect.stringContaining('installer_busy') });
     rmSync(f.paths.lock);
     expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(before);
+    const lines = before.toString().trimEnd().split('\n').map(line => JSON.parse(line));
+    let previous = JSON.stringify(lines[0]) + '\n', forged = previous;
+    for (const [index, row] of lines.slice(1).entries()) {
+      if (index === lines.length - 3) row.stateSha256 = '0'.repeat(64);
+      row.previousSha256 = sha(Buffer.from(previous)); previous = JSON.stringify(row) + '\n'; forged += previous;
+    }
+    writeFileSync(join(session.runDirectory, 'journal.jsonl'), forged);
+    expect(await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables()))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, reason: expect.stringContaining('verify_intent_unbound') });
+    writeFileSync(join(session.runDirectory, 'journal.jsonl'), before);
     expect(await recoverGlobalMigration(session.runDirectory, session.planSha256, result.evidenceSha256!, () => {}, async () => tables()))
       .toMatchObject({ status: 'restored', phase: 'readback', existingProcessOperations: 0 });
   });

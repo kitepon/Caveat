@@ -194,6 +194,7 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
           const current = [...candidate.files, candidate.manifest].find(row => row.name === name);
           const before = [...previousShell.files, previousShell.manifest].find(row => row.name === name);
           if (result.step.startsWith('verify.publish.generated.') && current?.status === 'unknown' && before?.status === 'installed') {
+            assert.equal(journal.records.at(-2)?.stateSha256, shaGlobalRecoveryValue(value.shell), 'global_recovery_verify_intent_unbound');
             current.status = 'installed';
             assert.deepEqual(value.manifest, previousOriginal, 'global_recovery_verify_originals_changed');
             assert.deepEqual(candidate, previousShell, 'global_recovery_verify_publication_changed');
