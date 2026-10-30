@@ -21,7 +21,7 @@ async function withRecoveryChain<T>(runDirectory: string, planSha256: string, us
   assert.ok(seen.size < 8 && !seen.has(runDirectory), 'global_recovery_chain_cycle_or_bound'); seen.add(runDirectory);
   if (basename(runDirectory).startsWith('global-migration-')) {
     let validated = false;
-    const result = await withGlobalMigrationEvidence(runDirectory, planSha256, async origin => { validated = true; return use({ origin,
+    const result = await withGlobalMigrationEvidence(runDirectory, planSha256, async origin => { assert.ok(origin.recoveryEligible, 'global_recovery_source_journal_unconfirmed'); validated = true; return use({ origin,
       model: recoveryModelFromMigration(origin, runDirectory), roots: [runDirectory], references: origin.references,
       evidenceSha256: origin.evidenceSha256, journalSha256: origin.journalSha256, verifyEvidence: origin.verifyEvidence }); }, budget);
     assert.ok(validated, 'global_recovery_source_unconfirmed');
@@ -105,7 +105,7 @@ export async function checkGlobalRecoveryProcesses(source: GlobalRecoverySnapsho
   emit: (event: ProcessProbeEvent) => void, collect: typeof nativeGlobalProcessTables) {
   const { plan } = source;
   const scope = { packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)),
-    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)) };
+    binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: plan.protectedObjects.map(row => row.path) };
   const result = await preflightGlobalProcesses(scope, emit, collect);
   if (result.status !== 'ready') throw Object.assign(Error('global_recovery_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true });
   return result;
@@ -132,10 +132,14 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
       };
       verify(); const processAssessment = await checkGlobalRecoveryProcesses(source, runDirectory, target, emit, collect); verify();
       return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'ready' as const, planSha256, evidenceSha256: source.evidenceSha256,
-        processAssessment, currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 };
+        processAssessment, currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0,
+        ...(source.observations ? { observations: source.observations, proposal: source.proposal, diagnostic: { journal: source.journalDiagnostic } } : {}) };
     });
-    if ('observations' in result && result.status === 'stopped') throw Object.assign(Error('global_recovery_current_state_unconfirmed'),
-      { diagnostic: { observations: result.observations.filter(row => row.state === 'changed' || row.state === 'unknown').slice(0, 16) } });
+    if (result.status === 'stopped' && 'observations' in result) return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
+      reason: 'global_recovery_current_state_unconfirmed', diagnostic: { ...result.diagnostic, inspectionReason: result.reason,
+        observations: result.observations.filter(row => row.state === 'changed' || row.state === 'unknown').slice(0, 16) },
+      observations: result.observations, proposal: result.proposal, currentObjects: 'not-confirmed' as const, executionPermission: false as const,
+      filesystemWrites: 0, existingProcessOperations: 0, processAssessment: null };
     assert.equal(result.schema, 'caveat.global_recovery_plan.v1', 'global_recovery_plan_source_unconfirmed'); return result;
   } catch (error) { return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
     reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown })?.diagnostic ?? null,

@@ -322,6 +322,44 @@ describe('native shell publication confirmation diagnostics', () => {
 });
 
 describe('persisted global migration recovery inspection', () => {
+  it('freshly assesses a shell verify unknown journal before proposing recovery', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      await removeFixtureWorking(session);
+      const shell = prepareGlobalShellInstallation(session.guard, session.journal, session.engine, session.runDirectory,
+        f.paths.root, session.plan.shellPlan, async () => {
+          if (existsSync(join(f.paths.root, 'shell'))) throw Object.assign(Error('fixture_post_publish_verify_failed'),
+            { diagnostic: { path: join(f.paths.root, 'shell') } });
+          await session.engine.verifyCurrent();
+        }, session.plan.baseline.node);
+      expect((await shell.install()).status).toBe('unknown');
+      expect(session.journal.read().records.at(-1)).toMatchObject({ step: 'verify.publish.generated.shell', outcome: 'unknown' });
+    } finally { session.close(); }
+    const before = readFileSync(join(session.runDirectory, 'journal.jsonl')), files = readdirSync(session.runDirectory);
+    const result = await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables());
+    expect(result).toMatchObject({ filesystemWrites: 0, existingProcessOperations: 0, executionPermission: false,
+      diagnostic: { journal: { status: 'unknown', lastEvent: { step: 'verify.publish.generated.shell', outcome: 'unknown',
+        reason: 'fixture_post_publish_verify_failed', diagnostic: { path: join(f.paths.root, 'shell') } } } },
+      proposal: { kind: 'rollback-known', automaticExecution: false } });
+    expect(result).toHaveProperty('observations', expect.arrayContaining([
+      expect.objectContaining({ step: 'original.package', state: 'known' }),
+      expect.objectContaining({ step: 'generated.shell', state: 'known' }),
+    ]));
+    expect(result).toMatchObject({ status: 'ready', currentObjects: 'confirmed', processAssessment: { consumers: 0, writers: 0 } });
+    expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(before);
+    expect(readdirSync(session.runDirectory)).toEqual(files); expect(existsSync(f.paths.lock)).toBe(false);
+    expect(await recoverGlobalMigration(session.runDirectory, session.planSha256, '0'.repeat(64), () => {}, async () => tables()))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, runId: null });
+    expect(await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables(true)))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, processAssessment: { writers: 1 } });
+    writeFileSync(f.paths.lock, 'foreign installer');
+    expect(await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables()))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, reason: expect.stringContaining('installer_busy') });
+    rmSync(f.paths.lock);
+    expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(before);
+    expect(await recoverGlobalMigration(session.runDirectory, session.planSha256, result.evidenceSha256!, () => {}, async () => tables()))
+      .toMatchObject({ status: 'restored', phase: 'readback', existingProcessOperations: 0 });
+  });
   it('opens installed shell/original evidence read-only with no execution permission', { timeout: 120000 }, async () => {
     const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
     try { await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); } finally { session.close(); }
@@ -340,8 +378,25 @@ describe('persisted global migration recovery inspection', () => {
     } finally { session.close(); }
     if (kind === 'torn') appendFileSync(join(session.runDirectory, 'journal.jsonl'), '{incomplete');
     const before = readFileSync(join(session.runDirectory, 'journal.jsonl'));
-    expect(await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256)).toMatchObject({ status: 'stopped', reason: 'interrupted_or_unknown', journalStatus: kind, filesystemWrites: 0 });
+    const inspected = await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256);
+    expect(inspected).toMatchObject({ status: 'stopped', reason: 'interrupted_or_unknown', journalStatus: kind, filesystemWrites: 0,
+      observations: expect.arrayContaining([expect.objectContaining({ step: 'original.package', state: 'known' })]) });
+    const plan = await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables());
+    expect(plan).toMatchObject({ status: 'stopped', executionPermission: false, filesystemWrites: 0,
+      diagnostic: { journal: { status: kind } }, proposal: { kind: 'rollback-known', automaticExecution: false } });
+    assertRecoveryEvidence(inspected);
+    expect(await recoverGlobalMigration(session.runDirectory, session.planSha256, inspected.evidenceSha256, () => {}, async () => tables()))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, runId: null });
     expect(readFileSync(join(session.runDirectory, 'journal.jsonl'))).toEqual(before); expect(existsSync(f.packageRoot)).toBe(false);
+  });
+  it('keeps an initial pending intent without state evidence unconfirmed', { timeout: 60000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try { session.journal.intent('preserve.package', 'retain', 'a'.repeat(64)); } finally { session.close(); }
+    expect(await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables()))
+      .toMatchObject({ status: 'stopped', filesystemWrites: 0, executionPermission: false,
+        diagnostic: { inspectionReason: 'interrupted_or_unknown', journal: { status: 'pending', lastEvent: { step: 'preserve.package' } } },
+        proposal: { objects: [], automaticExecution: false } });
+    expect(existsSync(f.packageRoot)).toBe(true);
   });
   it('refuses a changed state file and wrong plan hash without changing originals', { timeout: 60000 }, async () => {
     const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables()); let name: string;

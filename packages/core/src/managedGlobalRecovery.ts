@@ -36,6 +36,8 @@ export function globalRecoveryRows(value: unknown): asserts value is GlobalGuard
 type Binding = { directory: string; name: string; rows: GlobalGuardTreeRow[] | null; tree: GlobalGuardTree | null };
 export type GlobalRecoverySnapshot = { plan: Plan; original: OriginalManifest; shell: ShellState | undefined;
   guard: Awaited<ReturnType<typeof openGlobalPathGuard>>; bindings: Map<string, Binding>; evidenceSha256: string; journalSha256: string;
+  observations?: { step: string; state: string; reason?: string; diagnostic?: unknown }[];
+  proposal?: { kind: 'rollback-known'; automaticExecution: false; objects: string[] }; journalDiagnostic?: { status: string; lastEvent: unknown };
   verifyEvidence: () => void; verifyProtected: () => void; admission?: unknown; sourceRoots?: string[]; vacancySlots?: { directory: string; name: string }[] };
 
 /** Diagnostics are bounded; object contents stay in the private evidence. */
@@ -78,23 +80,27 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
       catch (error) { checks.push({ step, state: 'unknown', reason: (error as Error).message, diagnostic: (error as { diagnostic?: unknown }).diagnostic }); }
     }
     if (plan.baseline.npmManagement.absent) {
-      try { assert.equal(guard.observe(plan.globalRoot, '.package-lock.json'), null); checks.push({ step: 'absent-management', state: 'absent' }); }
-      catch { checks.push({ step: 'absent-management', state: 'unknown' }); }
+      try { assert.equal(guard.observe(plan.globalRoot, '.package-lock.json'), null, 'global_recovery_management_appeared'); checks.push({ step: 'absent-management', state: 'absent' }); }
+      catch (error) { checks.push({ step: 'absent-management', state: 'unknown', reason: (error as Error).message,
+        diagnostic: { path: join(plan.globalRoot, '.package-lock.json') } }); }
     }
     const directories = guard.directoryBindings();
     for (const [index, row] of plan.directories.entries()) {
-      try { assert.deepEqual(directories.find(current => current.path === row.path), row, 'global_recovery_directory_changed'); checks.push({ step: 'directory.' + index, state: 'known' }); }
-      catch { checks.push({ step: 'directory.' + index, state: 'unknown' }); }
+      const current = directories.find(value => value.path === row.path);
+      try { assert.deepEqual(current, row, 'global_recovery_directory_changed'); checks.push({ step: 'directory.' + index, state: 'known' }); }
+      catch (error) { checks.push({ step: 'directory.' + index, state: 'unknown', reason: (error as Error).message,
+        diagnostic: { directory: dirname(row.path), name: basename(row.path), path: row.path,
+          records: [{ relativePath: '', attributes: current ? Object.keys(row).filter(key => row[key as keyof typeof row] !== current[key as keyof typeof current]) : ['presence'] }] } }); }
     }
     for (const [index, row] of plan.absences.entries()) {
       try { assert.deepEqual(observeGlobalAbsence(row.path), row, 'global_recovery_absence_changed'); checks.push({ step: 'absent-config.' + index, state: 'absent' }); }
-      catch { checks.push({ step: 'absent-config.' + index, state: 'unknown' }); }
+      catch (error) { checks.push({ step: 'absent-config.' + index, state: 'unknown', reason: (error as Error).message, diagnostic: { path: row.path } }); }
     }
     for (const [index, alias] of plan.aliases.entries()) {
       // Original package names may legitimately be absent after preservation/removal.
       if (alias.path === plan.baseline.packageRoot) continue;
       try { assert.equal(realpathSync(alias.path), alias.canonical, 'global_recovery_alias_changed'); checks.push({ step: 'alias.' + index, state: 'known' }); }
-      catch { checks.push({ step: 'alias.' + index, state: 'unknown' }); }
+      catch (error) { checks.push({ step: 'alias.' + index, state: 'unknown', reason: (error as Error).message, diagnostic: { path: alias.path } }); }
     }
     for (const [step, observed, expected] of [
       ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
@@ -116,7 +122,10 @@ export function inspectGlobalMigrationRecovery(runDirectory: string, expectedPla
 }
 
 export type GlobalRecoveryBudget = { files: number; bytes: number };
-export type GlobalMigrationEvidence = Omit<GlobalRecoverySnapshot, 'guard' | 'bindings' | 'verifyProtected'> & { journalStatus: 'ready' | 'complete'; references: { run: string; name: string; bytes: number; sha256: string }[] };
+export type GlobalMigrationEvidence = Omit<GlobalRecoverySnapshot, 'guard' | 'bindings' | 'verifyProtected'> & {
+  journalStatus: ReturnType<typeof parseGlobalMutationJournal>['status']; recoveryEligible: boolean;
+  journalDiagnostic: { status: string; lastEvent: unknown };
+  references: { run: string; name: string; bytes: number; sha256: string }[] };
 
 /** Decode source history without pretending that old object names still contain the objects. */
 export async function withGlobalMigrationEvidence<T>(runDirectory: string, expectedPlanSha256: string, use: (source: GlobalMigrationEvidence) => Promise<T>, budget: GlobalRecoveryBudget = { files: 0, bytes: 0 }) {
@@ -154,17 +163,44 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
     const journal = parseGlobalMutationJournal(read('journal.jsonl'), expectedPlanSha256);
     const base = { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus: journal.status, journalSha256: journal.bytesSha256,
       filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const };
-    if (!['ready', 'complete'].includes(journal.status)) return { ...base, status: 'stopped' as const, reason: 'interrupted_or_unknown', observations: [] };
     const results = journal.records.filter(row => row.kind === 'result');
-    if (!results.length) return { ...base, status: 'observed' as const, reason: 'no_recorded_mutation', observations: [] };
+    if (!results.length) return { ...base, status: journal.status === 'ready' || journal.status === 'complete' ? 'observed' as const : 'stopped' as const,
+      reason: journal.status === 'ready' || journal.status === 'complete' ? 'no_recorded_mutation' : 'interrupted_or_unknown', observations: [],
+      diagnostic: { journal: { status: journal.status, lastEvent: journal.records.at(-1) ?? null } },
+      proposal: { kind: 'rollback-known' as const, automaticExecution: false as const, objects: [] as string[] } };
     let original: OriginalManifest | undefined, shell: ShellState | undefined;
+    let recoveryEligible = ['ready', 'complete'].includes(journal.status), lastEvent: unknown = journal.records.at(-1) ?? null;
     for (const result of results) {
+      if (result.stateSha256 === null) continue;
       const bytes = read('state-' + journal.header.runId + '-' + result.sequence + '.json');
       assert.equal(digestGlobalRecoveryBytes(bytes), result.stateSha256, 'global_recovery_state_hash_changed');
-      const value = decode(bytes) as { schema: string; planSha256: string; runId: string; step: string; operation: string; manifest: OriginalManifest; shell?: ShellState };
+      const value = decode(bytes) as { schema: string; planSha256: string; runId: string; step: string; operation: string; manifest: OriginalManifest; shell?: ShellState;
+        result?: { verificationFailed?: boolean; reason?: string; diagnostic?: unknown }; errorSha256?: string };
       assert.ok(['caveat.global_preservation_state.v1', 'caveat.global_shell_operation.v1'].includes(value.schema)
         && value.planSha256 === expectedPlanSha256 && value.runId === journal.header.runId && value.step === result.step && value.operation === result.operation, 'global_recovery_state_binding_invalid');
+      const previousOriginal = original, previousShell = shell;
       original = value.manifest;
+      // A failed read-only verification cannot undo the immediately preceding confirmed publication.
+      if (result === journal.records.at(-1)) {
+        const diagnostic = value.result?.diagnostic ?? null;
+        lastEvent = { ...result, reason: typeof value.result?.reason === 'string' ? value.result.reason.slice(0, 8192) : null,
+          diagnostic: Buffer.byteLength(JSON.stringify(diagnostic)) <= 65536 ? diagnostic : { truncated: true, sha256: shaGlobalRecoveryValue(diagnostic) },
+          errorSha256: value.errorSha256 ?? null };
+        const prior = journal.records.at(-3);
+        if (journal.status === 'unknown' && result.outcome === 'unknown' && result.step.startsWith('verify.')
+          && prior?.kind === 'result' && prior.outcome === 'confirmed' && result.step === 'verify.' + prior.step
+          && result.operation === prior.operation && value.result?.verificationFailed === true && previousOriginal && previousShell && value.shell) {
+          const candidate = structuredClone(value.shell), name = result.step.slice('verify.publish.generated.'.length);
+          const current = [...candidate.files, candidate.manifest].find(row => row.name === name);
+          const before = [...previousShell.files, previousShell.manifest].find(row => row.name === name);
+          if (result.step.startsWith('verify.publish.generated.') && current?.status === 'unknown' && before?.status === 'installed') {
+            current.status = 'installed';
+            assert.deepEqual(value.manifest, previousOriginal, 'global_recovery_verify_originals_changed');
+            assert.deepEqual(candidate, previousShell, 'global_recovery_verify_publication_changed');
+            value.shell = candidate; recoveryEligible = true;
+          }
+        }
+      }
       assert.equal(original.schema, 'caveat.global_original_objects.v1', 'global_recovery_originals_invalid');
       globalRecoveryKeys(original, ['schema', 'objects', 'originalEvidence', 'originalsReconstructed', 'automaticRecovery']);
       assert.ok(original.originalsReconstructed === false && original.automaticRecovery === false, 'global_recovery_reconstruction_forbidden');
@@ -196,13 +232,13 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
         }
         assert.equal(object.backupDirectory, runDirectory, 'global_recovery_backup_scope_invalid');
         for (const key of ['role', 'step', 'name', 'directory', 'backupDirectory', 'backupName'] as const) assert.equal(object[key], expected[key], 'global_recovery_original_scope_changed');
-        assert.ok(['original', 'preserved', 'restored'].includes(object.state), 'global_recovery_original_unknown');
+        assert.ok(['original', 'preserved', 'restored', ...(!recoveryEligible ? ['unknown'] : [])].includes(object.state), 'global_recovery_original_unknown');
         globalRecoveryRows(object.rows); globalRecoveryRows(expected.rows); assert.equal(shaGlobalRecoveryValue(object.rows), object.stateSha256, 'global_recovery_original_rows_changed');
         const known = structuredClone(expected.rows); known[0]!.identity.ctime = object.rows[0]!.identity.ctime;
         assert.deepEqual(object.rows, known, 'global_recovery_original_identity_changed');
         if (object.working) {
           globalRecoveryKeys(object.working, ['status', 'rows', 'stagingName']);
-          assert.ok(['known', 'after-known', 'absent', 'quarantined'].includes(object.working.status)
+          assert.ok(['known', 'after-known', 'absent', 'quarantined', ...(!recoveryEligible ? ['unknown', 'released'] : [])].includes(object.working.status)
             && object.working.stagingName === 'work-' + journal.header.runId + '-' + object.step, 'global_recovery_working_unknown');
           if (object.working.rows !== null) {
             globalRecoveryRows(object.working.rows);
@@ -213,7 +249,7 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
                 [before.kind, before.contentSha256, before.linkTarget], 'global_recovery_working_content_unbound');
             }
           }
-          else assert.equal(object.working.status, 'absent', 'global_recovery_working_rows_required');
+          else assert.ok(['absent', ...(!recoveryEligible ? ['unknown', 'released'] : [])].includes(object.working.status), 'global_recovery_working_rows_required');
         }
       }
       if (value.schema === 'caveat.global_shell_operation.v1') {
@@ -222,9 +258,9 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
         for (const [index, object] of [...shell.files, shell.manifest].entries()) {
           assert.equal(object.name, index < shell.files.length ? plan.leaves[index]!.name : 'shell', 'global_recovery_shell_scope_invalid');
           assert.equal(object.backupName, index < shell.files.length ? 'generated-' + index : 'generated-shell', 'global_recovery_shell_backup_invalid');
-          assert.ok(['absent', 'installed', 'quarantined'].includes(object.status), 'global_recovery_shell_unknown');
+          assert.ok(['absent', 'installed', 'quarantined', ...(!recoveryEligible ? ['unknown'] : [])].includes(object.status), 'global_recovery_shell_unknown');
           if (object.status === 'absent') assert.equal(object.rows, null, 'global_recovery_shell_rows_invalid');
-          else {
+          else if (object.rows !== null || object.status !== 'unknown') {
             globalRecoveryRows(object.rows);
             if (index < shell.files.length) {
               assert.equal(object.rows.length, 1, 'global_recovery_wrapper_rows_invalid');
@@ -242,7 +278,8 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
     verifyEvidence();
     const evidenceSha256 = shaGlobalRecoveryValue([...cached].map(([name, bytes]) => ({ name, sha256: digestGlobalRecoveryBytes(bytes) })).sort((a, b) => a.name.localeCompare(b.name)));
     return await use({ plan, original, shell, evidenceSha256, journalSha256: journal.bytesSha256, verifyEvidence,
-      journalStatus: journal.status as 'ready' | 'complete', references: [...cached].map(([name, bytes]) => ({ run: basename(runDirectory), name, bytes: bytes.length, sha256: digestGlobalRecoveryBytes(bytes) })) });
+      journalStatus: journal.status, recoveryEligible, journalDiagnostic: { status: journal.status, lastEvent },
+      references: [...cached].map(([name, bytes]) => ({ run: basename(runDirectory), name, bytes: bytes.length, sha256: digestGlobalRecoveryBytes(bytes) })) });
 
   } finally { evidence.close(); }
 }
@@ -250,7 +287,7 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
 /** Internal scoped lease: all source files are read-only; native objects stay held while use runs. */
 export function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expectedPlanSha256: string, use?: (snapshot: GlobalRecoverySnapshot) => Promise<T>) {
   return withGlobalMigrationEvidence(runDirectory, expectedPlanSha256, async source => {
-    const { plan, original, shell, evidenceSha256, journalSha256, journalStatus, verifyEvidence } = source;
+    const { plan, original, shell, evidenceSha256, journalSha256, journalStatus, verifyEvidence, recoveryEligible, journalDiagnostic } = source;
     const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(plan, runDirectory));
     try {
       guard.assertPrivateDirectory(runDirectory);
@@ -264,7 +301,12 @@ export function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expe
         } catch (error) { observations.push({ step, state: 'unknown', reason: (error as Error).message, diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? { directory, name, path: join(directory, name) } }); }
       };
       for (const object of original.objects) {
-        check('original.' + object.step, object.state === 'preserved' ? runDirectory : object.directory, object.state === 'preserved' ? object.backupName : object.name, object.rows);
+        if (object.state === 'unknown') {
+          check('original.candidate.' + object.step, object.directory, object.name, object.rows);
+          check('original.backup.' + object.step, runDirectory, object.backupName, object.rows);
+          observations.push({ step: 'original.' + object.step, state: 'unknown', reason: 'journal_operation_unconfirmed',
+            diagnostic: { directory: object.directory, name: object.name, path: join(object.directory, object.name) } });
+        } else check('original.' + object.step, object.state === 'preserved' ? runDirectory : object.directory, object.state === 'preserved' ? object.backupName : object.name, object.rows);
         if (object.working?.status === 'quarantined') check('quarantined.' + object.step, runDirectory, 'used-' + object.working.stagingName, object.working.rows);
         if (object.state === 'preserved') {
           const installed = shell?.files.find(row => row.name === object.name && row.status === 'installed');
@@ -282,9 +324,15 @@ export function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expe
       // A concurrent edit of any previously read evidence invalidates this entire inspection.
       verifyEvidence();
       const changed = observations.some(row => row.state === 'changed' || row.state === 'unknown');
-      if (use && !changed) return await use({ plan, original, shell, guard, bindings, evidenceSha256, journalSha256, verifyEvidence,
-        verifyProtected: protectedState.verify });
-      return { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus, journalSha256, filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const, evidenceSha256, status: changed ? 'stopped' as const : 'observed' as const, reason: changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations };
+      const proposal = { kind: 'rollback-known' as const, automaticExecution: false as const,
+        objects: observations.filter(row => row.state === 'known' && (original.objects.some(object => ['original.', 'working.', 'quarantined.'].some(prefix => row.step === prefix + object.step))
+          || row.step.startsWith('generated.'))).map(row => row.step) };
+      if (use && !changed && recoveryEligible) return await use({ plan, original, shell, guard, bindings, evidenceSha256, journalSha256, verifyEvidence,
+        verifyProtected: protectedState.verify, ...(journalStatus === 'unknown' ? { observations, proposal, journalDiagnostic } : {}) });
+      return { schema: 'caveat.global_recovery_inspection.v1' as const, planSha256: expectedPlanSha256, journalStatus, journalSha256, filesystemWrites: 0, childProcesses: 0, automaticRecovery: false as const, executionPermission: false as const, evidenceSha256,
+        status: changed || !recoveryEligible ? 'stopped' as const : 'observed' as const,
+        reason: !recoveryEligible ? 'interrupted_or_unknown' : changed ? 'current_state_unconfirmed' : 'recorded_state_matches', observations,
+        diagnostic: { journal: journalDiagnostic }, proposal };
     } finally { guard.close(); }
   });
 }

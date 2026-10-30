@@ -6,6 +6,7 @@ import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from
 
 export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[] };
 export type GlobalProcessAssessment = { pid: number; birth: string | null; parentPid: number | null; parentApp: string;
+  protectedPaths?: string[];
   classification: 'consumer' | 'writer'; reason: string; resolution: { action: 'close-process' | 'finish-npm-operation'; instruction: string } };
 const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, ''); return fold ? slash.toLowerCase() : slash;
@@ -38,6 +39,8 @@ export const globalProcessResidualRisks = [
   'a later dynamic import of the old global can fail with module not found after quarantine',
   'views whose file handles are closed and previously read JavaScript caches are not observed',
   'root or administrator writes are not excluded',
+  'writers with unreadable handles and writers that open or replace files between observations are not identified',
+  'Windows open-handle writer attribution is unavailable; retained protected handles still exclude writes and deletion',
 ] as const;
 
 /** Only readable references to the old package and readable config writers stop migration. */
@@ -51,10 +54,12 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const records: GlobalProcessAssessment[] = [];
   const counts = { observed: rows.size, unreadable: 0, foreign: 0, kernel: 0, shortLived: 0, consumer: 0, writer: 0 };
   const own = rows.get(tables.selfPid)?.at(-1);
-  const configWriter = !root && (scope.protectedPaths ?? []).some(path => /(?:^|[\\/])\.claude\.json$/.test(path));
-  const protectedConfigs = configWriter ? (scope.protectedPaths ?? []).filter(path => /(?:^|[\\/])\.claude\.json$/.test(path)).map(path => {
-    const stat = statSync(path, { bigint: true }); return { dev: String(stat.dev), ino: String(stat.ino) };
-  }) : [];
+  const protectedFiles = (scope.protectedPaths ?? []).flatMap(path => {
+    const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+    return stat?.isFile() ? [{ path, dev: String(stat.dev), ino: String(stat.ino) }] : [];
+  });
+  const protectedConfigs = protectedFiles.filter(file => /(?:^|[\\/])\.claude\.json$/.test(file.path));
+  const configWriter = protectedConfigs.length > 0;
   for (const [pid, observed] of rows) {
     const row = observed.at(-1)!;
     if (pid === tables.selfPid) continue;
@@ -70,17 +75,22 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     const configKnown = own?.uid != null && row.uid === own.uid && row.claudeConfig != null && !row.reason;
     if (claude && !configKnown && !observed.some(value => !value.argv || !value.executable)) counts.unreadable++;
     const claudeWriter = claude && configKnown && protectedConfigs.some(identity => identity.dev === row.claudeConfig!.dev && identity.ino === row.claudeConfig!.ino);
+    const stableBirth = row.birth !== null && observed.every(value => value.birth === row.birth && value.uid === row.uid);
+    const openFiles = own?.uid != null && row.uid === own.uid && stableBirth && !row.reason
+      ? protectedFiles.filter(file => row.openWriters?.some(value => value.dev === file.dev && value.ino === file.ino)) : [];
+    if (row.openWritersUnverified || row.openWriters === null || row.openWriters?.length && (!stableBirth || row.reason)) counts.unreadable++;
     const writer = root && scope.npmRoot && current.some(value => {
       const argv = value.argv?.map(norm); if (!argv) return false;
       return argv.some(arg => hasLiteral(arg, norm(scope.npmRoot!)))
         && argv.some(arg => /^(?:install|i|uninstall|un|remove|rm|update|up|rebuild|link)$/.test(arg))
         && (argv.some(arg => hasLiteral(arg, root)) || argv.some(arg => ['-g', '--global'].includes(arg)) && argv.some(arg => /^caveat-cli(?:@|$)/.test(arg)));
     });
-    if (!consumer && !claudeWriter && !writer) continue;
-    const classification = writer || claudeWriter ? 'writer' : 'consumer'; counts[classification]++;
+    if (!consumer && !claudeWriter && !writer && !openFiles.length) continue;
+    const classification = writer || claudeWriter || openFiles.length ? 'writer' : 'consumer'; counts[classification]++;
     const parentApp = processAppName(rows.get(row.ppid ?? -1)?.at(-1));
     records.push({ pid, birth: row.birth, parentPid: row.ppid, parentApp, classification,
-      reason: claudeWriter ? 'claude_config_writer' : writer ? 'old_global_npm_writer' : 'old_global_reference',
+      ...(openFiles.length ? { protectedPaths: openFiles.map(file => file.path) } : {}),
+      reason: openFiles.length ? 'protected_file_open_writer' : claudeWriter ? 'claude_config_writer' : writer ? 'old_global_npm_writer' : 'old_global_reference',
       resolution: { action: writer ? 'finish-npm-operation' : 'close-process', instruction: writer
         ? `Let npm PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) finish, then retry.`
         : `Save work and close ${parentApp} (parent PID ${row.ppid ?? 'unavailable'}, consumer PID ${pid}), then retry.` } });
@@ -94,7 +104,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
 /** Collection injection belongs to isolated tests. Individual unreadable processes are counted. */
 export async function preflightGlobalProcesses(scope: GlobalProcessScope, onEvent: (event: ProcessProbeEvent) => void = () => {}, collect = nativeGlobalProcessTables) {
   validateScope(scope);
-  try { return assessGlobalProcesses(scope, await collect(onEvent)); }
+  try { return assessGlobalProcesses(scope, await collect(onEvent, scope.protectedPaths)); }
   catch (error) {
     return { schema: 'caveat.global_process_preflight.v1' as const, status: 'stopped' as const,
       observedAt: new Date().toISOString(), consumers: null, writers: null, unknown: null, records: [], counts: null,

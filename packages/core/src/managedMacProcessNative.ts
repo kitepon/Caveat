@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { claudeConfigIdentity, type ClaudeConfigIdentity } from './managedClaudeConfig.js';
-import { statSync } from 'node:fs';
+import { closeSync, fstatSync, openSync, statSync } from 'node:fs';
 import type { NativeProcessRecord, ProcessExecutable, MacArgumentFailure } from './managedProcessNative.js';
 
 const MAX_ARGUMENT_BYTES = 1024 * 1024;
@@ -86,12 +86,13 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
 }
 
 /** Native loading is lazy: ordinary hooks never load a C bridge or inspect processes. */
-export async function createMacKernelReader() {
+export async function createMacKernelReader(protectedFiles: { dev: string; ino: string }[] = []) {
   const koffi = await import('koffi');
   const proc = koffi.load('/usr/lib/libproc.dylib'), libc = koffi.load('/usr/lib/libSystem.B.dylib');
   const list = proc.func('int proc_listpids(uint32_t type, uint32_t typeinfo, _Out_ void *buffer, int buffersize)');
   const info = proc.func('int proc_pidinfo(int pid, int flavor, uint64_t arg, _Out_ void *buffer, int buffersize)');
   const path = proc.func('int proc_pidpath(int pid, _Out_ void *buffer, uint32_t buffersize)');
+  const fdinfo = proc.func('int proc_pidfdinfo(int pid, int fd, int flavor, _Out_ void *buffer, int buffersize)');
   const sysctl = libc.func('int sysctl(const int *name, uint32_t namelen, _Out_ void *oldp, _Inout_ size_t *oldlenp, const void *newp, size_t newlen)');
   const bsd = (pid: number) => {
     const buffer = Buffer.alloc(BSD_INFO_BYTES);
@@ -112,10 +113,25 @@ export async function createMacKernelReader() {
   assert.equal(koffi.sizeof('void *'), 8, 'mac_kinfo_lp64_required');
   const kinfo = (pid: number) => readMacKinfoIdentity(pid, (...values) => Number(sysctl(...values)), () => koffi.errno());
   const args = (pid: number, readConfig: boolean) => readMacProcessArguments(pid, (...values) => Number(sysctl(...values)), () => koffi.errno(), readConfig);
+  const vnode = (pid: number, fd: number) => {
+    // XNU LP64 vnode_fdinfo: proc_fileinfo(24), vinfo_stat(136), vnode fields(16).
+    const bytes = Buffer.alloc(176);
+    assert.equal(Number(fdinfo(pid, fd, 1, bytes, bytes.length)), bytes.length, 'mac_fd_info_unavailable');
+    return { writable: (bytes.readUInt32LE(0) & 2) !== 0,
+      regular: (bytes.readUInt16LE(28) & 0o170000) === 0o100000,
+      dev: String(bytes.readUInt32LE(24)), ino: String(bytes.readBigUInt64LE(32)) };
+  };
   const calibration = kinfo(process.pid), currentBsd = bsd(process.pid);
   assert.deepEqual([calibration.pid, calibration.ppid, calibration.uid, calibration.birth],
     [currentBsd.pid, currentBsd.ppid, currentBsd.uid, currentBsd.birth], 'mac_kinfo_self_calibration_failed');
-  const readProcess = (pid: number): NativeProcessRecord => {
+  if (protectedFiles.length) {
+    const fd = openSync(process.execPath, 'r');
+    try {
+      const stat = fstatSync(fd, { bigint: true });
+      assert.deepEqual(vnode(process.pid, fd), { writable: false, regular: true, dev: String(stat.dev), ino: String(stat.ino) }, 'mac_fd_abi_calibration_failed');
+    } finally { closeSync(fd); }
+  }
+  const readProcess = (pid: number, deadline = Date.now() + 20000): NativeProcessRecord => {
     let phase = 'kinfo';
     const code = (error: unknown) => { const value = error as { nativeCode?: number; errno?: number }; return value.nativeCode ?? value.errno ?? null; };
     let row: NativeProcessRecord = { pid, ppid: null, uid: null, birth: null, executable: null, argv: null };
@@ -131,6 +147,25 @@ export async function createMacKernelReader() {
       if (row.claudeConfig) {
         const again = args(pid, true);
         assert.deepEqual([again.argv, again.claudeConfig], [row.argv, row.claudeConfig], 'mac_process_config_changed');
+      }
+      if (protectedFiles.length && owner.uid === calibration.uid && !owner.kernel && owner.state !== 'Z') {
+        row.openWriters = [];
+        try {
+          const needed = Number(info(pid, 1, 0, null, 0));
+          assert.ok(needed >= 0 && needed <= 800000, 'mac_fd_table_bound');
+          const bytes = Buffer.alloc(Math.min(800000, needed + 128)), used = Number(info(pid, 1, 0, bytes, bytes.length));
+          assert.ok(used >= 0 && used < bytes.length && used % 8 === 0, 'mac_fd_table_unconfirmed');
+          for (let offset = 0; offset < used; offset += 8) {
+            assert.ok(Date.now() <= deadline, 'process_probe_deadline');
+            if (bytes.readUInt32LE(offset + 4) !== 1) continue;
+            try {
+              const value = vnode(pid, bytes.readInt32LE(offset));
+              if (value.writable && value.regular && protectedFiles.some(file => file.dev === value.dev && file.ino === value.ino)) {
+                row.openWriters.push({ dev: value.dev, ino: value.ino });
+              }
+            } catch { row.openWritersUnverified = true; }
+          }
+        } catch { row.openWritersUnverified = true; }
       }
       const last = kinfo(pid);
       assert.deepEqual([last.uid, last.birth], [owner.uid, owner.birth], 'mac_process_identity_changed');
@@ -154,7 +189,7 @@ export async function createMacKernelReader() {
       let total = 0;
       return pids.sort((a, b) => a - b).map(pid => {
         assert.ok(Date.now() <= deadline, 'process_probe_deadline');
-        const row = readProcess(pid); total += Buffer.byteLength(JSON.stringify(row));
+        const row = readProcess(pid, deadline); total += Buffer.byteLength(JSON.stringify(row));
         assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
         return row;
       });

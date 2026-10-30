@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { assessGlobalProcesses, preflightGlobalProcesses } from '../src/managedGlobalProcesses.js';
@@ -49,6 +51,7 @@ describe('global process assessment', () => {
     const stat = statSync(file, { bigint: true }), config = { binAliases: [], protectedPaths: [file] };
     const claude = { ...record(20, '/usr/bin/claude'), claudeConfig: { dev: String(stat.dev), ino: String(stat.ino) } };
     expect(assessGlobalProcesses(config, tables(claude))).toMatchObject({ status: 'stopped', writers: 1, records: [{ reason: 'claude_config_writer' }] });
+    expect(assessGlobalProcesses({ ...scope, ...config }, tables(claude))).toMatchObject({ status: 'stopped', writers: 1, records: [{ reason: 'claude_config_writer' }] });
     expect(assessGlobalProcesses(config, tables({ ...claude, claudeConfig: { ...claude.claudeConfig, ino: 'other-home' } }))).toMatchObject({ status: 'ready', writers: 0, unknown: 0 });
     for (const row of [{ ...claude, claudeConfig: null }, { ...claude, uid: 2000 }, { ...claude, reason: 'process_identity_changed' }]) {
       expect(assessGlobalProcesses(config, tables(row))).toMatchObject({ status: 'ready', writers: 0, unknown: 1 });
@@ -57,6 +60,38 @@ describe('global process assessment', () => {
   it('counts an old consumer that has already exited without stopping', () => {
     const value = tables(record(20, '/runtime/node', ['node', scope.packageRoot + '/index.js'])); value.after.pop();
     expect(assessGlobalProcesses(scope, value)).toMatchObject({ status: 'ready', counts: { shortLived: 1 }, records: [] });
+  });
+  it('names only identity-bound open writers of every protected client configuration during B', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-all-config-writer-')); roots.push(root);
+    const paths = ['.grok/config.toml', '.cursor/mcp.json', '.codex/config.toml', '.claude.json'].map(name => {
+      const file = join(root, name); mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, '{}'); return file;
+    });
+    const identities = paths.map(path => { const stat = statSync(path, { bigint: true }); return { dev: String(stat.dev), ino: String(stat.ino) }; });
+    const writer = { ...record(20), openWriters: identities };
+    expect(assessGlobalProcesses({ ...scope, protectedPaths: paths }, tables(writer))).toMatchObject({ writers: 1,
+      records: [{ pid: 20, birth: '1234', parentPid: 1, protectedPaths: paths, reason: 'protected_file_open_writer' }] });
+    const changed = tables(writer); changed.before.at(-1)!.birth = 'reused-pid';
+    expect(assessGlobalProcesses({ ...scope, protectedPaths: paths }, changed)).toMatchObject({ writers: 0, unknown: 1 });
+    expect(assessGlobalProcesses({ ...scope, protectedPaths: paths }, tables({ ...writer, uid: 2000 })).writers).toBe(0);
+    expect(assessGlobalProcesses({ ...scope, protectedPaths: paths }, tables({ ...writer, openWriters: null })))
+      .toMatchObject({ writers: 0, unknown: 1 });
+    expect(assessGlobalProcesses({ ...scope, protectedPaths: paths }, tables({ ...writer, openWriters: [] })).writers).toBe(0);
+  });
+  it.skipIf(process.platform !== 'linux' && process.platform !== 'darwin')('observes a real protected writable FD with its PID and excludes a read-only FD', { timeout: 60000 }, async () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-native-open-writer-')); roots.push(root);
+    const file = join(root, 'config.toml'); writeFileSync(file, 'unchanged');
+    for (const mode of ['r+', 'r']) {
+      const child = spawn(process.execPath, ['-e', "const fs=require('node:fs');const fd=fs.openSync(process.argv[1],process.argv[2]);process.stdout.write('ready');process.stdin.resume();process.stdin.on('end',()=>{fs.closeSync(fd);});", file, mode], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const closed = once(child, 'close');
+      try {
+        await Promise.race([once(child.stdout, 'data'), closed.then(() => { throw Error('writer_fixture_child_closed_before_ready'); })]);
+        const result = await preflightGlobalProcesses({ ...scope, protectedPaths: [file] });
+        const observed = result.records.find(row => row.pid === child.pid);
+        if (mode === 'r+') expect(observed, JSON.stringify(result)).toMatchObject({ classification: 'writer', parentPid: process.pid, parentApp: 'node',
+          reason: 'protected_file_open_writer', protectedPaths: [file], birth: expect.any(String) });
+        else expect(observed).toBeUndefined();
+      } finally { child.stdin.end(); await closed; }
+    }
   });
   it('validates scope and reports whole collection failures separately', async () => {
     await expect(preflightGlobalProcesses({ ...scope, packageRoot: '/global/../elsewhere' }, () => {}, async () => tables())).rejects.toThrow('absolute_process_scope_required');
