@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
@@ -51,6 +52,9 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const counts = { observed: rows.size, unreadable: 0, foreign: 0, kernel: 0, shortLived: 0, consumer: 0, writer: 0 };
   const own = rows.get(tables.selfPid)?.at(-1);
   const configWriter = !root && (scope.protectedPaths ?? []).some(path => /(?:^|[\\/])\.claude\.json$/.test(path));
+  const protectedConfigs = configWriter ? (scope.protectedPaths ?? []).filter(path => /(?:^|[\\/])\.claude\.json$/.test(path)).map(path => {
+    const stat = statSync(path, { bigint: true }); return { dev: String(stat.dev), ino: String(stat.ino) };
+  }) : [];
   for (const [pid, observed] of rows) {
     const row = observed.at(-1)!;
     if (pid === tables.selfPid) continue;
@@ -62,7 +66,10 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
     const current = [row];
     const consumer = root && current.some(value => (value.executable && hasLiteral(norm(value.executable.path).replace(/ \(deleted\)$/, ''), root))
       || value.argv?.some(arg => hasLiteral(norm(arg), root) || aliases.some(alias => norm(arg) === alias)));
-    const claudeWriter = configWriter && current.some(value => value.argv && processAppName(value) === 'Claude Code');
+    const claude = configWriter && row.argv && processAppName(row) === 'Claude Code';
+    const configKnown = own?.uid != null && row.uid === own.uid && row.claudeConfig != null && !row.reason;
+    if (claude && !configKnown && !observed.some(value => !value.argv || !value.executable)) counts.unreadable++;
+    const claudeWriter = claude && configKnown && protectedConfigs.some(identity => identity.dev === row.claudeConfig!.dev && identity.ino === row.claudeConfig!.ino);
     const writer = root && scope.npmRoot && current.some(value => {
       const argv = value.argv?.map(norm); if (!argv) return false;
       return argv.some(arg => hasLiteral(arg, norm(scope.npmRoot!)))

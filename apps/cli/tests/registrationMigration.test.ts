@@ -35,9 +35,11 @@ describe('Main15 standard atomic registration writes', { timeout: 180000 }, () =
   });
   it('checks readable Claude Code writers at admission while counting inaccessible processes without stopping', async () => {
     const f = fixture(), original = readdirSync(f.paths.root), data = tables();
-    data.before.push({ ...data.before[0]!, pid: 765432, argv: ['node', '/npm/@anthropic-ai/claude-code/cli.js'] }); data.after = structuredClone(data.before);
+    const config = statSync(join(f.home, '.claude.json'), { bigint: true });
+    data.before.push({ ...data.before[0]!, claudeConfig: { dev: String(config.dev), ino: String(config.ino) }, pid: 765432, argv: ['node', '/npm/@anthropic-ai/claude-code/cli.js'] }); data.after = structuredClone(data.before);
     const collect = (scope: Parameters<typeof preflightGlobalProcesses>[0]) => preflightGlobalProcesses(scope, () => {}, async () => data);
     await expect(bindRegistrationAdmission(f.input, () => {}, collect)).rejects.toThrow('process_preflight_stopped');
+    data.before[1]!.claudeConfig = null;
     data.before[1]!.argv = null as unknown as string[]; data.before[1]!.executable = null as any; data.after = structuredClone(data.before);
     const admission = await bindRegistrationAdmission({ ...f.input, clientsClosed: false }, () => {}, collect);
     expect(admission.processAssessment()?.status).toBe('ready'); expect(readdirSync(f.paths.root)).toEqual(original);
