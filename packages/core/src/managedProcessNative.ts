@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { claudeConfigIdentity, type ClaudeConfigIdentity } from './managedClaudeConfig.js';
 import { spawn } from 'node:child_process';
 import { closeSync, openSync, readdirSync, readlinkSync, readSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +12,7 @@ export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read
 export type MacTextObservation = { status: 'read' | 'unreadable'; identities: { dev: string; ino: string }[]; stage: string; nativeCode: number | null };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
-  executable: ProcessExecutable | null; argv: string[] | null; state?: string; confirmedExited?: 'darwin-kinfo-empty-getpgid-esrch';
+  claudeConfig?: ClaudeConfigIdentity | null; executable: ProcessExecutable | null; argv: string[] | null; state?: string; confirmedExited?: 'darwin-kinfo-empty-getpgid-esrch';
   ownerProof?: 'darwin-kinfo-proc'; imageIdentityBound?: true; text?: MacTextObservation; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
 export type NativeProcessTables = {
@@ -163,6 +164,17 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
       try { row.argv = command(); } catch { /* Preserve owner/birth independently from unreadable argv. */ }
       const exe = () => executable(join(root, 'exe'), readlinkSync(join(root, 'exe')));
       try { row.executable = exe(); } catch { /* A foreign uid can deny exe while retaining readable argv. */ }
+      if (row.uid === process.geteuid?.() && row.argv?.some(arg => /(?:^|[\\/])claude(?:\.exe)?$|@anthropic-ai[\\/]claude-code[\\/]/i.test(arg))) {
+        try {
+          const environment = bounded(join(root, 'environ'), 1024 * 1024);
+          try {
+            row.claudeConfig = claudeConfigIdentity(environment, join(root, 'root'));
+            const again = bounded(join(root, 'environ'), 1024 * 1024);
+            try { assert.deepEqual(claudeConfigIdentity(again, join(root, 'root')), row.claudeConfig, 'process_config_changed'); }
+            finally { again.fill(0); }
+          } finally { environment.fill(0); }
+        } catch { row.claudeConfig = null; }
+      }
       if (row.argv) assert.deepEqual(command(), row.argv, 'process_arguments_changed');
       if (row.executable) assert.deepEqual(exe(), row.executable, 'process_executable_changed');
     }
