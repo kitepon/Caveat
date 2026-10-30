@@ -60,8 +60,9 @@ describe('product global migration caller', () => {
   it('persists a bounded plan and prepares with unrelated metadata exceeding 16 MiB', { timeout: 60000 }, async () => {
     const f = fixture();
     let directory = join(f.globalRoot, 'other');
-    for (let i = 0; i < 12; i++) { directory = join(directory, 'd'.repeat(200)); mkdirSync(directory); }
-    for (let i = 0; i < 6500; i++) writeFileSync(join(directory, 'file-' + i), '');
+    // Stay below macOS PATH_MAX while retaining a real metadata set larger than 16 MiB.
+    for (let i = 0; i < 3; i++) { directory = join(directory, 'd'.repeat(180)); mkdirSync(directory); }
+    for (let i = 0; i < 20000; i++) writeFileSync(join(directory, 'file-' + String(i).padStart(5, '0') + '-'.repeat(180)), '');
     const rows = snapshotGlobalTree(f.globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], metadataOnly: true }).filter(row => row.relativePath);
     expect(Buffer.byteLength(JSON.stringify(rows))).toBeGreaterThan(16 * 1024 * 1024);
     const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
