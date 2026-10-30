@@ -98,6 +98,32 @@ export function snapshotGlobalTree(root: string, options: {
   return rows;
 }
 
+export function digestOtherGlobals(rows: GlobalTreeRow[]) {
+  const all = createHash('sha256'), groups = new Map<string, { hash: ReturnType<typeof createHash>; entries: number }>();
+  for (const row of [...rows].sort((a, b) => a.relativePath.replaceAll('\\', '/') < b.relativePath.replaceAll('\\', '/') ? -1 : a.relativePath.replaceAll('\\', '/') > b.relativePath.replaceAll('\\', '/') ? 1 : 0)) {
+    const normalized = { ...row, relativePath: row.relativePath.replaceAll('\\', '/') };
+    const bytes = JSON.stringify(Object.fromEntries(Object.entries(normalized).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))) + '\n';
+    const parts = normalized.relativePath.split('/');
+    const name = parts[0]!.startsWith('@') && parts.length > 1 ? parts.slice(0, 2).join('/') : parts[0]!;
+    const group = groups.get(name) ?? { hash: createHash('sha256'), entries: 0 };
+    all.update(bytes); group.hash.update(bytes); group.entries++; groups.set(name, group);
+  }
+  return { schema: 'caveat.other_globals_digest.v1' as const, sha256: all.digest('hex'),
+    packages: [...groups].map(([name, group]) => ({ name, sha256: group.hash.digest('hex'), entries: group.entries })) };
+}
+export function snapshotOtherGlobals(globalRoot: string) {
+  return digestOtherGlobals(snapshotGlobalTree(globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true, metadataOnly: true }).filter(row => row.relativePath !== ''));
+}
+export function changedOtherGlobals(actual: ReturnType<typeof digestOtherGlobals>, saved: ReturnType<typeof digestOtherGlobals> | GlobalTreeRow[]) {
+  // Existing recovery evidence may still contain the pre-digest row format.
+  const expected = Array.isArray(saved) ? digestOtherGlobals(saved) : saved;
+  const before = new Map(expected.packages.map(row => [row.name, row]));
+  const after = new Map(actual.packages.map(row => [row.name, row]));
+  return [...new Set([...before.keys(), ...after.keys()])].sort().filter(name => {
+    const a = before.get(name), b = after.get(name); return !a || !b || a.sha256 !== b.sha256 || a.entries !== b.entries;
+  }).map(name => ({ package: name, reason: 'other_global_changed' }));
+}
+
 /** Record the first existing ancestor too, so creating a missing configuration directory is a change. */
 export function observeGlobalAbsence(file: string) {
   file = resolve(file); let missing = false;
@@ -198,15 +224,13 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
       npmManagement = { path: management, absent: true };
     }
     phase = 'other_globals';
-    const otherGlobals = snapshotGlobalTree(globalRoot, {
-      observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true, metadataOnly: true,
-    }).filter(row => row.relativePath !== '');
+    const otherGlobals = snapshotOtherGlobals(globalRoot);
     phase = 'final_identity';
     assert.equal(realpathSync(packageRoot), canonicalPackageRoot, 'package_root_changed_during_read');
     assert.deepEqual(observed(packageRoot), packageTree, 'package_changed_during_read');
     for (const file of protectedFiles) assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read');
     assert.deepEqual(snapshotGlobalTree(npmRoot, { observeOnly: true, opaqueExternalLinks: true }), npmTree, 'npm_changed_during_read');
-    assert.deepEqual(snapshotGlobalTree(globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], opaqueExternalLinks: true, metadataOnly: true }).filter(row => row.relativePath !== ''), otherGlobals, 'other_global_changed_during_read');
+    assert.deepEqual(snapshotOtherGlobals(globalRoot), otherGlobals, 'other_global_changed_during_read');
     try {
       const current = observed(management, 8 * MiB);
       assert.ok(!npmManagement.absent, 'management_created_during_read');

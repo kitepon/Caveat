@@ -5,6 +5,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 ## [Unreleased]
 
 ### Fixed
+- Store unrelated global-package observations as SHA-256 summaries, keeping migration evidence within its existing size bound and naming packages that change during migration or recovery.
 - Missing own knowledge repositories return `NOT_A_REPO` instead of an opaque MCP sync failure, with guidance to confirm the intended repository and client context.
 
 ## [0.21.12] — 2026-10-29
