@@ -43,10 +43,16 @@ describe('global process assessment', () => {
     expect(assessGlobalProcesses(scope, tables(record(20, '/runtime/node', [...npm, 'other-package']))).status).toBe('ready');
     expect(assessGlobalProcesses(scope, tables(record(20, '/runtime/node', [...npm, 'caveat-cli'])))).toMatchObject({ status: 'stopped', writers: 1, records: [{ resolution: { action: 'finish-npm-operation' } }] });
   });
-  it('detects readable Claude Code writers for configuration migration', () => {
-    const config = { binAliases: [], protectedPaths: ['/profile/.claude.json'] };
-    expect(assessGlobalProcesses(config, tables(record(20, '/usr/bin/node', ['node', '/npm/@anthropic-ai/claude-code/cli.js'])))).toMatchObject({ status: 'stopped', writers: 1, records: [{ reason: 'claude_config_writer' }] });
-    expect(assessGlobalProcesses(config, tables({ ...record(20), argv: null }))).toMatchObject({ status: 'ready' });
+  it('binds Claude writers to the protected file and counts unreadable environments', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-config-writer-')); roots.push(root);
+    const file = join(root, '.claude.json'); writeFileSync(file, '{}');
+    const stat = statSync(file, { bigint: true }), config = { binAliases: [], protectedPaths: [file] };
+    const claude = { ...record(20, '/usr/bin/claude'), claudeConfig: { dev: String(stat.dev), ino: String(stat.ino) } };
+    expect(assessGlobalProcesses(config, tables(claude))).toMatchObject({ status: 'stopped', writers: 1, records: [{ reason: 'claude_config_writer' }] });
+    expect(assessGlobalProcesses(config, tables({ ...claude, claudeConfig: { ...claude.claudeConfig, ino: 'other-home' } }))).toMatchObject({ status: 'ready', writers: 0, unknown: 0 });
+    for (const row of [{ ...claude, claudeConfig: null }, { ...claude, uid: 2000 }, { ...claude, reason: 'process_identity_changed' }]) {
+      expect(assessGlobalProcesses(config, tables(row))).toMatchObject({ status: 'ready', writers: 0, unknown: 1 });
+    }
   });
   it('counts an old consumer that has already exited without stopping', () => {
     const value = tables(record(20, '/runtime/node', ['node', scope.packageRoot + '/index.js'])); value.after.pop();
@@ -77,6 +83,21 @@ describe('native process parsers and owned transport', () => {
     rmSync(join(proc, 'cmdline'));
     const missing = assessGlobalProcesses(scope, readLinuxProcessTables(root));
     expect(missing.status).toBe('ready'); expect(missing.unknown).toBe(0);
+  });
+  it.skipIf(process.platform !== 'linux')('collects only config identity from an owned procfs environment', () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'caveat-env-proc-'))); roots.push(root);
+    const proc = join(root, String(process.pid)), home = join(root, 'home'); mkdirSync(proc); mkdirSync(home);
+    writeFileSync(join(home, '.claude.json'), '{}');
+    const fields = ['S', '1', ...Array(17).fill('0'), '987654', ...Array(30).fill('0')];
+    writeFileSync(join(proc, 'stat'), process.pid + ' (claude) ' + fields.join(' '));
+    const uid = process.geteuid!(); writeFileSync(join(proc, 'status'), `Uid:\t${uid}\t${uid}\t${uid}\t${uid}\n`);
+    symlinkSync(process.execPath, join(proc, 'exe')); symlinkSync('/', join(proc, 'root'));
+    writeFileSync(join(proc, 'cmdline'), '/usr/bin/claude\0');
+    writeFileSync(join(proc, 'environ'), 'HOME=' + home + '\0SECRET=hidden\0');
+    const result = readLinuxProcessTables(root), stat = statSync(join(home, '.claude.json'), { bigint: true });
+    expect(result.after[0]!.claudeConfig).toEqual({ dev: String(stat.dev), ino: String(stat.ino) });
+    expect(JSON.stringify(result)).not.toContain('hidden'); expect(JSON.stringify(result)).not.toContain(home);
+    rmSync(join(proc, 'environ')); expect(readLinuxProcessTables(root).after[0]!.claudeConfig).toBeNull();
   });
   it('roundtrips Windows CreateProcess argument quoting including Unicode and trailing slashes', () => {
     const argv = ['C:\\Program Files\\node.exe', 'C:\\作業\\entry.js', '', 'space value', 'trailing\\', 'quote"value', '\\"', 'a\\\\"b'];

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { realpathSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, statSync, rmSync, realpathSync } from 'node:fs';
 import { createMacKernelReader, decodeMacArguments, decodeMacBsdInfo, decodeMacKinfoIdentity, readMacKinfoIdentity, readMacProcessArguments } from '../src/managedMacProcessNative.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { isWindows } from '../src/platform.js';
 
 describe('native process bridge and Darwin layouts', () => {
@@ -32,6 +34,20 @@ describe('native process bridge and Darwin layouts', () => {
     expect(decodeMacArguments(Buffer.concat([count, Buffer.from('node\0node\0KEY=value\0SECRET=environment\0')]))).toEqual({
       savedExecutable: 'node', argv: ['node', 'KEY=value'],
     });
+  });
+  it('reads only config identity from same-owner procargs and never returns secrets', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-mac-config-'));
+    try {
+      writeFileSync(join(root, '.claude.json'), '{}');
+      const count = Buffer.alloc(4); count.writeInt32LE(1);
+      const input = Buffer.concat([count, Buffer.from('/usr/bin/claude\0claude\0HOME=' + root + '\0SECRET=hidden\0')]);
+      const query = (_m: Buffer, _n: number, b: Buffer | null, length: number[]) => { length[0] = input.length; if (b) input.copy(b); return 0; };
+      const stat = statSync(join(root, '.claude.json'), { bigint: true });
+      const result = readMacProcessArguments(42, query, () => 0, true);
+      expect(result.claudeConfig).toEqual({ dev: String(stat.dev), ino: String(stat.ino) });
+      expect(JSON.stringify(result)).not.toContain('hidden'); expect(JSON.stringify(result)).not.toContain(root);
+      expect(readMacProcessArguments(42, query, () => 0).claudeConfig).toBeUndefined();
+    } finally { rmSync(root, { recursive: true, force: true }); }
   });
   it('decodes only the LP64 kinfo PID, birth and effective uid used for the foreign-owner proof', () => {
     const bytes = Buffer.alloc(648); bytes.writeInt32LE(42, 40); bytes.writeUInt32LE(501, 420);

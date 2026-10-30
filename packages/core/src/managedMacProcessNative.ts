@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { claudeConfigIdentity, type ClaudeConfigIdentity } from './managedClaudeConfig.js';
 import { statSync } from 'node:fs';
 import type { NativeProcessRecord, ProcessExecutable, MacArgumentFailure } from './managedProcessNative.js';
 
@@ -7,7 +8,7 @@ const BSD_INFO_BYTES = 136;
 const decode = (bytes: Buffer) => new TextDecoder('utf8', { fatal: true }).decode(bytes);
 
 /** KERN_PROCARGS2: argc, saved executable path, padding, then exactly argc NUL strings. */
-export function decodeMacArguments(bytes: Buffer) {
+function decodeMacArgumentData(bytes: Buffer) {
   assert.ok(bytes.length >= 6 && bytes.length <= MAX_ARGUMENT_BYTES, 'mac_arguments_bound');
   const count = bytes.readInt32LE(0);
   assert.ok(count > 0 && count <= 65536, 'mac_argument_count');
@@ -22,7 +23,11 @@ export function decodeMacArguments(bytes: Buffer) {
     argv.push(decode(bytes.subarray(cursor, end))); cursor = end + 1;
   }
   assert.ok(argv[0], 'mac_argv0_unavailable');
-  return { savedExecutable, argv };
+  return { savedExecutable, argv, cursor };
+}
+
+export function decodeMacArguments(bytes: Buffer) {
+  const { savedExecutable, argv } = decodeMacArgumentData(bytes); return { savedExecutable, argv };
 }
 
 export function decodeMacBsdInfo(bytes: Buffer, pid: number) {
@@ -56,7 +61,7 @@ export function readMacKinfoIdentity(pid: number, query: MacSysctl, errno: () =>
   return decodeMacKinfoIdentity(buffer, pid);
 }
 /** Exact size/read failures are retained separately; decoding never exposes the environment segment. */
-export function readMacProcessArguments(pid: number, query: MacSysctl, errno: () => number): { argv: string[] | null; failure?: MacArgumentFailure } {
+export function readMacProcessArguments(pid: number, query: MacSysctl, errno: () => number, readConfig = false): { argv: string[] | null; claudeConfig?: ClaudeConfigIdentity | null; failure?: MacArgumentFailure } {
   const mib = Buffer.alloc(12); [1, 49, pid].forEach((value, index) => mib.writeInt32LE(value, index * 4));
   const length = [0];
   if (query(mib, 3, null, length, null, 0) !== 0) return { argv: null, failure: { stage: 'size', nativeCode: errno(), sizeQuerySucceeded: false } };
@@ -67,7 +72,11 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
     if (query(mib, 3, buffer, length, null, 0) !== 0) return { argv: null, failure: { stage: 'read', nativeCode: errno(), sizeQuerySucceeded: true } };
     const used = Number(length[0]);
     if (!Number.isSafeInteger(used) || used < 6 || used > buffer.length) return { argv: null, failure: { stage: 'read-bound', nativeCode: null, sizeQuerySucceeded: true } };
-    try { return { argv: decodeMacArguments(buffer.subarray(0, used)).argv }; }
+    try {
+      const data = decodeMacArgumentData(buffer.subarray(0, used));
+      return { argv: data.argv, ...(readConfig && data.argv.some(arg => /(?:^|\/)claude$|@anthropic-ai\/claude-code\//i.test(arg))
+        ? { claudeConfig: claudeConfigIdentity(buffer.subarray(data.cursor, used)) } : {}) };
+    }
     catch (error) {
       const message = error instanceof Error ? error.message : '';
       const decodeReason = ['mac_argument_count', 'mac_saved_executable_missing', 'mac_argument_unterminated', 'mac_argv0_unavailable'].find(reason => message.includes(reason)) ?? 'utf8-or-invalid';
@@ -102,7 +111,7 @@ export async function createMacKernelReader() {
   };
   assert.equal(koffi.sizeof('void *'), 8, 'mac_kinfo_lp64_required');
   const kinfo = (pid: number) => readMacKinfoIdentity(pid, (...values) => Number(sysctl(...values)), () => koffi.errno());
-  const args = (pid: number) => readMacProcessArguments(pid, (...values) => Number(sysctl(...values)), () => koffi.errno());
+  const args = (pid: number, readConfig: boolean) => readMacProcessArguments(pid, (...values) => Number(sysctl(...values)), () => koffi.errno(), readConfig);
   const calibration = kinfo(process.pid), currentBsd = bsd(process.pid);
   assert.deepEqual([calibration.pid, calibration.ppid, calibration.uid, calibration.birth],
     [currentBsd.pid, currentBsd.ppid, currentBsd.uid, currentBsd.birth], 'mac_kinfo_self_calibration_failed');
@@ -115,10 +124,16 @@ export async function createMacKernelReader() {
       row = { ...row, ppid: owner.ppid, uid: owner.uid, birth: owner.birth, state: owner.state, ownerProof: 'darwin-kinfo-proc' };
       if (owner.kernel) row.kernel = 'darwin-kernel-task';
       if (!owner.kernel && owner.state !== 'Z') {
-        phase = 'arguments'; const argument = args(pid); row.argv = argument.argv; if (argument.failure) row.argumentFailure = argument.failure;
+        phase = 'arguments'; const argument = args(pid, owner.uid === calibration.uid); row.argv = argument.argv; row.claudeConfig = argument.claudeConfig; if (argument.failure) row.argumentFailure = argument.failure;
         phase = 'image';
         try { row.executable = image(pid); } catch (error) { row.kernelFailure = { stage: phase + '-' + ((error as { nativeStage?: string }).nativeStage ?? 'unverified'), nativeCode: code(error) }; }
       }
+      if (row.claudeConfig) {
+        const again = args(pid, true);
+        assert.deepEqual([again.argv, again.claudeConfig], [row.argv, row.claudeConfig], 'mac_process_config_changed');
+      }
+      const last = kinfo(pid);
+      assert.deepEqual([last.uid, last.birth], [owner.uid, owner.birth], 'mac_process_identity_changed');
       return row;
     } catch (error) {
       return { ...row, reason: 'mac_kernel_metadata_unverified', kernelFailure: { stage: phase, nativeCode: code(error) } };
