@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { openGlobalPathGuard, type GlobalGuardTree, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import { parseGlobalMutationJournal } from './managedGlobalJournal.js';
-import { observeGlobalAbsence, snapshotGlobalTree } from './managedGlobalSnapshot.js';
+import { digestOtherGlobals, changedOtherGlobals, snapshotOtherGlobals, observeGlobalAbsence, snapshotGlobalTree } from './managedGlobalSnapshot.js';
 import { globalNpmLayout } from './platform.js';
 import type { bindGlobalMigration } from './managedGlobalMigration.js';
 
@@ -52,7 +52,7 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
     bindings.set('protected.' + index, binding);
   }
   const observe = () => {
-    const checks: { step: string; state: 'known' | 'absent' | 'unknown' }[] = [];
+    const checks: { step: string; state: 'known' | 'absent' | 'unknown'; records?: { package: string; reason: string }[] }[] = [];
     guard.assertCurrent();
     for (const [step, binding] of bindings) if (step.startsWith('protected.')) {
       try { assert.deepEqual(guard.readTree(binding.tree!), binding.rows); checks.push({ step, state: 'known' }); }
@@ -79,10 +79,13 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
     }
     for (const [step, observed, expected] of [
       ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
-      ['other-globals', () => snapshotGlobalTree(plan.globalRoot, { observeOnly: true, opaqueExternalLinks: true, skip: ['caveat-cli', '.package-lock.json'], metadataOnly: true }).filter(row => row.relativePath), plan.baseline.otherGlobals],
     ] as const) {
       try { assert.deepEqual(observed(), expected); checks.push({ step, state: 'known' }); } catch { checks.push({ step, state: 'unknown' }); }
     }
+    try {
+      const actual = snapshotOtherGlobals(plan.globalRoot), records = changedOtherGlobals(actual, plan.baseline.otherGlobals);
+      checks.push({ step: 'other-globals', state: actual.sha256 !== (Array.isArray(plan.baseline.otherGlobals) ? digestOtherGlobals(plan.baseline.otherGlobals) : plan.baseline.otherGlobals).sha256 ? 'unknown' : 'known', ...(records.length ? { records } : {}) });
+    } catch { checks.push({ step: 'other-globals', state: 'unknown' }); }
     return checks;
   };
   return { observe, verify() { assert.ok(observe().every(row => row.state === 'known' || row.state === 'absent'), 'global_recovery_protected_state_changed'); } };

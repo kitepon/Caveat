@@ -20,7 +20,7 @@ import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, inspectGlobalMig
 import { bindGlobalPathGuard, openGlobalPathGuard } from '../src/managedGlobalGuard.js';
 import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
 import { globalFilesystemNativeSpec } from '../src/platform.js';
-import { snapshotGlobalTree } from '../src/managedGlobalSnapshot.js';
+import { digestOtherGlobals, changedOtherGlobals, snapshotGlobalTree } from '../src/managedGlobalSnapshot.js';
 import { prepareGlobalShellInstallation } from '../src/managedGlobalShell.js';
 import { runOwnedGlobalNpm, globalUninstallArguments } from '../src/managedGlobalNpm.js';
 
@@ -57,16 +57,41 @@ function fixture() {
   return { root, profile, prefix, globalRoot, packageRoot, binDirectory, paths, config, input };
 }
 describe('product global migration caller', () => {
+  it('persists a bounded plan and prepares with unrelated metadata exceeding 16 MiB', { timeout: 60000 }, async () => {
+    const f = fixture();
+    let directory = join(f.globalRoot, 'other');
+    // Stay below macOS PATH_MAX while retaining a real metadata set larger than 16 MiB.
+    for (let i = 0; i < 3; i++) { directory = join(directory, 'd'.repeat(180)); mkdirSync(directory); }
+    for (let i = 0; i < 20000; i++) writeFileSync(join(directory, 'file-' + String(i).padStart(5, '0') + '-'.repeat(180)), '');
+    const rows = snapshotGlobalTree(f.globalRoot, { observeOnly: true, skip: ['caveat-cli', '.package-lock.json'], metadataOnly: true }).filter(row => row.relativePath);
+    expect(Buffer.byteLength(JSON.stringify(rows))).toBeGreaterThan(16 * 1024 * 1024);
+    const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    try {
+      expect(Buffer.byteLength(JSON.stringify(admission.plan))).toBeLessThan(16 * 1024 * 1024);
+      const prepared = await admission.prepare(admission.planSha256);
+      expect(statSync(join(prepared.runDirectory, 'plan.json')).size).toBeLessThan(16 * 1024 * 1024);
+    } finally { admission.close(); }
+  });
+  it('normalizes digest order, supports old evidence and names a changed package', () => {
+    const root = mkdtempSync(join(tmpdir(), 'caveat-digest-')); roots.push(root);
+    writeFileSync(join(root, 'index.js'), 'other global remains');
+    const rows = snapshotGlobalTree(root, { observeOnly: true, metadataOnly: true });
+    const before = digestOtherGlobals(rows), changed = structuredClone(rows); changed[1]!.mtimeNs += '1';
+    expect(digestOtherGlobals([...rows].reverse())).toEqual(before);
+    expect(changedOtherGlobals(before, rows)).toEqual([]);
+    expect(changedOtherGlobals(digestOtherGlobals(changed), before)).toEqual([{ package: 'index.js', reason: 'other_global_changed' }]);
+  });
   it.each(['migration', 'recovery'] as const)('observes large unrelated globals during %s without broadening retained trees', { timeout: 60000 }, async mode => {
     const f = fixture(), file = join(f.globalRoot, 'other/index.js');
     truncateSync(file, 129 * 1024 * 1024);
     expect(() => snapshotGlobalTree(join(f.globalRoot, 'other'))).toThrow('tree_byte_bound');
     const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
     let guard: Awaited<ReturnType<typeof openGlobalPathGuard>> | undefined;
+    let recoveryObserve: (() => ReturnType<ReturnType<typeof bindGlobalRecoveryProtected>['observe']>) | undefined;
     try {
       expect(existsSync(f.paths.lock)).toBe(false);
-      expect(admission.plan.baseline.otherGlobals.find(row => row.relativePath === join('other', 'index.js'))).toMatchObject({ kind: 'file', size: String(129 * 1024 * 1024) });
-      expect(admission.plan.baseline.otherGlobals.every(row => row.sha256 === undefined)).toBe(true);
+      expect(admission.plan.baseline.otherGlobals.packages.find(row => row.name === 'other')).toMatchObject({ entries: 2, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      expect(JSON.stringify(admission.plan.baseline.otherGlobals)).not.toContain('index.js');
       await admission.verify();
       let verify = admission.verify;
       if (mode === 'recovery') {
@@ -74,6 +99,8 @@ describe('product global migration caller', () => {
         admission.close();
         guard = await openGlobalPathGuard(globalRecoveryGuardPaths(admission.plan, f.paths.root));
         const protectedState = bindGlobalRecoveryProtected(admission.plan, guard);
+        recoveryObserve = protectedState.observe;
+        expect(recoveryObserve().find(row => row.step === 'other-globals')).toMatchObject({ state: 'known' });
         verify = async () => { protectedState.verify(); };
       }
       await verify();
@@ -81,6 +108,8 @@ describe('product global migration caller', () => {
       try { writeSync(fd, Buffer.from('changed'), 0, 7, 128 * 1024 * 1024); } finally { closeSync(fd); }
       expect(statSync(file).size).toBe(before.size);
       await expect(verify()).rejects.toThrow(mode === 'migration' ? 'global_migration_other_globals_changed' : 'global_recovery_protected_state_changed');
+      if (mode === 'migration') await expect(verify()).rejects.toMatchObject({ diagnostic: { records: [{ package: 'other', reason: 'other_global_changed' }] } });
+      else expect(recoveryObserve!().find(row => row.step === 'other-globals')).toMatchObject({ state: 'unknown', records: [{ package: 'other', reason: 'other_global_changed' }] });
     } finally { try { guard?.close(); } finally { admission.close(); } }
   });
   it('connects fresh baseline checks to original preservation, working copies and exact restoration', { timeout: 60000 }, async () => {
