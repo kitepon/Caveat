@@ -73,7 +73,9 @@ describe('product global migration caller', () => {
     } finally { admission.close(); }
   });
   it('normalizes digest order, supports old evidence and names a changed package', () => {
-    const f = fixture(), rows = snapshotGlobalTree(join(f.globalRoot, 'other'), { observeOnly: true, metadataOnly: true });
+    const root = mkdtempSync(join(tmpdir(), 'caveat-digest-')); roots.push(root);
+    writeFileSync(join(root, 'index.js'), 'other global remains');
+    const rows = snapshotGlobalTree(root, { observeOnly: true, metadataOnly: true });
     const before = digestOtherGlobals(rows), changed = structuredClone(rows); changed[1]!.mtimeNs += '1';
     expect(digestOtherGlobals([...rows].reverse())).toEqual(before);
     expect(changedOtherGlobals(before, rows)).toEqual([]);
