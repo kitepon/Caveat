@@ -38,6 +38,23 @@ describe('global package snapshot', () => {
     expect(result.writePermission).toBe(false);
     expect(snapshotGlobalTree(root)).toEqual(before);
   });
+  it('reports the absolute protected file path when it changes between snapshot reads', () => {
+    const { root, input } = fixture(), file = join(root, '.claude.json');
+    writeFileSync(file, '{}');
+    input.protectedFiles.push(file);
+    const npmAlias = input.npmAlias;
+    Object.defineProperty(input, 'npmAlias', { get() {
+      writeFileSync(file, '{"changed":true}');
+      return npmAlias;
+    } });
+    try { snapshotGlobalPackage(input); }
+    catch (error) {
+      expect((error as Error).message).toContain('protected_changed_during_read');
+      expect(error).toMatchObject({ diagnostic: { path: file } });
+      return;
+    }
+    throw Error('expected protected snapshot refusal');
+  });
   it('stops on a dependency that would have to resolve outside the retained package', () => {
     const { root, input } = fixture();
     rmSync(join(input.packageRoot, 'node_modules/dep'), { recursive: true });

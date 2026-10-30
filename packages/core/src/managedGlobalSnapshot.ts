@@ -228,7 +228,13 @@ export function snapshotGlobalPackage(input: GlobalPackageSnapshotInput) {
     phase = 'final_identity';
     assert.equal(realpathSync(packageRoot), canonicalPackageRoot, 'package_root_changed_during_read');
     assert.deepEqual(observed(packageRoot), packageTree, 'package_changed_during_read');
-    for (const file of protectedFiles) assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read');
+    for (const file of protectedFiles) {
+      try { assert.deepEqual(observed(file.file, 256 * MiB), file.rows, 'protected_changed_during_read'); }
+      catch (error) {
+        if (error instanceof Error) Object.assign(error, { diagnostic: { path: resolve(file.file) } });
+        throw error;
+      }
+    }
     assert.deepEqual(snapshotGlobalTree(npmRoot, { observeOnly: true, opaqueExternalLinks: true }), npmTree, 'npm_changed_during_read');
     assert.deepEqual(snapshotOtherGlobals(globalRoot), otherGlobals, 'other_global_changed_during_read');
     try {
