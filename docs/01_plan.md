@@ -44,6 +44,7 @@ YAML以外のnamed frontmatter engineはgray-matterの呼出前に拒否する�
 - `private`: 自分の端末または同じprivate remoteを使える組織内まで。
 - `public`: 世界へ配布してよい。
 - `caveat sync`: public/privateを含むown全体をprivate remoteと同期する。匿名可読remoteは拒否する。
+- MCPの記録・更新が成功した後は背景同期を要求する。直前の同期完了を理由に新しい書込みの要求を捨てない。
 - `caveat autosync run --json`: OS予定用の単発処理。既存cycleの間隔・再試行・privacy判定を
   再利用し、dirty treeを保留する。repo共通lockとindex lockで手動/hook同期と排他する。
   終了値は成功0/保留2/失敗1。`autosync status --json`は最後の実試行・失敗・成功完了を保持する。

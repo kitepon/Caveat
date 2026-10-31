@@ -30,9 +30,8 @@ import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn, type ProbeImpl 
 // remote, so the periodic cycle runs on a human-scale interval. A cycle is one
 // probe + fetch/rebase + push against a repo that is usually unchanged.
 export const AUTO_SYNC_DEBOUNCE_MS = 15 * 60 * 1000;
-// A fresh entry should leave the machine without waiting for the next Stop
-// hook. This floor only batches a burst of writes; it is not a rate limit.
-export const AUTO_SYNC_RECORD_DEBOUNCE_MS = 60 * 1000;
+// A completed cycle predates a new MCP write and cannot suppress its trigger.
+export const AUTO_SYNC_RECORD_DEBOUNCE_MS = 0;
 export const AUTO_SYNC_SUSPEND_THRESHOLD = 3;
 // After the threshold, auto-retry backs off instead of stopping forever: a
 // remote that is down, rotated, or mid-conflict usually recovers without the

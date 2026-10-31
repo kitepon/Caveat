@@ -267,8 +267,8 @@ MCP stdio サーバは stdout に JSON-RPC 以外を書いてはいけない。`
 - **1 cycle の中身**: `communityPull`（全 community repo を git pull）→ `syncOwn`（commit → `pull --rebase` → push）→ 全 source 再索引。**push と pull は分離できない** — `syncOwn` が必ず往復する 1 セット。前段に匿名可読 probe（remote への HTTP GET）が入る。実測 ~3.5s（community 0 件、own 218 entries、detached background なのでユーザー体感 0）
 - **発火点は 2 つ**。どちらも `triggerAutoSync` で detached worker (`caveat hook autosync`) を spawn して即 return する:
   1. **Stop hook** ([hookCmd.ts](apps/cli/src/commands/hookCmd.ts) / [codexHookCmd.ts](apps/cli/src/commands/codexHookCmd.ts)) — `AUTO_SYNC_DEBOUNCE_MS` = **15 分**。定期的に他端末の entry を拾う担当
-  2. **MCP の書き込み** (`caveat_record` / `caveat_update`) — `AUTO_SYNC_RECORD_DEBOUNCE_MS` = **60 秒**。登録した罠を即座に private remote へ出す担当。`McpContext.onEntryWritten` 経由（**必須フィールド**。テストが暗黙に実 spawn するのを型で防ぐため optional にしない）
-- **デバウンス値の根拠**: 旧 24 時間は送信側・受信側の両方に掛かり、伝播が最悪 48h だった。「別端末で登録した罠が当日中に届かない」は Caveat の価値そのものを殺すので、実測コストが許す範囲まで詰めた。record 起点の 60 秒は rate limit ではなく **burst 吸収の floor**
+  2. **MCP の書き込み** (`caveat_record` / `caveat_update`) — `AUTO_SYNC_RECORD_DEBOUNCE_MS` = **0**。書込み成功後に private remote への背景同期を要求する。直前の同期は新しい書込みを含まないため、その完了時刻では要求を抑制しない。`McpContext.onEntryWritten` 経由（**必須フィールド**。テストが暗黙に実 spawn するのを型で防ぐため optional にしない）
+- **デバウンス値の根拠**: 旧 24 時間は送信側・受信側の両方に掛かり、伝播が最悪 48h だった。Stopは15分で他端末の変更を受信する。MCP書込みは直前のcycleに含まれないため既定の待ち時間を置かず、cycle/repo/indexの既存lockと失敗backoffを維持する。
 - **失敗時は backoff であって永久停止ではない**: 同一 code の失敗が `AUTO_SYNC_SUSPEND_THRESHOLD`(3) 回連続すると `AUTO_SYNC_DEGRADED_RETRY_MS`(6h) 間隔へ後退する。**手動 `caveat sync` を待たずに自力で回復する**。degraded 中は `AUTO_SYNC_NOTICE_REPEAT_MS`(24h) ごとに reminder を再送する（旧実装は escalation を 1 回告知した後は完全に無言で永久停止し、伝播が死んだことに誰も気づけなかった）
 - **notification signature は「本文」から採る**。`sha256(JSON.stringify(lines))` のみ。内部 field (`disposition` / `suspended`) を混ぜると、同じ意味の状態（6h ごとの再試行失敗 と その間の skip）が別物と判定されて backoff 窓ごとに 2 通飛ぶ
 - **env**: `CAVEAT_AUTO_SYNC=off` で全停止。`CAVEAT_AUTO_SYNC_DEBOUNCE_MS` でデバウンス上書き（**不正値は stderr に警告して default へ落とす** — `Number('abc')` = NaN、`elapsed < NaN` は常に false なので、素通しにすると「毎回 spawn」になる）

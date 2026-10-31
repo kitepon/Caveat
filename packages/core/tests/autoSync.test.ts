@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import {
   acquireFileLock,
   AUTO_SYNC_DEBOUNCE_MS,
+  AUTO_SYNC_RECORD_DEBOUNCE_MS,
   autoSyncNotification,
   autoSyncStatePath,
   CAVEAT_AUTO_SYNC_DEBOUNCE_ENV,
@@ -55,6 +56,23 @@ describe('auto sync trigger', () => {
   afterEach(() => {
     delete process.env[CAVEAT_AUTO_SYNC_ENV];
     delete process.env[CAVEAT_AUTO_SYNC_DEBOUNCE_ENV];
+  });
+
+  it('does not discard an MCP write just after a completed cycle', () => {
+    const { home, cleanup } = fresh();
+    try {
+      markCycleFinished(home, 900);
+      expect(wouldSpawn(home)).toBe(false);
+      expect(() => triggerAutoSync({
+        caveatHome: home, cliScript: '', debounceMs: AUTO_SYNC_RECORD_DEBOUNCE_MS,
+      })).toThrow('current Caveat CLI script path is unavailable');
+      process.env[CAVEAT_AUTO_SYNC_ENV] = 'off';
+      expect(() => triggerAutoSync({
+        caveatHome: home, cliScript: '', debounceMs: AUTO_SYNC_RECORD_DEBOUNCE_MS,
+      })).not.toThrow();
+    } finally {
+      cleanup();
+    }
   });
 
   it('spawns when no cycle has run, and debounces against a recent one', () => {
