@@ -60,7 +60,7 @@ function disposition(cycle: RunAutoSyncResult): Pick<PeriodicSyncResult, 'status
 }
 
 export async function runPeriodicSync(
-  opts: Omit<RunAutoSyncOptions, 'dirtyPolicy' | 'debounceMs'> & { intervalMs?: number },
+  opts: Omit<RunAutoSyncOptions, 'dirtyPolicy' | 'debounceMs' | 'writeRequestedAt'> & { intervalMs?: number },
 ): Promise<PeriodicSyncResult> {
   const interval = opts.intervalMs ?? AUTO_SYNC_DEBOUNCE_MS;
   if (!Number.isFinite(interval) || interval < 0) throw Error('periodic_sync_interval_invalid');
@@ -70,7 +70,7 @@ export async function runPeriodicSync(
   if (!lock) return { schema: 'caveat.periodic_sync.v1', status: 'skipped', reason: 'periodic_busy', started_at, finished_at: clock().toISOString() };
   try {
     const previous = readPeriodicSyncState(opts.caveatHome);
-    const cycle = await runAutoSync({ ...opts, dirtyPolicy: 'refuse', debounceMs: interval });
+    const cycle = await runAutoSync({ ...opts, dirtyPolicy: 'refuse', debounceMs: interval, writeRequestedAt: undefined });
     const result: PeriodicSyncResult = { schema: 'caveat.periodic_sync.v1', ...disposition(cycle), started_at, finished_at: clock().toISOString() };
     const state: PeriodicSyncState = {
       schema: 'caveat.periodic_sync_state.v1',

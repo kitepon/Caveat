@@ -32,6 +32,7 @@ import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn, type ProbeImpl 
 export const AUTO_SYNC_DEBOUNCE_MS = 15 * 60 * 1000;
 // A completed cycle predates a new MCP write and cannot suppress its trigger.
 export const AUTO_SYNC_RECORD_DEBOUNCE_MS = 0;
+export const AUTO_SYNC_WRITE_LOCK_WAIT_MS = 30_000;
 export const AUTO_SYNC_SUSPEND_THRESHOLD = 3;
 // After the threshold, auto-retry backs off instead of stopping forever: a
 // remote that is down, rotated, or mid-conflict usually recovers without the
@@ -57,6 +58,9 @@ export function autoSyncLockPath(caveatHome: string): string {
 
 export interface AutoSyncState {
   finishedAt: string;
+  /** Recorded only after the cycle completes; legacy finishedAt remains unchanged. */
+  startedAt?: string;
+  contextSha256?: string;
   signature: string;
   /** When the user was last told about a degraded sync. Drives notice repeats. */
   lastNotifiedAt?: string;
@@ -92,6 +96,8 @@ export function resetAutoSyncFailureState(caveatHome: string): void {
     const current = readAutoSyncState(caveatHome);
     writeAutoSyncState(caveatHome, {
       finishedAt: current?.finishedAt ?? new Date(0).toISOString(),
+      startedAt: current?.startedAt,
+      contextSha256: current?.contextSha256,
       signature: current?.signature ?? '',
       lastNotifiedAt: current?.lastNotifiedAt,
       ownSync: { consecutiveFailureSignature: null, consecutiveFailureCount: 0 },
@@ -106,6 +112,8 @@ function isAutoSyncState(value: unknown): value is AutoSyncState {
   const candidate = value as AutoSyncState;
   return (
     typeof candidate.finishedAt === 'string' &&
+    (candidate.startedAt === undefined || (typeof candidate.startedAt === 'string' && Number.isFinite(Date.parse(candidate.startedAt)))) &&
+    (candidate.contextSha256 === undefined || (typeof candidate.contextSha256 === 'string' && /^[a-f0-9]{64}$/.test(candidate.contextSha256))) &&
     typeof candidate.signature === 'string' &&
     isOptionalString(candidate.lastNotifiedAt) &&
     candidate.ownSync !== null &&
@@ -243,6 +251,8 @@ export interface RunAutoSyncOptions {
   dirtyPolicy?: 'commit' | 'refuse';
   /** Optional interval, checked again while holding the cycle lock. */
   debounceMs?: number;
+  /** MCP write time, carried to the worker so busy cycles can coalesce its request. */
+  writeRequestedAt?: number;
   probeImpl?: ProbeImpl;
 }
 
@@ -250,11 +260,25 @@ export interface RunAutoSyncResult {
   ran: boolean;
   outcome?: AutoSyncOutcome;
   notified?: boolean;
-  skipReason?: 'disabled' | 'sync_busy' | 'index_busy' | 'interval_wait';
+  skipReason?: 'disabled' | 'sync_busy' | 'index_busy' | 'interval_wait' | 'write_already_synced' | 'write_lock_timeout';
   errorCode?: 'cycle_failed';
 }
 
 export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSyncResult> {
+  if (opts.writeRequestedAt === undefined) return runAutoSyncCycle(opts);
+  if (!Number.isSafeInteger(opts.writeRequestedAt) || opts.writeRequestedAt < 0) throw Error('autosync_write_requested_at_invalid');
+  const deadline = performance.now() + AUTO_SYNC_WRITE_LOCK_WAIT_MS;
+  for (;;) {
+    const result = await runAutoSyncCycle(opts);
+    const busy = result.skipReason === 'sync_busy' || result.skipReason === 'index_busy' || result.outcome?.own.code === 'SYNC_BUSY';
+    if (!busy) return result;
+    const remaining = deadline - performance.now();
+    if (remaining <= 0) return { ...result, skipReason: 'write_lock_timeout' };
+    await new Promise(resolve => setTimeout(resolve, Math.min(100, remaining)));
+  }
+}
+
+async function runAutoSyncCycle(opts: RunAutoSyncOptions): Promise<RunAutoSyncResult> {
   if (process.env[CAVEAT_AUTO_SYNC_ENV] === 'off') return { ran: false, skipReason: 'disabled' };
   const lock = acquireFileLock(autoSyncLockPath(opts.caveatHome));
   if (!lock) return { ran: false, skipReason: 'sync_busy' };
@@ -274,7 +298,14 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
     const nowMs = nowDate.getTime();
     const nowIso = nowDate.toISOString();
     const previousState = readAutoSyncState(opts.caveatHome);
-    if (opts.debounceMs !== undefined && previousState
+    const contextSha256 = sha256(JSON.stringify([opts.ownDir, opts.paths.dbPath, opts.paths.entriesDir, opts.paths.communityDir, opts.githubUser ?? null]));
+    // Millisecond ties cannot prove that the write preceded the cycle snapshot.
+    if (opts.writeRequestedAt !== undefined && previousState?.startedAt
+      && previousState.contextSha256 === contextSha256
+      && parseTimestamp(previousState.startedAt) > opts.writeRequestedAt) {
+      return { ran: false, skipReason: 'write_already_synced' };
+    }
+    if (opts.writeRequestedAt === undefined && opts.debounceMs !== undefined && previousState
       && nowMs - parseTimestamp(previousState.finishedAt) < opts.debounceMs) {
       return { ran: false, skipReason: 'interval_wait' };
     }
@@ -370,6 +401,8 @@ export async function runAutoSync(opts: RunAutoSyncOptions): Promise<RunAutoSync
     }
     writeAutoSyncState(opts.caveatHome, {
       finishedAt: nowIso,
+      startedAt: nowIso,
+      contextSha256,
       signature,
       lastNotifiedAt: notified ? nowIso : previousState?.lastNotifiedAt,
       ownSync: ownSyncState,
@@ -400,6 +433,7 @@ export interface TriggerAutoSyncOptions {
   cliScript: string;
   /** Minimum age of the last completed cycle before spawning. Default: AUTO_SYNC_DEBOUNCE_MS. */
   debounceMs?: number;
+  writeRequestedAt?: number;
 }
 
 /**
@@ -409,17 +443,19 @@ export interface TriggerAutoSyncOptions {
  */
 export function triggerAutoSync(opts: TriggerAutoSyncOptions): void {
   if (process.env[CAVEAT_AUTO_SYNC_ENV] === 'off') return;
-  const debounceMs = resolveTriggerDebounceMs(opts.debounceMs ?? AUTO_SYNC_DEBOUNCE_MS);
+  if (opts.writeRequestedAt !== undefined && (!Number.isSafeInteger(opts.writeRequestedAt) || opts.writeRequestedAt < 0)) throw Error('autosync_write_requested_at_invalid');
+  const debounceMs = opts.writeRequestedAt === undefined ? resolveTriggerDebounceMs(opts.debounceMs ?? AUTO_SYNC_DEBOUNCE_MS) : 0;
   const statePath = autoSyncStatePath(opts.caveatHome);
   try {
-    if (existsSync(statePath) && Date.now() - statSync(statePath).mtimeMs < debounceMs) return;
+    if (opts.writeRequestedAt === undefined && existsSync(statePath) && Date.now() - statSync(statePath).mtimeMs < debounceMs) return;
   } catch {
     // Treat unreadable state as not yet run; the worker owns the real lock.
   }
   if (!opts.cliScript) throw new Error('current Caveat CLI script path is unavailable');
   const child = spawn(
     process.execPath,
-    [...process.execArgv, '--disable-warning=ExperimentalWarning', opts.cliScript, 'hook', 'autosync'],
+    [...process.execArgv, '--disable-warning=ExperimentalWarning', opts.cliScript, 'hook', 'autosync',
+      ...(opts.writeRequestedAt === undefined ? [] : [String(opts.writeRequestedAt)])],
     { detached: true, stdio: 'ignore', windowsHide: true },
   );
   child.unref();

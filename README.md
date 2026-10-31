@@ -387,7 +387,10 @@ unaffected.
   Once a private remote is configured, **Caveat also syncs on its own** — a gotcha you hit on one
   machine is worth little if it reaches the others two days later. A background worker runs the same
   cycle after each successful MCP record or update, without suppressing the request because a previous
-  cycle just finished, and otherwise at most every 15 minutes when a session ends. It never blocks you,
+  cycle just finished. Write workers wait up to 30 seconds for busy sync/index locks and share a later
+  completed cycle for the same configured repository when its start proves it covers their request. If the wait expires they stop without
+  changing another worker's lock; there is no persistent retry queue. Stop hooks otherwise request a
+  cycle at most every 15 minutes when a session ends. It never blocks you,
   it obeys the same refuse-if-anonymously-readable rule, and repeated
   failures back off rather than stopping silently. Set `CAVEAT_AUTO_SYNC=off` to sync only by hand.
 

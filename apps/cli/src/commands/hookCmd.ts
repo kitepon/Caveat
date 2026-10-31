@@ -370,22 +370,29 @@ async function runReindexWorker(): Promise<void> {
   }
 }
 
-async function runAutoSyncWorker(): Promise<void> {
+async function runAutoSyncWorker(arg?: string): Promise<void> {
   if (process.env[CAVEAT_AUTO_SYNC_ENV] === 'off') {
     process.stderr.write('[caveat:hook] auto sync disabled by CAVEAT_AUTO_SYNC=off\n');
+    return;
+  }
+  const writeRequestedAt = arg === undefined ? undefined : Number(arg);
+  if (arg !== undefined && (!/^(0|[1-9]\d*)$/.test(arg) || !Number.isSafeInteger(writeRequestedAt))) {
+    process.stderr.write('[caveat:hook] invalid autosync write request time\n');
     return;
   }
   const ctx = buildContextSafely(CLAUDE_HOST);
   if (!ctx) return;
   try {
-    await runAutoSync({
+    const result = await runAutoSync({
       userHome: ctx.userHome,
       caveatHome: ctx.caveatHome,
       ownDir: ctx.paths.knowledgeRepo,
             githubUser: ctx.config.githubUser,
       paths: ctx.paths,
       logger: silentLogger,
+      writeRequestedAt,
     });
+    if (result.skipReason === 'write_lock_timeout') process.stderr.write('[caveat:hook] autosync write lock wait expired\n');
   } catch (err: unknown) {
     process.stderr.write(`[caveat:hook] auto sync error: ${errorMessage(err)}\n`);
   }
@@ -398,7 +405,7 @@ export async function runHook(name: HookName, arg?: string): Promise<void> {
     process.exit(0);
   }
   if (name === 'autosync') {
-    await runAutoSyncWorker();
+    await runAutoSyncWorker(arg);
     process.exit(0);
   }
   if (name === 'worker') {

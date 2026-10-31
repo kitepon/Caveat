@@ -6,6 +6,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ### Fixed
 - Request background sync for each successful MCP record or update, including writes made immediately after the previous cycle completed.
+- Wait briefly for busy write-triggered sync workers and coalesce requests covered by a later completed cycle, preserving normal Stop intervals and scheduled dirty-worktree refusal.
 - Include the absolute protected file path in migration diagnostics when the file changes during a snapshot read.
 
 ## [0.21.13] — 2026-10-30

@@ -45,6 +45,9 @@ YAML以外のnamed frontmatter engineはgray-matterの呼出前に拒否する�
 - `public`: 世界へ配布してよい。
 - `caveat sync`: public/privateを含むown全体をprivate remoteと同期する。匿名可読remoteは拒否する。
 - MCPの記録・更新が成功した後は背景同期を要求する。直前の同期完了を理由に新しい書込みの要求を捨てない。
+  MCP workerはsync/index/repoのbusyを最大30秒待ち、lock内で同じrepo/索引/認証設定の要求より後に開始した完了cycleを確認できれば集約する。
+  開始時刻が無い旧stateと同一ミリ秒の時刻は完了証明に使わない。待機上限で停止し、queueや常駐処理を追加しない。
+  `CAVEAT_AUTO_SYNC=off`は待機中にも有効。明示debounce overrideはStopの待ち時間に使い、MCPの要求を捨てる理由にしない。
 - `caveat autosync run --json`: OS予定用の単発処理。既存cycleの間隔・再試行・privacy判定を
   再利用し、dirty treeを保留する。repo共通lockとindex lockで手動/hook同期と排他する。
   終了値は成功0/保留2/失敗1。`autosync status --json`は最後の実試行・失敗・成功完了を保持する。
