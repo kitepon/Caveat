@@ -45,7 +45,11 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
       if (observed.status !== expected) {
         const failure = ('result' in observed ? observed.result : null) as { nativeCode?: number; file?: string } | null;
         result = failure?.nativeCode === 32 ? { status: 'stopped', phase, sharingViolation: { code: 32, file: failure.file, instruction: 'Close the AI client using this file, then retry.', readableHolders: admission.processAssessment()?.records ?? [] } }
-          : { status: observed.status === 'unknown' ? 'unknown' : 'stopped', phase }; event(result.status); return await finish();
+          : { status: observed.status === 'unknown' ? 'unknown' : 'stopped', phase,
+            ...('errorSha256' in observed ? { errorSha256: observed.errorSha256 } : {}),
+            ...('reason' in observed ? { reason: observed.reason } : {}),
+            ...('diagnostic' in observed ? { diagnostic: observed.diagnostic } : {}),
+            ...('shell' in observed ? { shell: { ...observed.shell, ...('recovery' in observed ? { recovery: observed.recovery } : {}) } } : {}) }; event(result.status); return await finish();
       }
       event('completed');
     }

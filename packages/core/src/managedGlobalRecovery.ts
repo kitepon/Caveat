@@ -38,6 +38,25 @@ export type GlobalRecoverySnapshot = { plan: Plan; original: OriginalManifest; s
   guard: Awaited<ReturnType<typeof openGlobalPathGuard>>; bindings: Map<string, Binding>; evidenceSha256: string; journalSha256: string;
   verifyEvidence: () => void; verifyProtected: () => void; admission?: unknown; sourceRoots?: string[]; vacancySlots?: { directory: string; name: string }[] };
 
+/** Diagnostics are bounded; object contents stay in the private evidence. */
+export function assertGlobalRecoveryBinding(read: () => GlobalGuardTreeRow[] | null, expected: GlobalGuardTreeRow[] | null, directory: string, name: string) {
+  let actual: GlobalGuardTreeRow[] | null = null, observed = false;
+  try { actual = read(); observed = true; assert.deepEqual(actual, expected, 'global_recovery_binding_changed'); }
+  catch (cause) {
+    const before = new Map((expected ?? []).map(row => [row.relativePath, row.identity]));
+    const after = new Map((actual ?? []).map(row => [row.relativePath, row.identity]));
+    const records: { relativePath: string; attributes: string[] }[] = [];
+    for (const path of observed ? new Set([...before.keys(), ...after.keys()]) : []) {
+      const a = before.get(path), b = after.get(path);
+      const attributes = !a || !b ? ['presence'] : Object.keys({ ...a, ...b }).filter(key => a[key as keyof typeof a] !== b[key as keyof typeof b]);
+      if (attributes.length) records.push({ relativePath: path, attributes });
+      if (records.length === 16) break;
+    }
+    throw Object.assign(Error('global_recovery_binding_changed', { cause }), { diagnostic: { directory, name, path: join(directory, name), records,
+      ...(!observed ? { observation: 'unavailable', code: (cause as NodeJS.ErrnoException)?.code ?? null } : {}) } });
+  }
+}
+
 export function globalRecoveryGuardPaths(plan: Plan, runDirectory: string) {
   return [...new Set([runDirectory, plan.root, plan.globalRoot, plan.binDirectory,
     dirname(dirname(plan.baseline.npm.executable)), ...plan.absences.map(row => row.parent), ...plan.protectedObjects.map(row => dirname(row.path))])];
@@ -52,11 +71,11 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
     bindings.set('protected.' + index, binding);
   }
   const observe = () => {
-    const checks: { step: string; state: 'known' | 'absent' | 'unknown'; records?: { package: string; reason: string }[] }[] = [];
+    const checks: { step: string; state: 'known' | 'absent' | 'unknown'; reason?: string; diagnostic?: unknown; records?: { package: string; reason: string }[] }[] = [];
     guard.assertCurrent();
     for (const [step, binding] of bindings) if (step.startsWith('protected.')) {
-      try { assert.deepEqual(guard.readTree(binding.tree!), binding.rows); checks.push({ step, state: 'known' }); }
-      catch { checks.push({ step, state: 'unknown' }); }
+      try { assertGlobalRecoveryBinding(() => guard.readTree(binding.tree!), binding.rows, binding.directory, binding.name); checks.push({ step, state: 'known' }); }
+      catch (error) { checks.push({ step, state: 'unknown', reason: (error as Error).message, diagnostic: (error as { diagnostic?: unknown }).diagnostic }); }
     }
     if (plan.baseline.npmManagement.absent) {
       try { assert.equal(guard.observe(plan.globalRoot, '.package-lock.json'), null); checks.push({ step: 'absent-management', state: 'absent' }); }
@@ -64,23 +83,23 @@ export function bindGlobalRecoveryProtected(plan: Plan, guard: Awaited<ReturnTyp
     }
     const directories = guard.directoryBindings();
     for (const [index, row] of plan.directories.entries()) {
-      try { assert.deepEqual(directories.find(current => current.path === row.path), row); checks.push({ step: 'directory.' + index, state: 'known' }); }
+      try { assert.deepEqual(directories.find(current => current.path === row.path), row, 'global_recovery_directory_changed'); checks.push({ step: 'directory.' + index, state: 'known' }); }
       catch { checks.push({ step: 'directory.' + index, state: 'unknown' }); }
     }
     for (const [index, row] of plan.absences.entries()) {
-      try { assert.deepEqual(observeGlobalAbsence(row.path), row); checks.push({ step: 'absent-config.' + index, state: 'absent' }); }
+      try { assert.deepEqual(observeGlobalAbsence(row.path), row, 'global_recovery_absence_changed'); checks.push({ step: 'absent-config.' + index, state: 'absent' }); }
       catch { checks.push({ step: 'absent-config.' + index, state: 'unknown' }); }
     }
     for (const [index, alias] of plan.aliases.entries()) {
       // Original package names may legitimately be absent after preservation/removal.
       if (alias.path === plan.baseline.packageRoot) continue;
-      try { assert.equal(realpathSync(alias.path), alias.canonical); checks.push({ step: 'alias.' + index, state: 'known' }); }
+      try { assert.equal(realpathSync(alias.path), alias.canonical, 'global_recovery_alias_changed'); checks.push({ step: 'alias.' + index, state: 'known' }); }
       catch { checks.push({ step: 'alias.' + index, state: 'unknown' }); }
     }
     for (const [step, observed, expected] of [
       ['npm', () => snapshotGlobalTree(dirname(dirname(plan.baseline.npm.executable)), { observeOnly: true, opaqueExternalLinks: true }), plan.baseline.npm.tree],
     ] as const) {
-      try { assert.deepEqual(observed(), expected); checks.push({ step, state: 'known' }); } catch { checks.push({ step, state: 'unknown' }); }
+      try { assert.deepEqual(observed(), expected, 'global_recovery_npm_changed'); checks.push({ step, state: 'known' }); } catch (error) { checks.push({ step, state: 'unknown', reason: (error as Error).message, diagnostic: (error as { diagnostic?: unknown }).diagnostic }); }
     }
     try {
       const actual = snapshotOtherGlobals(plan.globalRoot), records = changedOtherGlobals(actual, plan.baseline.otherGlobals);
@@ -235,14 +254,14 @@ export function withGlobalRecoverySnapshot<T = never>(runDirectory: string, expe
     const guard = await openGlobalPathGuard(globalRecoveryGuardPaths(plan, runDirectory));
     try {
       guard.assertPrivateDirectory(runDirectory);
-      const observations: { step: string; state: 'known' | 'absent' | 'changed' | 'unknown' }[] = [], bindings = new Map<string, Binding>();
+      const observations: { step: string; state: 'known' | 'absent' | 'changed' | 'unknown'; reason?: string; diagnostic?: unknown }[] = [], bindings = new Map<string, Binding>();
       const check = (step: string, directory: string, name: string, expected: GlobalGuardTreeRow[] | null) => {
         try {
           const tree = expected ? guard.retainTree(directory, name) : null;
-          if (!tree) { assert.equal(guard.observe(directory, name), null); observations.push({ step, state: 'absent' }); }
-          else { assert.deepEqual(guard.readTree(tree), expected); observations.push({ step, state: 'known' }); }
+          if (!tree) { assertGlobalRecoveryBinding(() => { const value = guard.observe(directory, name); return value ? [{ relativePath: '', identity: value }] : null; }, null, directory, name); observations.push({ step, state: 'absent' }); }
+          else { assertGlobalRecoveryBinding(() => guard.readTree(tree), expected, directory, name); observations.push({ step, state: 'known' }); }
           bindings.set(step, { directory, name, rows: structuredClone(expected), tree });
-        } catch { observations.push({ step, state: 'unknown' }); }
+        } catch (error) { observations.push({ step, state: 'unknown', reason: (error as Error).message, diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? { directory, name, path: join(directory, name) } }); }
       };
       for (const object of original.objects) {
         check('original.' + object.step, object.state === 'preserved' ? runDirectory : object.directory, object.state === 'preserved' ? object.backupName : object.name, object.rows);

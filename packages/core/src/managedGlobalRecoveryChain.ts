@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { basename, dirname, join } from 'node:path';
 import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, globalRecoveryKeys, shaGlobalRecoveryValue,
-  withGlobalMigrationEvidence, withGlobalRecoverySnapshot, type GlobalMigrationEvidence, type GlobalRecoverySnapshot } from './managedGlobalRecovery.js';
+  assertGlobalRecoveryBinding, withGlobalMigrationEvidence, withGlobalRecoverySnapshot, type GlobalMigrationEvidence, type GlobalRecoverySnapshot } from './managedGlobalRecovery.js';
 import { withGlobalRecoveryAttemptEvidence } from './managedGlobalRecoveryAttempt.js';
 import { recoveryLocations, recoveryModelFromMigration, recoveryVacancySlots, validateRecoveryJournalState, type RecoveryModel } from './managedGlobalRecoveryModel.js';
 import { openGlobalPathGuard, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
@@ -71,7 +71,7 @@ export function withGlobalRecoverySourceSnapshot<T>(runDirectory: string, planSh
       const bindings: GlobalRecoverySnapshot['bindings'] = new Map();
       const bind = (key: string, row: ReturnType<typeof recoveryLocations>[number]) => {
         const tree = guard.retainTree(row.directory, row.name);
-        assert.deepEqual(guard.readTree(tree), row.rows, 'global_recovery_chain_current_object_changed');
+        assertGlobalRecoveryBinding(() => guard.readTree(tree), row.rows, row.directory, row.name);
         bindings.set(key, { ...structuredClone(row), tree });
       };
       for (const row of model.objects) {
@@ -122,11 +122,11 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
       const target = join(source.plan.root, 'global-recovery-' + source.evidenceSha256.slice(0, 32));
       const verify = () => { source.verifyEvidence(); source.verifyProtected(); source.guard.assertCurrent();
         for (const row of source.bindings.values()) {
-          if (row.tree) assert.deepEqual(source.guard.readTree(row.tree), row.rows);
+          if (row.tree) assertGlobalRecoveryBinding(() => source.guard.readTree(row.tree!), row.rows, row.directory, row.name);
           else assert.equal(source.guard.observe(row.directory, row.name), null, 'global_recovery_plan_vacancy_changed');
         }
         const occupied = new Set([...source.bindings.values()].filter(row => row.tree).map(row => join(row.directory, row.name)));
-        for (const row of source.vacancySlots ?? []) if (!occupied.has(join(row.directory, row.name))) assert.equal(source.guard.observe(row.directory, row.name), null);
+        for (const row of source.vacancySlots ?? []) if (!occupied.has(join(row.directory, row.name))) assert.equal(source.guard.observe(row.directory, row.name), null, 'global_recovery_plan_vacancy_changed');
         assert.equal(source.guard.observe(source.plan.root, 'installer.lock'), null, 'global_recovery_installer_busy');
         assert.equal(source.guard.observe(source.plan.root, basename(target)), null, 'global_recovery_attempt_already_exists');
       };
@@ -134,8 +134,11 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
       return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'ready' as const, planSha256, evidenceSha256: source.evidenceSha256,
         processAssessment, currentObjects: 'confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 };
     });
+    if ('observations' in result && result.status === 'stopped') throw Object.assign(Error('global_recovery_current_state_unconfirmed'),
+      { diagnostic: { observations: result.observations.filter(row => row.state === 'changed' || row.state === 'unknown').slice(0, 16) } });
     assert.equal(result.schema, 'caveat.global_recovery_plan.v1', 'global_recovery_plan_source_unconfirmed'); return result;
   } catch (error) { return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
+    reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown })?.diagnostic ?? null,
     processAssessment: (error as { preflight?: unknown })?.preflight ?? null,
     errorSha256: shaGlobalRecoveryValue(error instanceof Error ? error.name + ':' + error.message : String(error)),
     currentObjects: 'not-confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 }; }
