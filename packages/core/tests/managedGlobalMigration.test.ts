@@ -16,7 +16,7 @@ import { stageManagedDeployment, activateManagedDeployment, managedDeploymentPat
 import { globalNpmEnvironment, globalNpmLayout, isWindows } from '../src/platform.js';
 import { runWindowsAclPrivateTree } from '../src/privateWindowsAcl.js';
 import type { NativeProcessTables } from '../src/managedProcessNative.js';
-import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
+import { assertGlobalRecoveryBinding, bindGlobalRecoveryProtected, globalRecoveryGuardPaths, inspectGlobalMigrationRecovery, withGlobalMigrationEvidence } from '../src/managedGlobalRecovery.js';
 import { bindGlobalPathGuard, openGlobalPathGuard } from '../src/managedGlobalGuard.js';
 import { createPosixGlobalGuard } from '../src/managedPosixGuard.js';
 import { globalFilesystemNativeSpec } from '../src/platform.js';
@@ -298,6 +298,29 @@ describe('product-owned shell publication and known-only rollback', () => {
 });
 
 
+describe('native shell publication confirmation diagnostics', () => {
+  it('confirms published manifest identities and a fresh recovery plan', { timeout: 120000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
+    try {
+      await removeFixtureWorking(session);
+      const result = await session.shell.install();
+      expect(result, JSON.stringify(result)).toMatchObject({ status: 'installed' });
+    } finally { session.close(); }
+    const recovery = await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables());
+    expect(recovery, JSON.stringify(recovery)).toMatchObject({ status: 'ready', currentObjects: 'confirmed' });
+  });
+  for (const attribute of ['ctime', 'securitySha256', 'contentSha256'] as const) it('identifies a binding and differing ' + attribute + ' without permitting recovery', () => {
+    const row = { relativePath: 'manifest.json', identity: { dev: '1', ino: '2', kind: 'file' as const, size: '3', links: '1', mtime: '4', ctime: '5', owner: '6', group: '7', mode: 0o600, securitySha256: 'a'.repeat(64), contentSha256: 'b'.repeat(64) } };
+    const current = structuredClone(row); current.identity[attribute] = 'changed';
+    try { assertGlobalRecoveryBinding(() => [current], [row], '/fixture/shell', 'manifest.json'); }
+    catch (error) {
+      expect(error).toMatchObject({ message: 'global_recovery_binding_changed', diagnostic: { directory: '/fixture/shell', name: 'manifest.json', records: [{ relativePath: 'manifest.json', attributes: [attribute] }] } });
+      return;
+    }
+    throw Error('expected refusal');
+  });
+});
+
 describe('persisted global migration recovery inspection', () => {
   it('opens installed shell/original evidence read-only with no execution permission', { timeout: 120000 }, async () => {
     const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables());
@@ -333,7 +356,9 @@ describe('persisted global migration recovery inspection', () => {
     try { await session.engine.preserveAll(); } finally { session.close(); }
     const file = join(session.runDirectory, 'original-package/dist/caveat.js'); writeFileSync(file, 'changed original');
     const result = await inspectGlobalMigrationRecovery(session.runDirectory, session.planSha256);
-    expect(result.status).toBe('stopped'); expect(result.observations).toContainEqual({ step: 'original.package', state: 'unknown' });
+    expect(result.status).toBe('stopped'); expect(result.observations).toContainEqual(expect.objectContaining({ step: 'original.package', state: 'unknown', diagnostic: expect.objectContaining({ directory: session.runDirectory, name: 'original-package' }) }));
+    const recovery = await planGlobalRecoveryWithCollector(session.runDirectory, session.planSha256, async () => tables());
+    expect(recovery).toMatchObject({ status: 'stopped', reason: 'global_recovery_current_state_unconfirmed', diagnostic: { observations: expect.arrayContaining([expect.objectContaining({ step: 'original.package', diagnostic: expect.objectContaining({ name: 'original-package', records: expect.arrayContaining([expect.objectContaining({ attributes: expect.arrayContaining(['contentSha256']) })]) }) })]) } });
     expect(readFileSync(file, 'utf8')).toBe('changed original'); expect(existsSync(f.packageRoot)).toBe(false);
   });
 });
@@ -444,6 +469,22 @@ describe('product migration coordinator', () => {
     const result = await coordinateGlobalMigration(f.input, '0'.repeat(64), event => events.push(event), (input, event) => bindGlobalAdmission(input, event, async () => tables()));
     expect(result).toMatchObject({ status: 'stopped', phase: 'admission', runId: null }); expect(readdirSync(f.paths.root)).toEqual(before);
     expect(JSON.stringify(events)).not.toContain(f.root);
+  });
+  it('retains shell failure details in an unknown terminal result', { timeout: 120000 }, async () => {
+    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    const result = await coordinateGlobalMigration(f.input, admission.planSha256, () => {}, async () => {
+      const base = fixtureCoordinatorAdmission(admission);
+      return { ...base, async prepare(digest: string) {
+        const session = await base.prepare(digest);
+        return { ...session, shell: { ...session.shell, async install() {
+          return { status: 'unknown' as const, errorSha256: 'b'.repeat(64), reason: 'fixture-confirmation-failed',
+            diagnostic: { path: join(f.paths.root, 'shell') }, shell: session.shell.snapshot(), recovery: 'fresh-known-only-plan-required' as const };
+        } } };
+      } };
+    });
+    expect(result).toMatchObject({ status: 'unknown', phase: 'wrappers', errorSha256: 'b'.repeat(64),
+      reason: 'fixture-confirmation-failed', diagnostic: { path: join(f.paths.root, 'shell') },
+      shell: { recovery: 'fresh-known-only-plan-required' }, recovery: { requiresFreshEvidence: true } });
   });
   it('connects all phases, closes the owning guard, and independently reads installed state', { timeout: 120000 }, async () => {
     const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables()), events: { sequence: number; phase: string; event: string }[] = [];

@@ -5,6 +5,7 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 ## [Unreleased]
 
 ### Fixed
+- Preserve global migration failure details and report recovery binding paths and differing identity attributes.
 - Include the absolute protected file path in migration diagnostics when the file changes during a snapshot read.
 
 ## [0.21.13] — 2026-10-30

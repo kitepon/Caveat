@@ -65,9 +65,9 @@ export function prepareGlobalShellInstallation(guard: Guard, journal: Journal, e
         if (!readOnly) {
           row.status = 'unknown';
           const check = 'verify.' + step; journal.intent(check, operation, sha(snapshot()));
-          record(check, operation, 'unknown', { verificationFailed: true }, errorSha(error));
+          record(check, operation, 'unknown', { verificationFailed: true, reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown })?.diagnostic ?? null }, errorSha(error));
         }
-        return { status: readOnly ? 'stopped' as const : 'unknown' as const, resultRecorded: true, errorSha256: errorSha(error), shell: snapshot(), recovery: 'fresh-known-only-plan-required' as const };
+        return { status: readOnly ? 'stopped' as const : 'unknown' as const, resultRecorded: true, errorSha256: errorSha(error), reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown })?.diagnostic ?? null, shell: snapshot(), recovery: 'fresh-known-only-plan-required' as const };
       }
     }
     return { status: outcome, shell: snapshot() };
