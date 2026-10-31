@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { basename, dirname, join } from 'node:path';
-import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths, globalRecoveryKeys, shaGlobalRecoveryValue,
-  assertGlobalRecoveryBinding, withGlobalMigrationEvidence, withGlobalRecoverySnapshot, type GlobalMigrationEvidence, type GlobalRecoverySnapshot } from './managedGlobalRecovery.js';
+import { bindGlobalRecoveryProtected, bindRecoveryAdmission, globalRecoveryRows, globalRecoveryGuardPaths, globalRecoveryKeys, shaGlobalRecoveryValue,
+  assertGlobalRecoveryBinding, withGlobalMigrationEvidence, withGlobalRecoverySnapshot, type GlobalMigrationEvidence, type GlobalRecoverySnapshot, type RecoveryAdmission } from './managedGlobalRecovery.js';
 import { withGlobalRecoveryAttemptEvidence } from './managedGlobalRecoveryAttempt.js';
 import { recoveryLocations, recoveryModelFromMigration, recoveryVacancySlots, validateRecoveryJournalState, type RecoveryModel } from './managedGlobalRecoveryModel.js';
 import { openGlobalPathGuard, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
@@ -35,18 +35,33 @@ async function withRecoveryChain<T>(runDirectory: string, planSha256: string, us
       assert.equal(chain.origin.plan.root, dirname(runDirectory), 'global_recovery_chain_outside_root');
       assert.equal(attempt.source.journalSha256, chain.journalSha256, 'global_recovery_chain_source_journal_changed');
       const isMigration = basename(parent).startsWith('global-migration-');
+      const fresh = attempt.source.admission as RecoveryAdmission | null;
+      let sourceDigest = attempt.source.evidenceSha256, sourceAdmission = attempt.source.admission;
+      if (fresh?.schema === 'caveat.global_recovery_admission.v2') {
+        globalRecoveryKeys(fresh, ['schema', 'source', 'sourceEvidenceSha256', 'protection']);
+        assert.equal(shaGlobalRecoveryValue(fresh), sourceDigest, 'global_recovery_chain_admission_digest_changed');
+        assert.match(fresh.sourceEvidenceSha256, /^[a-f0-9]{64}$/);
+        globalRecoveryKeys(fresh.protection, ['objects', 'otherGlobals']);
+        assert.deepEqual(fresh.protection.objects.map(row => row.path), chain.origin.plan.protectedObjects.map(row => row.path), 'global_recovery_protected_scope_changed');
+        for (const row of fresh.protection.objects) globalRecoveryRows(row.rows);
+        globalRecoveryKeys(fresh.protection.otherGlobals, ['schema', 'sha256', 'packages']);
+        assert.equal(fresh.protection.otherGlobals.schema, 'caveat.other_globals_digest.v1');
+        assert.match(fresh.protection.otherGlobals.sha256, /^[a-f0-9]{64}$/);
+        assert.ok(Array.isArray(fresh.protection.otherGlobals.packages) && fresh.protection.otherGlobals.packages.length <= 100000, 'global_recovery_other_globals_bound');
+        sourceDigest = fresh.sourceEvidenceSha256; sourceAdmission = fresh.source;
+      }
       if (isMigration) {
-        assert.equal(attempt.source.evidenceSha256, chain.evidenceSha256, 'global_recovery_chain_source_changed');
-        assert.ok(attempt.source.schema === 'caveat.global_recovery_source.v1' || attempt.source.admission === null, 'global_recovery_chain_migration_admission_invalid');
+        assert.equal(sourceDigest, chain.evidenceSha256, 'global_recovery_chain_source_changed');
+        assert.ok(attempt.source.schema === 'caveat.global_recovery_source.v1' || sourceAdmission === null, 'global_recovery_chain_migration_admission_invalid');
       } else {
         assert.equal(attempt.source.schema, 'caveat.global_recovery_source.v2', 'global_recovery_chain_admission_required');
-        const admission = attempt.source.admission as Admission;
+        const admission = sourceAdmission as Admission;
         globalRecoveryKeys(admission, ['schema', 'planSha256', 'sourceRun', 'sourceDataSha256', 'state', 'directories']);
         assert.ok(admission.schema === 'caveat.global_recovery_admission.v1' && admission.planSha256 === planSha256
           && admission.sourceRun === basename(parent) && admission.sourceDataSha256 === shaGlobalRecoveryValue(orderedReferences(chain.references)), 'global_recovery_chain_admission_unbound');
         assert.deepEqual(admission.state, chain.model, 'global_recovery_chain_admission_state_changed');
         assert.ok(Array.isArray(admission.directories) && admission.directories.length > 0 && admission.directories.length <= 512, 'global_recovery_chain_directory_bound');
-        assert.equal(shaGlobalRecoveryValue(admission), attempt.source.evidenceSha256, 'global_recovery_chain_admission_digest_changed');
+        assert.equal(shaGlobalRecoveryValue(admission), sourceDigest, 'global_recovery_chain_admission_digest_changed');
       }
       const model = structuredClone(chain.model); model.sourceEvidenceSha256 = attempt.source.evidenceSha256;
       validateRecoveryJournalState(model, attempt.journal, attempt.states, chain.origin, runDirectory);
@@ -95,8 +110,9 @@ export function withGlobalRecoverySourceSnapshot<T>(runDirectory: string, planSh
       const generated = model.generated.map((row, index) => ({ name: row.name, backupName: row.name === 'shell' ? 'generated-shell' : 'generated-' + index,
         status: row.status as 'absent' | 'installed' | 'quarantined', rows: row.entry ? structuredClone(row.entry.rows) : null }));
       const shell: NonNullable<GlobalRecoverySnapshot['shell']> = { schema: 'caveat.global_shell_objects.v1', files: generated.slice(0, -1), manifest: generated.at(-1)! };
-      return await use({ plan, original, shell, guard, bindings, evidenceSha256: shaGlobalRecoveryValue(admission), journalSha256: chain.journalSha256,
-        verifyEvidence: chain.verifyEvidence, verifyProtected: protectedState.verify, admission, sourceRoots: chain.roots, vacancySlots: slots });
+      const freshAdmission = bindRecoveryAdmission(admission, shaGlobalRecoveryValue(admission), protectedState.snapshot);
+      return await use({ plan, original, shell, guard, bindings, evidenceSha256: shaGlobalRecoveryValue(freshAdmission), protection: protectedState.snapshot, journalSha256: chain.journalSha256,
+        verifyEvidence: chain.verifyEvidence, verifyProtected: protectedState.verify, admission: freshAdmission, sourceRoots: chain.roots, vacancySlots: slots });
     } finally { guard.close(); }
   });
 }
@@ -116,8 +132,19 @@ export function planGlobalRecovery(runDirectory: string, planSha256: string, emi
   return planGlobalRecoveryWithCollector(runDirectory, planSha256, nativeGlobalProcessTables, emit);
 }
 export async function planGlobalRecoveryWithCollector(runDirectory: string, planSha256: string, collect: typeof nativeGlobalProcessTables, emit: (event: ProcessProbeEvent) => void = () => {}) {
+  let diagnosticPlan: GlobalRecoverySnapshot['plan'] | undefined;
+  const diagnose = async () => {
+    if (!diagnosticPlan) return null;
+    const plan = diagnosticPlan;
+    try { return await preflightGlobalProcesses({ packageRoot: join(plan.globalRoot, 'caveat-cli'), npmRoot: dirname(dirname(plan.baseline.npm.executable)),
+      binAliases: plan.leaves.map(row => join(plan.binDirectory, row.name)), protectedPaths: plan.protectedObjects.map(row => row.path) }, emit, collect); }
+    catch (error) { return { status: 'stopped' as const, reason: 'global_recovery_process_observation_failed',
+      errorSha256: shaGlobalRecoveryValue(error instanceof Error ? error.name + ':' + error.message : String(error)) }; }
+  };
   try {
     assert.match(planSha256, /^[a-f0-9]{64}$/);
+    if (basename(runDirectory).startsWith('global-migration-')) await withGlobalMigrationEvidence(runDirectory, planSha256, async source => { diagnosticPlan = source.plan; });
+    else await withRecoveryChain(runDirectory, planSha256, async chain => { diagnosticPlan = chain.origin.plan; });
     const result = await withGlobalRecoverySourceSnapshot(runDirectory, planSha256, async source => {
       const target = join(source.plan.root, 'global-recovery-' + source.evidenceSha256.slice(0, 32));
       const verify = () => { source.verifyEvidence(); source.verifyProtected(); source.guard.assertCurrent();
@@ -139,11 +166,14 @@ export async function planGlobalRecoveryWithCollector(runDirectory: string, plan
       reason: 'global_recovery_current_state_unconfirmed', diagnostic: { ...result.diagnostic, inspectionReason: result.reason,
         observations: result.observations.filter(row => row.state === 'changed' || row.state === 'unknown').slice(0, 16) },
       observations: result.observations, proposal: result.proposal, currentObjects: 'not-confirmed' as const, executionPermission: false as const,
-      filesystemWrites: 0, existingProcessOperations: 0, processAssessment: null };
+      filesystemWrites: 0, existingProcessOperations: 0, processAssessment: await diagnose() };
     assert.equal(result.schema, 'caveat.global_recovery_plan.v1', 'global_recovery_plan_source_unconfirmed'); return result;
-  } catch (error) { return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
+  } catch (error) {
+    let assessment = (error as { preflight?: unknown })?.preflight ?? null;
+    if (!assessment) try { assessment = await diagnose(); } catch { /* Invalid or unreadable scopes cannot authorize a probe. */ }
+    return { schema: 'caveat.global_recovery_plan.v1' as const, status: 'stopped' as const,
     reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown })?.diagnostic ?? null,
-    processAssessment: (error as { preflight?: unknown })?.preflight ?? null,
+    processAssessment: assessment,
     errorSha256: shaGlobalRecoveryValue(error instanceof Error ? error.name + ':' + error.message : String(error)),
     currentObjects: 'not-confirmed' as const, executionPermission: false as const, filesystemWrites: 0, existingProcessOperations: 0 }; }
 }

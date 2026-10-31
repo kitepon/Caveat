@@ -1,0 +1,459 @@
+{
+  "schema": "caveat.global_recovery_plan.v1",
+  "status": "stopped",
+  "reason": "global_recovery_current_state_unconfirmed",
+  "diagnostic": {
+    "journal": {
+      "status": "unknown",
+      "lastEvent": {
+        "sequence": 16,
+        "previousSha256": "e74b0f700106c2b99c77ae6cc769f12cb3a44d82b11704eeda7fa6f67f76c990",
+        "kind": "result",
+        "step": "verify.publish.generated.shell",
+        "operation": "manifest",
+        "outcome": "unknown",
+        "stateSha256": "8fe31bfd0f66d82858333f68a296e2199bc1f1a21f2280bd0dc1277635f22c25",
+        "reason": null,
+        "diagnostic": null,
+        "errorSha256": "503a1c821364079698515d351f637b3147153fb41fd8ff9b38c9950250ebc40b"
+      }
+    },
+    "inspectionReason": "current_state_unconfirmed",
+    "observations": [
+      {
+        "step": "protected.0",
+        "state": "unknown",
+        "reason": "global_recovery_binding_changed",
+        "diagnostic": {
+          "directory": "<profile>/.caveat-deploy/managed-v1",
+          "name": "active.json",
+          "path": "<profile>/.caveat-deploy/managed-v1/active.json",
+          "records": [
+            {
+              "relativePath": "",
+              "attributes": [
+                "ino",
+                "mtime",
+                "ctime",
+                "contentSha256"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "step": "protected.2",
+        "state": "unknown",
+        "reason": "global_recovery_binding_changed",
+        "diagnostic": {
+          "directory": "<profile>",
+          "name": ".claude.json",
+          "path": "<profile>/.claude.json",
+          "records": [
+            {
+              "relativePath": "",
+              "attributes": [
+                "ino",
+                "size",
+                "mtime",
+                "ctime",
+                "contentSha256"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "step": "protected.4",
+        "state": "unknown",
+        "reason": "global_recovery_binding_changed",
+        "diagnostic": {
+          "directory": "<profile>/.codex",
+          "name": "config.toml",
+          "path": "<profile>/.codex/config.toml",
+          "records": [
+            {
+              "relativePath": "",
+              "attributes": [
+                "ino",
+                "mtime",
+                "ctime",
+                "contentSha256"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "step": "protected.6",
+        "state": "unknown",
+        "reason": "global_recovery_binding_changed",
+        "diagnostic": {
+          "directory": "<profile>/.grok",
+          "name": "config.toml",
+          "path": "<profile>/.grok/config.toml",
+          "records": [
+            {
+              "relativePath": "",
+              "attributes": [
+                "ino",
+                "mtime",
+                "ctime"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "step": "protected.7",
+        "state": "unknown",
+        "reason": "global_recovery_binding_changed",
+        "diagnostic": {
+          "directory": "<profile>/.cursor",
+          "name": "mcp.json",
+          "path": "<profile>/.cursor/mcp.json",
+          "records": [
+            {
+              "relativePath": "",
+              "attributes": [
+                "ino",
+                "mtime",
+                "ctime"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "step": "other-globals",
+        "state": "unknown",
+        "records": [
+          {
+            "package": "aiterm-mcp",
+            "reason": "other_global_changed"
+          },
+          {
+            "package": "aiterm-steer-delivery",
+            "reason": "other_global_changed"
+          }
+        ]
+      }
+    ]
+  },
+  "observations": [
+    {
+      "step": "original.package",
+      "state": "known"
+    },
+    {
+      "step": "working.package",
+      "state": "absent"
+    },
+    {
+      "step": "original.caveat",
+      "state": "known"
+    },
+    {
+      "step": "generated.caveat",
+      "state": "known"
+    },
+    {
+      "step": "generated.shell",
+      "state": "known"
+    },
+    {
+      "step": "protected.0",
+      "state": "unknown",
+      "reason": "global_recovery_binding_changed",
+      "diagnostic": {
+        "directory": "<profile>/.caveat-deploy/managed-v1",
+        "name": "active.json",
+        "path": "<profile>/.caveat-deploy/managed-v1/active.json",
+        "records": [
+          {
+            "relativePath": "",
+            "attributes": [
+              "ino",
+              "mtime",
+              "ctime",
+              "contentSha256"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "protected.1",
+      "state": "known"
+    },
+    {
+      "step": "protected.2",
+      "state": "unknown",
+      "reason": "global_recovery_binding_changed",
+      "diagnostic": {
+        "directory": "<profile>",
+        "name": ".claude.json",
+        "path": "<profile>/.claude.json",
+        "records": [
+          {
+            "relativePath": "",
+            "attributes": [
+              "ino",
+              "size",
+              "mtime",
+              "ctime",
+              "contentSha256"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "protected.3",
+      "state": "known"
+    },
+    {
+      "step": "protected.4",
+      "state": "unknown",
+      "reason": "global_recovery_binding_changed",
+      "diagnostic": {
+        "directory": "<profile>/.codex",
+        "name": "config.toml",
+        "path": "<profile>/.codex/config.toml",
+        "records": [
+          {
+            "relativePath": "",
+            "attributes": [
+              "ino",
+              "mtime",
+              "ctime",
+              "contentSha256"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "protected.5",
+      "state": "known"
+    },
+    {
+      "step": "protected.6",
+      "state": "unknown",
+      "reason": "global_recovery_binding_changed",
+      "diagnostic": {
+        "directory": "<profile>/.grok",
+        "name": "config.toml",
+        "path": "<profile>/.grok/config.toml",
+        "records": [
+          {
+            "relativePath": "",
+            "attributes": [
+              "ino",
+              "mtime",
+              "ctime"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "protected.7",
+      "state": "unknown",
+      "reason": "global_recovery_binding_changed",
+      "diagnostic": {
+        "directory": "<profile>/.cursor",
+        "name": "mcp.json",
+        "path": "<profile>/.cursor/mcp.json",
+        "records": [
+          {
+            "relativePath": "",
+            "attributes": [
+              "ino",
+              "mtime",
+              "ctime"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "protected.8",
+      "state": "known"
+    },
+    {
+      "step": "protected.9",
+      "state": "known"
+    },
+    {
+      "step": "protected.10",
+      "state": "known"
+    },
+    {
+      "step": "protected.11",
+      "state": "known"
+    },
+    {
+      "step": "absent-management",
+      "state": "absent"
+    },
+    {
+      "step": "directory.0",
+      "state": "known"
+    },
+    {
+      "step": "directory.1",
+      "state": "known"
+    },
+    {
+      "step": "directory.2",
+      "state": "known"
+    },
+    {
+      "step": "directory.3",
+      "state": "known"
+    },
+    {
+      "step": "directory.4",
+      "state": "known"
+    },
+    {
+      "step": "directory.5",
+      "state": "known"
+    },
+    {
+      "step": "directory.6",
+      "state": "known"
+    },
+    {
+      "step": "directory.7",
+      "state": "known"
+    },
+    {
+      "step": "directory.8",
+      "state": "known"
+    },
+    {
+      "step": "directory.9",
+      "state": "known"
+    },
+    {
+      "step": "directory.10",
+      "state": "known"
+    },
+    {
+      "step": "directory.11",
+      "state": "known"
+    },
+    {
+      "step": "directory.12",
+      "state": "known"
+    },
+    {
+      "step": "directory.13",
+      "state": "known"
+    },
+    {
+      "step": "directory.14",
+      "state": "known"
+    },
+    {
+      "step": "directory.15",
+      "state": "known"
+    },
+    {
+      "step": "directory.16",
+      "state": "known"
+    },
+    {
+      "step": "alias.0",
+      "state": "known"
+    },
+    {
+      "step": "alias.1",
+      "state": "known"
+    },
+    {
+      "step": "alias.2",
+      "state": "known"
+    },
+    {
+      "step": "alias.3",
+      "state": "known"
+    },
+    {
+      "step": "alias.4",
+      "state": "known"
+    },
+    {
+      "step": "alias.6",
+      "state": "known"
+    },
+    {
+      "step": "alias.7",
+      "state": "known"
+    },
+    {
+      "step": "alias.8",
+      "state": "known"
+    },
+    {
+      "step": "alias.9",
+      "state": "known"
+    },
+    {
+      "step": "alias.10",
+      "state": "known"
+    },
+    {
+      "step": "alias.11",
+      "state": "known"
+    },
+    {
+      "step": "alias.12",
+      "state": "known"
+    },
+    {
+      "step": "alias.13",
+      "state": "known"
+    },
+    {
+      "step": "alias.14",
+      "state": "known"
+    },
+    {
+      "step": "npm",
+      "state": "known"
+    },
+    {
+      "step": "other-globals",
+      "state": "unknown",
+      "records": [
+        {
+          "package": "aiterm-mcp",
+          "reason": "other_global_changed"
+        },
+        {
+          "package": "aiterm-steer-delivery",
+          "reason": "other_global_changed"
+        }
+      ]
+    }
+  ],
+  "proposal": {
+    "kind": "rollback-known",
+    "automaticExecution": false,
+    "objects": [
+      "original.package",
+      "original.caveat",
+      "generated.caveat",
+      "generated.shell"
+    ]
+  },
+  "currentObjects": "not-confirmed",
+  "executionPermission": false,
+  "filesystemWrites": 0,
+  "existingProcessOperations": 0,
+  "processAssessment": null,
+  "sequence": 2
+}

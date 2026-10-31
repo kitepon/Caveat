@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { basename, join } from 'node:path';
+import { basename, join, dirname, relative, isAbsolute } from 'node:path';
 import { bindGlobalRecoveryProtected, globalRecoveryGuardPaths } from './managedGlobalRecovery.js';
 import { openGlobalPathGuard, type GlobalGuardTree, type GlobalGuardTreeRow } from './managedGlobalGuard.js';
 import { createGlobalMutationJournal, type GlobalJournalOperation } from './managedGlobalJournal.js';
@@ -58,6 +58,15 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
       for (const row of generated) slot(runDirectory, 'used-' + row.backupName);
       for (const row of source.vacancySlots ?? []) slot(row.directory, row.name);
       const entries = () => [...objects.flatMap(row => [row.original, ...(row.workingEntry ? [row.workingEntry] : [])]), ...generated.flatMap(row => row.entry ? [row.entry] : [])];
+      const protectedPaths = [...plan.protectedObjects.map(row => join(guard.canonicalDirectory(dirname(row.path)), basename(row.path))),
+        ...(source.protection?.otherGlobals.packages ?? []).map(row => join(guard.canonicalDirectory(plan.globalRoot), row.name))];
+      const contains = (a: string, b: string) => { const path = relative(a, b); return path === '' || (!isAbsolute(path) && path !== '..' && !path.startsWith('..' + (process.platform === 'win32' ? '\\' : '/'))); };
+      for (const place of slots.values()) {
+        const path = join(guard.canonicalDirectory(place.directory), place.name);
+        assert.ok(protectedPaths.every(protectedPath => !contains(path, protectedPath) && !contains(protectedPath, path)), 'global_recovery_protected_mutation_scope');
+      }
+      const protectedIdentities = new Set(source.protection?.objects.flatMap(row => row.rows.map(value => value.identity.dev + ':' + value.identity.ino)) ?? []);
+      for (const entry of entries()) assert.ok(entry.rows.every(row => !protectedIdentities.has(row.identity.dev + ':' + row.identity.ino)), 'global_recovery_protected_mutation_identity');
       const verifyObjects = () => {
         const occupied = new Set<string>();
         for (const known of entries()) {
@@ -135,7 +144,7 @@ export async function recoverGlobalMigration(runDirectory: string, planSha256: s
         try {
           const directories = reader.directoryBindings();
           for (const binding of directoryBindings) assert.deepEqual(directories.find(row => row.path === binding.path), binding, 'global_recovery_readback_directory_changed');
-          const protectedState = bindGlobalRecoveryProtected(plan, reader); protectedState.verify(); source.verifyEvidence();
+          const protectedState = bindGlobalRecoveryProtected(plan, reader, source.protection); protectedState.verify(); source.verifyEvidence();
           const held = finalEntries.map(known => ({ known, tree: reader.retainTree(known.directory, known.name) }));
           const occupied = new Set(finalEntries.map(row => join(row.directory, row.name)));
           for (const [path, place] of slots) if (!occupied.has(path)) assert.equal(reader.observe(place.directory, place.name), null, 'global_recovery_readback_unknown_name');

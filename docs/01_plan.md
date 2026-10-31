@@ -769,6 +769,19 @@ file identities and reported with their process PID, birth and parent app, inclu
 global migration. Unreadable handles and writers that close or replace files between
 observations remain residual risks. Windows retains its write/delete exclusion;
 open-handle writer attribution is unavailable there.
+Recovery protects client configuration, the active deployment and unrelated globals
+by capturing their current native identities at inspection, rather than requiring
+that they still match the original migration's historical values. These objects
+are never recovery mutation targets. A versioned admission binds this fresh
+protection snapshot into the evidence digest; changes after planning require a new
+read-only plan. Execution rechecks the same snapshot before and between mutations,
+and independent post-close readback compares against that snapshot too. Original,
+working, quarantined and generated Caveat objects retain their journal bindings.
+Existing recovery source formats remain readable without rewriting old evidence.
+Stopped plans collect bounded consumer/writer observations when their validated
+source provides a trusted process scope, preserving both the original inspection
+reason and process assessment. Invalid source evidence cannot supply a probe scope.
+
 The digest binds every source reference, derived state and fresh parent bindings;
 current objects, absences, aliases, protected state and native process/writer gates
 are rechecked independently at execution. Each attempt uses a new private journal.
