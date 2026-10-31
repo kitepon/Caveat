@@ -2,7 +2,7 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.21.14] — 2026-11-01
 
 ### Fixed
 - Request background sync for each successful MCP record or update, including writes made immediately after the previous cycle completed.
