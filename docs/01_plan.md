@@ -748,13 +748,27 @@ Confirmed partial recovery journals may be planned with `deployment global-recov
 execution permission. A successful result supplies a full evidence digest for a
 separate `global-recover` invocation. The source chain is limited to eight runs,
 256 referenced files and 64 MiB in total; every run must have its exact canonical
-private directory. Pending, torn or unknown intents anywhere in the chain stop
+private directory. Pending, torn or unknown mutation intents anywhere in the chain stop
 before a new journal is created. Source plan/seed and confirmed transitions derive
 all allowed names and current object locations. A saved path is never authority.
 New migration plans also bind the full native original trees before mutation;
 original seed rows must match that reviewed identity/content/security exactly.
 Legacy evidence remains readable, but a recovery chain without this native plan
 anchor is explicitly refused rather than upgrading its trust from journal hashes.
+An unknown read-only verification immediately after a confirmed generated publication
+can be freshly assessed. Its original manifest and generated rows must match the
+preceding confirmed state exactly, apart from the status invalidated by verification.
+Fresh native object, protected-file, lock, evidence and consumer/writer checks must
+all pass before a separate rollback attempt is eligible. The failed action is never
+replayed and the old journal remains unchanged. Other interrupted runs report fresh
+known/unknown objects and a known-only proposal without authorizing execution; missing
+state evidence does not grant permission. Plans retain the last journal event and
+its available failure reason/diagnostic instead of replacing it with a schema error.
+On macOS and Linux, readable writable file descriptors are matched to protected
+file identities and reported with their process PID, birth and parent app, including
+global migration. Unreadable handles and writers that close or replace files between
+observations remain residual risks. Windows retains its write/delete exclusion;
+open-handle writer attribution is unavailable there.
 The digest binds every source reference, derived state and fresh parent bindings;
 current objects, absences, aliases, protected state and native process/writer gates
 are rechecked independently at execution. Each attempt uses a new private journal.
