@@ -12,6 +12,8 @@ export type MacArgumentFailure = { stage: 'size' | 'size-bound' | 'read' | 'read
 export type MacTextObservation = { status: 'read' | 'unreadable'; identities: { dev: string; ino: string }[]; stage: string; nativeCode: number | null };
 export type NativeProcessRecord = {
   pid: number; ppid: number | null; birth: string | null; uid: number | string | null;
+  openWriters?: { dev: string; ino: string }[] | null;
+  openWritersUnverified?: true;
   claudeConfig?: ClaudeConfigIdentity | null; executable: ProcessExecutable | null; argv: string[] | null; state?: string; confirmedExited?: 'darwin-kinfo-empty-getpgid-esrch';
   ownerProof?: 'darwin-kinfo-proc'; imageIdentityBound?: true; text?: MacTextObservation; argumentFailure?: MacArgumentFailure; ownerFailure?: { stage: string; nativeCode: number | null }; ownerMethod?: { stage: string; returnValue: number | null }; kernelFailure?: { stage: string; nativeCode: number | null }; windowsFields?: { executable: 'present' | 'null' | 'unverified'; arguments: 'present' | 'null' | 'unverified' }; imageBinding?: 'kernel-path' | 'kernel-and-text'; kernel?: 'linux-pf-kthread' | 'darwin-kernel-task' | 'windows-kernel-process'; reason?: string;
 };
@@ -22,13 +24,17 @@ export type NativeProcessTables = {
 export type ProcessProbeEvent = { phase: string; event: 'issued' | 'started' | 'completed' | 'stopped'; pid?: number };
 export type ProcessProbeRun = (command: string, args: string[], phase: string, deadline: number) => Promise<{ stdout: string; pid: number }>;
 
-export function nativeGlobalProcessTables(onEvent: (event: ProcessProbeEvent) => void = () => {}): Promise<NativeProcessTables> {
+export function nativeGlobalProcessTables(onEvent: (event: ProcessProbeEvent) => void = () => {}, protectedPaths: string[] = []): Promise<NativeProcessTables> {
+  const protectedFiles = protectedPaths.flatMap(path => {
+    const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
+    return stat?.isFile() ? [{ dev: String(stat.dev), ino: String(stat.ino) }] : [];
+  });
   return collectNativeGlobalProcesses({
     linux: async () => {
       assert.equal(readlinkSync('/proc/self'), String(process.pid), 'process_procfs_namespace_unbound');
-      return readLinuxProcessTables();
+      return readLinuxProcessTables('/proc', protectedFiles);
     },
-    darwin: () => readMacProcessTables(ownedProcessProbe(onEvent)),
+    darwin: () => readMacProcessTables(ownedProcessProbe(onEvent), undefined, protectedFiles),
     win32: command => readWindowsProcessTables(command, ownedProcessProbe(onEvent)),
   });
 }
@@ -147,7 +153,7 @@ export function parseLinuxProcessStat(text: string) {
   return { pid, ppid, birth, state: fields[0]!, ...(BigInt(fields[6]!) & 0x00200000n ? { kernel: 'linux-pf-kthread' as const } : {}) };
 }
 
-function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
+function linuxRecord(procRoot: string, pid: number, protectedFiles: { dev: string; ino: string }[], deadline: number): NativeProcessRecord {
   const root = join(procRoot, String(pid));
   let row: NativeProcessRecord = { pid, ppid: null, birth: null, uid: null, executable: null, argv: null };
   try {
@@ -177,6 +183,29 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
       }
       if (row.argv) assert.deepEqual(command(), row.argv, 'process_arguments_changed');
       if (row.executable) assert.deepEqual(exe(), row.executable, 'process_executable_changed');
+      if (protectedFiles.length && row.uid === process.geteuid?.()) {
+        try {
+          const fds = readdirSync(join(root, 'fd')); assert.ok(fds.length <= 100000, 'process_fd_bound');
+          row.openWriters = [];
+          const metadata = (fd: string) => {
+            const text = bounded(join(root, 'fdinfo', fd), 65536).toString('utf8');
+            const flags = text.match(/^flags:\s+([0-7]+)$/m), ino = text.match(/^ino:\s+([0-9]+)$/m);
+            assert.ok(flags && ino, 'process_fd_flags_unavailable'); return { flags: BigInt('0o' + flags[1]), ino: ino[1]! };
+          };
+          for (const fd of fds) {
+            assert.ok(Date.now() <= deadline, 'process_probe_deadline'); assert.match(fd, /^\d+$/);
+            const before = metadata(fd); if ((before.flags & 3n) === 0n) continue;
+            const file = join(root, 'fd', fd), stat = statSync(file, { bigint: true });
+            if (stat.isFile() && protectedFiles.some(value => value.dev === String(stat.dev) && value.ino === String(stat.ino))) {
+              assert.equal(before.ino, String(stat.ino), 'process_fd_identity_changed');
+              assert.deepEqual(metadata(fd), before, 'process_fd_flags_changed');
+              const after = statSync(file, { bigint: true });
+              assert.deepEqual([after.dev, after.ino], [stat.dev, stat.ino], 'process_fd_identity_changed');
+              row.openWriters.push({ dev: String(stat.dev), ino: String(stat.ino) });
+            }
+          }
+        } catch { row.openWritersUnverified = true; }
+      }
     }
     const last = parseLinuxProcessStat(bounded(join(root, 'stat'), 65536).toString('utf8'));
     assert.deepEqual({ ...last, state: first.state }, first, 'process_identity_changed');
@@ -186,7 +215,7 @@ function linuxRecord(procRoot: string, pid: number): NativeProcessRecord {
   }
 }
 
-export function readLinuxProcessTables(procRoot = '/proc'): NativeProcessTables {
+export function readLinuxProcessTables(procRoot = '/proc', protectedFiles: { dev: string; ino: string }[] = []): NativeProcessTables {
   const deadline = Date.now() + 20000;
   const readTable = () => {
     const pids = readdirSync(procRoot).filter(name => /^\d+$/.test(name)).map(Number).sort((a, b) => a - b);
@@ -194,7 +223,7 @@ export function readLinuxProcessTables(procRoot = '/proc'): NativeProcessTables 
     let total = 0;
     return pids.map(pid => {
       assert.ok(Date.now() <= deadline, 'process_probe_deadline');
-      const row = linuxRecord(procRoot, pid);
+      const row = linuxRecord(procRoot, pid, protectedFiles, deadline);
       total += Buffer.byteLength(JSON.stringify(row));
       assert.ok(total <= 16 * 1024 * 1024, 'process_table_byte_bound');
       return row;
@@ -260,8 +289,8 @@ export function parseMacTextImages(text: string) {
   flush(); return rows;
 }
 
-export async function readMacProcessTables(_run: ProcessProbeRun, kernelTable?: (deadline: number) => NativeProcessRecord[]): Promise<NativeProcessTables> {
-  const readTable = kernelTable ?? (await createMacKernelReader()).readTable;
+export async function readMacProcessTables(_run: ProcessProbeRun, kernelTable?: (deadline: number) => NativeProcessRecord[], protectedFiles: { dev: string; ino: string }[] = []): Promise<NativeProcessTables> {
+  const readTable = kernelTable ?? (await createMacKernelReader(protectedFiles)).readTable;
   const deadline = Date.now() + 20000;
   return { before: readTable(deadline), after: readTable(deadline), errors: [],
     selfPid: process.pid, selfExecutable: executable(realpathSync(process.execPath)), caseInsensitive: false };
