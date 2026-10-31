@@ -2,7 +2,7 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.21.15] — 2026-11-01
 
 ### Fixed
 - Bind recovery protection to a fresh inspection and carry that snapshot through execution and readback, while preserving journal bindings for Caveat-owned objects.
