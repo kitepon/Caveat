@@ -21,6 +21,24 @@ const FIXTURE_OVERHEAD_MS = 10_000;
 const HOOK_E2E_TIMEOUT_MS = 2 * HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
 const RUNTIME_ERROR_E2E_TIMEOUT_MS = RUNTIME_ERROR_CHILD_TIMEOUT_MS + HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
 
+it('passes write request times through the shipped autosync worker and rejects malformed arguments', { timeout: 3 * HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'caveat-write-worker-')); const userHome = join(root, 'home'); const caveatHome = join(root, 'caveat');
+  mkdirSync(userHome);
+  const env = { ...process.env, HOME: userHome, USERPROFILE: userHome, CAVEAT_HOME: caveatHome, CAVEAT_AUTO_SYNC: 'on', TMPDIR: root, TEMP: root, TMP: root };
+  const worker = (arg: string) => spawnSync(process.execPath, [fileURLToPath(new URL('../dist/caveat.js', import.meta.url)), 'hook', 'autosync', arg], { cwd: root, env, encoding: 'utf8', timeout: HOOK_CHILD_TIMEOUT_MS });
+  try {
+    const requestedAt = Date.now() - 1_000;
+    expect(worker(String(requestedAt)).status).toBe(0);
+    const state = join(caveatHome, 'sync', '.last-autosync.json'); const bytes = readFileSync(state, 'utf8');
+    expect(Date.parse(JSON.parse(bytes).startedAt)).toBeGreaterThan(requestedAt);
+    expect(worker(String(requestedAt)).status).toBe(0);
+    expect(readFileSync(state, 'utf8')).toBe(bytes);
+    const invalid = worker('NaN'); expect(invalid.status).toBe(0);
+    expect(invalid.stderr).toContain('[caveat:hook] invalid autosync write request time');
+    expect(readFileSync(state, 'utf8')).toBe(bytes);
+  } finally { rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
 function runHook(
   name: string,
   input: Record<string, unknown>,

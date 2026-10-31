@@ -6,8 +6,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openDb } from '../src/db.js';
 import { readPeriodicSyncState, runPeriodicSync } from '../src/periodicSync.js';
-import { syncOwn } from '../src/sync.js';
+import { syncOwn, SyncError } from '../src/sync.js';
 import { acquireFileLock, releaseFileLock } from '../src/autoReindex.js';
+import { AUTO_SYNC_WRITE_LOCK_WAIT_MS, runAutoSync, writeAutoSyncState } from '../src/autoSync.js';
+import { updateEntry } from '../src/update.js';
+
+vi.mock('../src/sync.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/sync.js')>();
+  return { ...actual, syncOwn: vi.fn(actual.syncOwn) };
+});
 
 const silent = { info: () => {}, warn: () => {}, error: () => {} };
 const denied = async () => ({ kind: 'denied' as const, status: 404 });
@@ -79,6 +86,101 @@ describe('periodic reception with isolated Git and SQLite', { timeout: 60_000 },
         .rejects.toMatchObject({ code: 'SYNC_BUSY' });
     } finally { release(); await first; }
     expect((await runPeriodicSync(f.opts)).status).toBe('success');
+  });
+
+  it('syncs an update made during a cycle and coalesces waiting write workers', async () => {
+    const f = fixture(); const actual = await vi.importActual<typeof import('../src/sync.js')>('../src/sync.js');
+    let release!: () => void; let entered!: () => void; let clock = 1_000; let probes = 0;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const pushed = new Promise<void>(resolve => { entered = resolve; });
+    vi.mocked(syncOwn).mockImplementationOnce(async opts => {
+      const result = await actual.syncOwn(opts); entered(); await gate; return result;
+    });
+    const opts = { ...f.opts, now: () => new Date(clock), probeImpl: async () => { probes++; return denied(); } };
+    const first = runAutoSync(opts); const pending: Array<ReturnType<typeof runAutoSync>> = [];
+    try {
+      await pushed;
+      const db = openDb({ path: f.opts.paths.dbPath, logger: silent });
+      try { updateEntry('periodic-entry', { sections: { Symptom: 'updated while the first cycle holds its locks' } }, { db, entriesRoot: f.opts.paths.entriesDir }); }
+      finally { db.close(); }
+      expect(git(f.ownDir, 'status', '--porcelain')).not.toBe('');
+      clock = 2_000;
+      pending.push(runAutoSync({ ...opts, writeRequestedAt: 1_500 }), runAutoSync({ ...opts, writeRequestedAt: 1_500 }));
+      release();
+      const results = await Promise.all(pending);
+      expect((await first).outcome?.own.disposition).toBe('success');
+      expect(results.filter(result => result.ran)).toHaveLength(1);
+      expect(results.filter(result => result.skipReason === 'write_already_synced')).toHaveLength(1);
+      expect(probes).toBe(2);
+      expect(git(f.ownDir, 'status', '--porcelain')).toBe('');
+      expect(git(f.bare, 'rev-parse', 'main')).toBe(git(f.ownDir, 'rev-parse', 'HEAD'));
+      expect(git(f.bare, 'show', 'main:entries/fixture.md')).toContain('updated while the first cycle holds its locks');
+    } finally { release(); await Promise.allSettled([first, ...pending]); }
+  });
+
+  it('waits for the index lock without advancing state or removing the held lock', async () => {
+    const f = fixture(); const lock = acquireFileLock(join(f.opts.caveatHome, 'index', '.reindex-lock'))!;
+    const worker = runAutoSync({ ...f.opts, writeRequestedAt: 0 });
+    let held = true;
+    try {
+      expect(readFileSync(lock.path, 'utf8')).toBe(String(process.pid));
+      expect(existsSync(join(f.opts.caveatHome, 'sync', '.last-autosync.json'))).toBe(false);
+      releaseFileLock(lock); held = false;
+      expect((await worker).outcome?.own.disposition).toBe('success');
+      expect(git(f.ownDir, 'status', '--porcelain')).toBe('');
+    } finally { if (held) releaseFileLock(lock); await Promise.allSettled([worker]); }
+  });
+
+  it('bounds write lock waits and retains another cycle lock', async () => {
+    const f = fixture(); const lock = acquireFileLock(join(f.opts.caveatHome, 'sync', '.autosync-lock'))!;
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(AUTO_SYNC_WRITE_LOCK_WAIT_MS);
+    try {
+      expect(await runAutoSync({ ...f.opts, writeRequestedAt: 0 })).toMatchObject({ ran: false, skipReason: 'write_lock_timeout' });
+      expect(readFileSync(lock.path, 'utf8')).toBe(String(process.pid));
+    } finally { clock.mockRestore(); releaseFileLock(lock); }
+  });
+
+  it('retains the last repository-busy outcome when the write wait expires', async () => {
+    const f = fixture(); vi.mocked(syncOwn).mockRejectedValueOnce(new SyncError('SYNC_BUSY', 'fixture repository lock'));
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(0).mockReturnValue(AUTO_SYNC_WRITE_LOCK_WAIT_MS);
+    try {
+      expect(await runAutoSync({ ...f.opts, writeRequestedAt: 0 })).toMatchObject({ ran: true, skipReason: 'write_lock_timeout', outcome: { own: { code: 'SYNC_BUSY' } } });
+    } finally { clock.mockRestore(); }
+  });
+
+  it('honors the off switch while a write worker is waiting', async () => {
+    const f = fixture(); const lock = acquireFileLock(join(f.opts.caveatHome, 'sync', '.autosync-lock'))!;
+    const worker = runAutoSync({ ...f.opts, writeRequestedAt: 0 });
+    vi.stubEnv('CAVEAT_AUTO_SYNC', 'off');
+    try {
+      expect(await worker).toMatchObject({ ran: false, skipReason: 'disabled' });
+      expect(readFileSync(lock.path, 'utf8')).toBe(String(process.pid));
+    } finally { releaseFileLock(lock); }
+  });
+
+  it('does not use legacy state as completion proof', async () => {
+    const f = fixture();
+    writeAutoSyncState(f.opts.caveatHome, { finishedAt: new Date(5_000).toISOString(), signature: 'fixture', ownSync: { consecutiveFailureCount: 0, consecutiveFailureSignature: null } });
+    expect((await runAutoSync({ ...f.opts, writeRequestedAt: 1_500, now: () => new Date(2_000) })).outcome?.own.disposition).toBe('success');
+  });
+
+  it('does not use a tied start time or another repository as completion proof', async () => {
+    const f = fixture();
+    expect((await runAutoSync({ ...f.opts, now: () => new Date(1_500) })).outcome?.own.disposition).toBe('success');
+    expect((await runAutoSync({ ...f.opts, writeRequestedAt: 1_500, now: () => new Date(2_000) })).outcome?.own.disposition).toBe('success');
+    writeFileSync(join(f.peer, 'entries', 'fixture.md'), entry('another configured knowledge repository'));
+    const other = { ...f.opts, ownDir: f.peer, paths: { ...f.opts.paths, entriesDir: join(f.peer, 'entries') } };
+    expect((await runAutoSync({ ...other, writeRequestedAt: 1_500, now: () => new Date(3_000) })).outcome?.own.disposition).toBe('success');
+    expect(git(f.peer, 'status', '--porcelain')).toBe('');
+    expect(git(f.bare, 'show', 'main:entries/fixture.md')).toContain('another configured knowledge repository');
+  });
+
+  it('does not retry a private-boundary refusal as a busy write', async () => {
+    const f = fixture(); let probes = 0; writeFileSync(f.file, entry('private edit retained'));
+    const head = git(f.ownDir, 'rev-parse', 'HEAD'); const status = git(f.ownDir, 'status', '--porcelain');
+    const result = await runAutoSync({ ...f.opts, writeRequestedAt: 0, probeImpl: async () => { probes++; return { kind: 'anonymous-readable' }; } });
+    expect(result.outcome?.own.code).toBe('REMOTE_PUBLIC'); expect(probes).toBe(1);
+    expect(git(f.ownDir, 'rev-parse', 'HEAD')).toBe(head); expect(git(f.ownDir, 'status', '--porcelain')).toBe(status);
   });
 
   it('aborts a fixture conflict, retains the local commit and records failure', async () => {

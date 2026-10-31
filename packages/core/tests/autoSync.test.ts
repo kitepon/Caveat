@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   acquireFileLock,
   AUTO_SYNC_DEBOUNCE_MS,
+  AUTO_SYNC_RECORD_DEBOUNCE_MS,
   autoSyncNotification,
   autoSyncStatePath,
   CAVEAT_AUTO_SYNC_DEBOUNCE_ENV,
@@ -15,6 +16,7 @@ import {
   readAutoSyncState,
   releaseFileLock,
   resetAutoSyncFailureState,
+  runAutoSync,
   SyncError,
   triggerAutoSync,
   writeAutoSyncState,
@@ -57,6 +59,34 @@ describe('auto sync trigger', () => {
     delete process.env[CAVEAT_AUTO_SYNC_DEBOUNCE_ENV];
   });
 
+  it('does not discard an MCP write just after a completed cycle', () => {
+    const { home, cleanup } = fresh();
+    try {
+      markCycleFinished(home, 900);
+      expect(wouldSpawn(home)).toBe(false);
+      expect(() => triggerAutoSync({
+        caveatHome: home, cliScript: '', debounceMs: AUTO_SYNC_RECORD_DEBOUNCE_MS,
+      })).toThrow('current Caveat CLI script path is unavailable');
+      process.env[CAVEAT_AUTO_SYNC_ENV] = 'off';
+      expect(() => triggerAutoSync({
+        caveatHome: home, cliScript: '', debounceMs: AUTO_SYNC_RECORD_DEBOUNCE_MS,
+      })).not.toThrow();
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('carries the write request time despite a configured interval and future marker mtime', { timeout: 10_000 }, async () => {
+    const { home, cleanup } = fresh(); const cliScript = join(home, 'worker.mjs'); const receipt = cliScript + '.receipt';
+    try {
+      markCycleFinished(home, -10_000); process.env[CAVEAT_AUTO_SYNC_DEBOUNCE_ENV] = '60000';
+      writeFileSync(cliScript, "import {writeFileSync} from 'node:fs';writeFileSync(process.argv[1]+'.receipt',JSON.stringify(process.argv.slice(2)));\n");
+      triggerAutoSync({ caveatHome: home, cliScript, writeRequestedAt: 1_500 });
+      await vi.waitFor(() => expect(existsSync(receipt)).toBe(true), { timeout: 5_000 });
+      expect(JSON.parse(readFileSync(receipt, 'utf8'))).toEqual(['hook', 'autosync', '1500']);
+    } finally { cleanup(); }
+  });
+
   it('spawns when no cycle has run, and debounces against a recent one', () => {
     const { home, cleanup } = fresh();
     try {
@@ -79,6 +109,15 @@ describe('auto sync trigger', () => {
     } finally {
       cleanup();
     }
+  });
+
+  it.each([-1, NaN, Infinity, 1.5, Number.MAX_SAFE_INTEGER + 1])('rejects an invalid write request time before running a cycle (%s)', async writeRequestedAt => {
+    const { home, cleanup } = fresh();
+    try {
+      expect(() => triggerAutoSync({ caveatHome: home, cliScript: '', writeRequestedAt })).toThrow('autosync_write_requested_at_invalid');
+      await expect(runAutoSync({ caveatHome: home, ownDir: join(home, 'own'), paths: { dbPath: join(home, 'index', 'db'), entriesDir: join(home, 'own', 'entries'), communityDir: join(home, 'community') }, logger: { info() {}, warn() {}, error() {} }, writeRequestedAt })).rejects.toThrow('autosync_write_requested_at_invalid');
+      expect(existsSync(join(home, 'sync'))).toBe(false);
+    } finally { cleanup(); }
   });
 
   it('falls back to the default when the debounce override is malformed', () => {
@@ -193,15 +232,18 @@ describe('auto sync core', () => {
       expect(readAutoSyncState(home)).toBeNull();
       writeAutoSyncState(home, {
         finishedAt: '2026-07-12T00:00:00.000Z',
+        startedAt: '2026-07-12T00:00:00.000Z',
         signature: 'sig',
         ownSync: { consecutiveFailureSignature: 'fail', consecutiveFailureCount: 2 },
       });
       expect(readAutoSyncState(home)).toEqual({
         finishedAt: '2026-07-12T00:00:00.000Z',
+        startedAt: '2026-07-12T00:00:00.000Z',
         signature: 'sig',
         ownSync: { consecutiveFailureSignature: 'fail', consecutiveFailureCount: 2 },
       });
       resetAutoSyncFailureState(home);
+      expect(readAutoSyncState(home)?.startedAt).toBe('2026-07-12T00:00:00.000Z');
       expect(readAutoSyncState(home)?.ownSync).toEqual({
         consecutiveFailureSignature: null,
         consecutiveFailureCount: 0,

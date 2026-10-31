@@ -5,6 +5,8 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 ## [Unreleased]
 
 ### Fixed
+- Request background sync for each successful MCP record or update, including writes made immediately after the previous cycle completed.
+- Wait briefly for busy write-triggered sync workers and coalesce requests covered by a later completed cycle, preserving normal Stop intervals and scheduled dirty-worktree refusal.
 - Reassess interrupted migration evidence for known-only recovery plans and identify open writers of protected configuration files on macOS and Linux.
 - Preserve global migration failure details and report recovery binding paths and differing identity attributes.
 - Include the absolute protected file path in migration diagnostics when the file changes during a snapshot read.
