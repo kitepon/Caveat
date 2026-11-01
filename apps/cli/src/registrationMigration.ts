@@ -52,7 +52,8 @@ function verifyProtected(plan: Plan) {
   for (const row of plan.protected) assert.deepEqual(snapshot(row.path), row.rows, 'registration_protected_changed');
 }
 async function freshProcesses(plan: Plan, preflight: Preflight, emit: Emit) {
-  const result = await preflight({ binAliases: [], protectedPaths: plan.files.map(file => file.path) },
+  // Registration replaces these settings, so concurrent config writers must still stop it.
+  const result = await preflight({ binAliases: [], observeConfigWriters: false, protectedPaths: plan.files.map(file => file.path) },
     event => emit({ phase: event.phase, event: event.event, pid: event.pid, runId: null }));
   if (result.status !== 'ready') throw Object.assign(Error('registration_process_preflight_stopped'), { preflight: result });
   return result;

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, realpathSync, readlinkSync, statSync, type BigIntStats } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
+import assert from 'node:assert/strict';
 import { isAbsolute, relative, sep, dirname, resolve } from 'node:path';
 import { isWindows } from './platform.js';
 import type { GlobalRecoverySnapshot } from './managedGlobalRecovery.js';
@@ -11,10 +12,26 @@ export const recoveryPathContains = (parent: string, child: string) => {
   const name = relative(key(parent), key(child));
   return name === '' || !isAbsolute(name) && name !== '..' && !name.startsWith('..' + sep);
 };
+/** Resolve existing aliases without reading external setting contents. */
+export function externalGlobalConfigPaths(paths: string[], owned: string[]) {
+  const external = (path: string) => owned.every(root => !recoveryPathContains(root, path) && !recoveryPathContains(path, root));
+  return [...new Set(paths.flatMap(path => {
+    assert.ok(isAbsolute(path), 'global_config_absolute_path_required');
+    let canonical = path;
+    try { canonical = realpathSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    return external(path) && external(canonical) ? [path, canonical] : [];
+  }))].sort();
+}
 /** Only external input settings are observations. Active deployment, npm and globals remain strict. */
 export function globalRecoveryConfigPaths(plan: Plan) {
   const owned = [plan.root, plan.globalRoot, plan.binDirectory, dirname(dirname(plan.baseline.npm.executable))];
   const external = (path: string) => owned.every(root => !recoveryPathContains(root, path) && !recoveryPathContains(path, root));
+  if (plan.schema === 'caveat.global_migration_plan.v2') {
+    assert.ok(Array.isArray(plan.configPaths) && plan.configPaths.length <= 64
+      && plan.configPaths.every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path && external(path)), 'global_config_owned_scope');
+    assert.deepEqual([...new Set(plan.configPaths)].sort(), plan.configPaths, 'global_config_scope_invalid');
+    return plan.configPaths;
+  }
   const files = plan.baseline.protectedFiles.map(row => row.file)
     .filter(path => external(path) && external(plan.aliases.find(row => row.path === path)?.canonical ?? path));
   const aliases = plan.aliases.filter(row => files.includes(row.path) || files.includes(row.canonical));

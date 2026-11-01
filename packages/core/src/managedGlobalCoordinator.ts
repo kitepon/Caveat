@@ -21,12 +21,15 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
   admit: (input: GlobalMigrationInput, events: (event: ProcessProbeEvent) => void) => Promise<Admission>) {
   let sequence = 0, phase = 'admission', planSha256: string | null = null, runId: string | null = null, admission: Admission | null = null;
   let processAssessment: ReturnType<Admission['processAssessment']> = null;
+  let configState: Admission['configState'] | undefined;
+  let failedConfigObservations: ReturnType<Admission['configState']['records']> = [];
   let mutationStarted = false;
   let result: { status: 'completed' | 'stopped' | 'unknown'; phase: string; errorSha256?: string; reason?: string; diagnostic?: unknown; sharingViolation?: { code: number; file?: string; instruction: string; readableHolders: unknown[] } } = { status: 'unknown', phase };
   const event = (kind: string, pid?: number) => emit({ schema: 'caveat.global_migration_event.v1', sequence: ++sequence, phase, event: kind, planSha256, runId, ...(pid ? { pid } : {}) });
   try {
     event('issued'); assert.ok(/^[a-f0-9]{64}$/.test(expectedPlanSha256), 'global_migration_expected_hash_required');
     admission = await admit(input, probe => { const saved = phase; phase = 'process-preflight'; try { event(probe.event, probe.pid); } finally { phase = saved; } });
+    configState = admission.configState;
     planSha256 = admission.planSha256;
     assert.equal(planSha256, expectedPlanSha256, 'global_migration_expected_plan_changed'); event('completed');
     const reviewed = admission.plan, node = reviewed.baseline.node;
@@ -72,6 +75,7 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
     result = { status: 'completed', phase };
   } catch (error) {
     processAssessment = (error as { preflight?: typeof processAssessment }).preflight ?? processAssessment;
+    failedConfigObservations = (error as { configObservations?: typeof failedConfigObservations }).configObservations ?? [];
     result = { status: phase === 'admission' ? 'stopped' : 'unknown', phase, reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? null, errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) };
   }
   return await finish();
@@ -82,9 +86,10 @@ export async function coordinateGlobalMigration(input: GlobalMigrationInput, exp
       try { admission.close(); } catch (error) { result = { status: 'unknown', phase: 'close', errorSha256: sha(error instanceof Error ? error.name + ':' + error.message : String(error)) }; }
       admission = null;
     }
+    configState?.observe();
     phase = 'terminal';
     try { event(result.status); } catch { result = { status: 'unknown', phase: 'receipt' }; }
-    return { schema: 'caveat.global_migration_result.v1' as const, ...result, planSha256, runId, processAssessment, residualRisks: globalProcessResidualRisks, filesystemWrites: mutationStarted ? null : 0,
+    return { schema: 'caveat.global_migration_result.v1' as const, ...result, configObservations: configState?.records() ?? failedConfigObservations, planSha256, runId, processAssessment, residualRisks: globalProcessResidualRisks, filesystemWrites: mutationStarted ? null : 0,
       recovery: mutationStarted && result.status !== 'completed' ? { command: 'deployment global-recovery-plan', runId, planSha256, requiresFreshEvidence: true } : null, existingProcessOperations: 0, privilegeElevation: false as const };
   }
 }

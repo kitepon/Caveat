@@ -161,8 +161,9 @@ export async function withGlobalMigrationEvidence<T>(runDirectory: string, expec
     };
     const planBytes = read('plan.json'); assert.equal(shaGlobalRecoveryValue(decode(planBytes)), expectedPlanSha256, 'global_recovery_plan_hash_changed');
     const plan = decode(planBytes) as Plan;
-    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories', ...(Object.hasOwn(plan, 'originalObjects') ? ['originalObjects'] : []), ...(Object.hasOwn(plan, 'nodeProof') ? ['nodeProof'] : [])]);
-    assert.equal(plan.schema, 'caveat.global_migration_plan.v1', 'global_recovery_plan_invalid');
+    globalRecoveryKeys(plan, ['schema', 'baseline', 'leaves', 'protectedObjects', 'prefix', 'root', 'globalRoot', 'binDirectory', 'shellPlan', 'aliases', 'absences', 'directories', ...(Object.hasOwn(plan, 'originalObjects') ? ['originalObjects'] : []), ...(Object.hasOwn(plan, 'nodeProof') ? ['nodeProof'] : []), ...(plan.schema === 'caveat.global_migration_plan.v2' ? ['configPaths'] : [])]);
+    assert.ok(['caveat.global_migration_plan.v1', 'caveat.global_migration_plan.v2'].includes(plan.schema), 'global_recovery_plan_invalid');
+    globalRecoveryConfigPaths(plan);
     assert.equal(plan.root, dirname(runDirectory), 'global_recovery_run_outside_root');
     assert.ok([plan.root, plan.globalRoot, plan.binDirectory, plan.prefix].every(path => typeof path === 'string' && isAbsolute(path) && resolve(path) === path), 'global_recovery_absolute_scope_required');
     const layout = globalNpmLayout(plan.globalRoot);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { externalGlobalConfigPaths, observeGlobalRecoveryConfigs, recoveryPathContains } from './managedGlobalRecoveryConfig.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { dirname, basename, join, relative, resolve, isAbsolute, sep } from 'node:path';
 import { realpathSync } from 'node:fs';
@@ -28,7 +29,7 @@ export async function bindGlobalMigration(input: GlobalMigrationInput, onEvent: 
 /** A read-only plan never creates a private run or acquires the installer lock. */
 export async function planGlobalMigration(input: GlobalMigrationInput, onEvent: (event: ProcessProbeEvent) => void = () => {}) {
   const admission = await bindGlobalAdmission(input, onEvent, nativeGlobalProcessTables);
-  try { return { status: 'ready' as const, planSha256: admission.planSha256, plan: admission.plan, processAssessment: admission.processAssessment(), filesystemWrites: 0, existingProcessOperations: 0 }; }
+  try { return { status: 'ready' as const, planSha256: admission.planSha256, plan: admission.plan, processAssessment: admission.processAssessment(), configObservations: admission.configState.records(), filesystemWrites: 0, existingProcessOperations: 0 }; }
   finally { admission.close(); }
 }
 
@@ -37,7 +38,14 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
   onEvent({ phase: 'global-preflight', event: 'issued' });
   input = structuredClone(input);
   assert.equal(basename(input.snapshot.pointer), 'active.json', 'global_migration_active_pointer_required');
-  const globalRoot = resolve(input.snapshot.globalRoot), baseline = snapshotGlobalPackage(input.snapshot), root = dirname(input.snapshot.pointer), active = readManagedDeploymentAtRoot(root);
+  const globalRoot = resolve(input.snapshot.globalRoot), root = dirname(input.snapshot.pointer);
+  const configPaths = externalGlobalConfigPaths([...input.snapshot.protectedFiles, ...(input.protectedAbsent ?? [])],
+    [root, globalRoot, input.binDirectory, dirname(dirname(realpathSync(input.snapshot.npmAlias)))]);
+  const configState = observeGlobalRecoveryConfigs(configPaths);
+  input.snapshot.protectedFiles = input.snapshot.protectedFiles.filter(path => !configPaths.includes(path));
+  input.snapshot.pins = input.snapshot.pins.filter(row => !configPaths.includes(row.file));
+  input.protectedAbsent = input.protectedAbsent?.filter(path => !configPaths.includes(path));
+  const baseline = snapshotGlobalPackage(input.snapshot), active = readManagedDeploymentAtRoot(root);
   assert.equal(active.pointer.release, input.snapshot.expectedRelease, 'global_migration_active_release_changed');
   assert.equal(realpathSync(input.snapshot.pointer), join(realpathSync(root), 'active.json'), 'global_migration_pointer_redirect');
   const layout = globalNpmLayout(globalRoot), binDirectory = realpathSync(input.binDirectory), npmRoot = dirname(dirname(baseline.npm.executable));
@@ -98,15 +106,24 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
       files: renderManagedShellWrappers('node', active.launcher).map(file => ({ ...file, path: join(binDirectory, file.name) })) };
     const leafNames = isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat'];
     const leaves = leafNames.map(name => ({ name, identity: guard.observe(binDirectory, name) }));
-    const scope: GlobalProcessScope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path)] };
+    const scope: GlobalProcessScope = { packageRoot: realpathSync(baseline.packageRoot), npmRoot, binAliases: leaves.map(row => join(binDirectory, row.name)), protectedPaths: [...protectedPaths, ...aliases.map(row => row.path), ...absences.map(row => row.path), ...configPaths], observeConfigWriters: true };
     let processAssessment: Awaited<ReturnType<typeof preflightGlobalProcesses>> | null = null;
     const processCheck = async () => {
       const result = await preflightGlobalProcesses(scope, onEvent, collect);
       processAssessment = result;
+      configState.writers(result.records.filter(row => row.classification === 'observation' && row.reason === 'claude_config_writer'));
       if (result.status !== 'ready') throw Object.assign(Error('global_migration_process_preflight_stopped'), { preflight: result, readOnlyCheckFailed: true }); return result;
     };
     const verifyProtected = () => {
-      guard.assertCurrent();
+      guard.assertCurrent(); configState.observe();
+      const configPlaces = configState.paths();
+      for (const place of [root, globalRoot, binDirectory, npmRoot]) {
+        assert.ok(configPlaces.every(path => !recoveryPathContains(place, path) && !recoveryPathContains(path, place)), 'global_migration_config_mutation_scope');
+      }
+      const configIds = new Set(configState.identities().map(row => row.dev + ':' + row.ino));
+      const mutable = [...baseline.packageTree, ...(baseline.npmManagement.rows ?? []), ...(preservation?.manifest().objects.flatMap(row => [...(row.rows ?? []), ...(row.working?.rows ?? [])]).map(row => ({ dev: row.identity.dev, ino: row.identity.ino })) ?? [])];
+      assert.ok(mutable.every(row => !configIds.has(row.dev + ':' + row.ino))
+        && leaves.every(row => !row.identity || !configIds.has(row.identity.dev + ':' + row.identity.ino)), 'global_migration_config_mutation_identity');
       for (const absent of absences) assert.deepEqual(observeGlobalAbsence(absent.path), absent, 'global_migration_absence_changed');
       for (const alias of aliases) if (alias.path !== resolve(input.snapshot.packageRoot)) assert.equal(realpathSync(alias.path), alias.canonical, 'global_migration_alias_changed');
       if (ownedLock && lockAtRoot) guard.readJournal(ownedLock);
@@ -134,7 +151,7 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
     const originalObjects = originalTrees.map(({ tree: _, ...row }) => row);
     assert.deepEqual(snapshotGlobalPackage(input.snapshot), baseline, 'global_migration_native_original_snapshot_changed');
     for (const row of originalObjects.filter(value => value.role === 'leaf')) assert.deepEqual(row.rows[0]!.identity, leaves.find(leaf => leaf.name === row.name)!.identity, 'global_migration_native_original_leaf_changed');
-    const plan = { schema: 'caveat.global_migration_plan.v1', baseline, leaves, originalObjects, protectedObjects: protectedObjects.map(({ path, rows }) => ({ path, rows })), prefix: canonicalLayout.prefix,
+    const plan = { schema: 'caveat.global_migration_plan.v2', configPaths, baseline, leaves, originalObjects, protectedObjects: protectedObjects.map(({ path, rows }) => ({ path, rows })), prefix: canonicalLayout.prefix,
       root: realpathSync(root), globalRoot: realpathSync(globalRoot), binDirectory, shellPlan, aliases, absences, directories: guard.directoryBindings() };
     const planSha256 = hash(plan);
     let prepared = false;
@@ -170,16 +187,16 @@ export async function bindGlobalAdmission(input: GlobalMigrationInput, onEvent: 
         });
         onEvent({ phase: 'global-prepare', event: 'completed' });
         return { status: 'prepared' as const, planSha256, runDirectory, plan: structuredClone(plan), engine, uninstall, shell, journal, verify, verifyProtected, guard,
-          close, existingProcessOperations: 0, privilegeElevation: false as const };
+          close, configState, existingProcessOperations: 0, privilegeElevation: false as const };
       } catch (error) {
-        if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
+        if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, configObservations: configState.records(), filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
         throw error;
       }
     };
     onEvent({ phase: 'global-preflight', event: 'completed' });
-    return { planSha256, plan: structuredClone(plan), prepare, verify, close, processAssessment: () => processAssessment };
+    return { planSha256, plan: structuredClone(plan), prepare, verify, close, configState, processAssessment: () => processAssessment };
   } catch (error) {
-    if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
+    if (error instanceof Error) Object.assign(error, { migrationPhase: phase, runDirectory, configObservations: configState.records(), filesystemWrites: runDirectory ? null : 0, existingProcessOperations: 0 });
     try { onEvent({ phase: 'global-preflight', event: 'stopped' }); } catch { /* Preserve the failed preflight. */ }
     try { close(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'global_migration_prepare_and_close_failed'); }
     throw error;
