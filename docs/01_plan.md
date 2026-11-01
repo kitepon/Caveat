@@ -88,6 +88,7 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
   `overall.status`、exitだけで合否を決め、Cursorのhook名、必要集合、command、timeoutを複製しない。
 - sync診断は同期機構の健全性を判定する。dirty、cached upstreamに対するahead/behind/diverged、
   origin/upstream/資格の不正、記録されたautosync失敗はreadyにしない。既存autosync stateが読めなければunverified。
+  直近のautosync試行の失敗は、次のcycleが成功するまでautosync_failedとして保持する。
   clean・cached 0/0・失敗記録なしでlive remoteだけ異なる時はready/remote_changedとする。
   event-driven同期の待機状態であり、HEAD同一性やremoteの祖先関係を証明しない。fetchや同期は診断で実行しない。
   native定期受信の登録は引き続き明示opt-inである。

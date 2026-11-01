@@ -2,7 +2,7 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [0.21.18] — 2026-11-01
 
 ### Fixed
 - Treat clean event-driven sync waiting for a changed remote as healthy, while retaining cached divergence, pending local changes and recorded autosync failures.
