@@ -1,0 +1,272 @@
+{
+  "sourceSha256": "47c86e724d675d64b944607f34fc5c697b0e3dc19dad9c4d0d5ea2f75206e977",
+  "note": "21 rows from the saved 00:27Z ps, 1227/1259 from the accompanying ruling; user paths and unrelated arguments removed. No new host probe.",
+  "processes": [
+    {
+      "pid": 988,
+      "parentPid": 1,
+      "image": "/Applications/Claude.app/Contents/MacOS/Claude",
+      "argv": [
+        "/Applications/Claude.app/Contents/MacOS/Claude"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1049,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=gpu-process"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1051,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=network.mojom.NetworkService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1078,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+        "--type=renderer"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1090,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+        "--type=renderer"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1128,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=node.mojom.NodeService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 1131,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=node.mojom.NodeService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 2354,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=audio.mojom.AudioService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 2355,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=video_capture.mojom.VideoCaptureService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 5754,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=node.mojom.NodeService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 43847,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+        "--type=renderer"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 43854,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+        "--type=renderer"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 45334,
+      "parentPid": 57198,
+      "image": null,
+      "argv": [
+        "claude",
+        "bg-pty-host",
+        "--bg-spare"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 47047,
+      "parentPid": 988,
+      "image": "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+      "argv": [
+        "/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper",
+        "--type=utility",
+        "--utility-sub-type=node.mojom.NodeService"
+      ],
+      "kind": "desktop",
+      "source": "ps"
+    },
+    {
+      "pid": 57198,
+      "parentPid": 1,
+      "image": "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+      "argv": [
+        "/opt/homebrew/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe",
+        "daemon",
+        "run",
+        "--origin",
+        "transient"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 57219,
+      "parentPid": 57198,
+      "image": null,
+      "argv": [
+        "claude",
+        "bg-pty-host",
+        "--bg-spare"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 63862,
+      "parentPid": 63861,
+      "image": "/Users/fixture/Library/Application Support/Claude/claude-code/2.1.309/5af865b9901c/claude.app/Contents/MacOS/claude",
+      "argv": [
+        "/Users/fixture/Library/Application Support/Claude/claude-code/2.1.309/5af865b9901c/claude.app/Contents/MacOS/claude",
+        "--fixture-session"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 90695,
+      "parentPid": 57198,
+      "image": null,
+      "argv": [
+        "claude",
+        "bg-pty-host",
+        "--bg-spare"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 11569,
+      "parentPid": 11487,
+      "image": "/opt/homebrew/bin/claude",
+      "argv": [
+        "/opt/homebrew/bin/claude",
+        "--fixture-session"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 12538,
+      "parentPid": 12457,
+      "image": "/opt/homebrew/bin/claude",
+      "argv": [
+        "/opt/homebrew/bin/claude",
+        "--fixture-session"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 92663,
+      "parentPid": 92200,
+      "image": "/opt/homebrew/bin/claude",
+      "argv": [
+        "/opt/homebrew/bin/claude",
+        "--fixture-session"
+      ],
+      "kind": "code",
+      "source": "ps"
+    },
+    {
+      "pid": 1227,
+      "parentPid": 1,
+      "image": null,
+      "argv": [
+        "claude",
+        "bg-pty-host"
+      ],
+      "kind": "code",
+      "source": "ruling"
+    },
+    {
+      "pid": 1259,
+      "parentPid": 1227,
+      "image": null,
+      "argv": [
+        "claude",
+        "--resume",
+        "fixture-session"
+      ],
+      "kind": "code",
+      "source": "ruling"
+    }
+  ]
+}

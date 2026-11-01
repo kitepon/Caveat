@@ -26,7 +26,7 @@ export async function isolatedPackSmoke(entries, root, version) {
       output += b;
       const lines = output.split('\n'); output = lines.pop();
       for (const line of lines) {
-        try { const r = JSON.parse(line); if (r.id === 1) { assert.ok(r.result?.serverInfo); initialized = true; child.stdin.end(); } }
+        try { const r = JSON.parse(line); if (r.id === 1) { assert.deepEqual(r.result?.serverInfo, { name: 'caveat', version }); initialized = true; child.stdin.end(); } }
         catch (e) { clearTimeout(timer); child.kill(); reject(e); }
       }
     });

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assessGlobalProcesses, preflightGlobalProcesses } from '../src/managedGlobalProcesses.js';
+import { assessGlobalProcesses, preflightGlobalProcesses, processAppName } from '../src/managedGlobalProcesses.js';
 import { decodeWindowsProcessTables, ownedProcessProbe, parseLinuxProcessStat, parseWindowsProcessArguments, parseMacTextImages, readLinuxProcessTables, readMacProcessTables, WINDOWS_PROCESS_PROBE, type NativeProcessRecord, type NativeProcessTables, type ProcessProbeEvent } from '../src/managedProcessNative.js';
 import { globalNpmEnvironment, isWindows, quoteWindowsArgument } from '../src/platform.js';
 
@@ -56,6 +56,36 @@ describe('global process assessment', () => {
     for (const row of [{ ...claude, claudeConfig: null }, { ...claude, uid: 2000 }, { ...claude, reason: 'process_identity_changed' }]) {
       expect(assessGlobalProcesses(config, tables(row))).toMatchObject({ status: 'ready', writers: 0, unknown: 1 });
     }
+  });
+  it('separates all 13 desktop processes from 10 Code writers in the Mac incident fixture', () => {
+    const fixture = JSON.parse(readFileSync(new URL('./fixtures/globalRecovery/macos-claude-processes.json', import.meta.url), 'utf8')) as {
+      processes: { pid: number; parentPid: number; image: string | null; argv: string[]; kind: string }[] };
+    const root = mkdtempSync(join(tmpdir(), 'caveat-mac-writers-')); roots.push(root);
+    const file = join(root, '.claude.json'); writeFileSync(file, '{}'); const stat = statSync(file, { bigint: true });
+    const identity = { dev: String(stat.dev), ino: String(stat.ino) };
+    const rows = fixture.processes.map(row => ({ ...record(row.pid), ppid: row.parentPid,
+      executable: row.image ? { path: row.image, dev: '1', ino: String(row.pid) } : null, argv: row.argv, claudeConfig: identity }));
+    expect(rows).toHaveLength(23);
+    for (const [index, row] of rows.entries()) expect(processAppName(row) === 'Claude Code', String(row.pid)).toBe(fixture.processes[index]!.kind === 'code');
+    const config = { ...scope, protectedPaths: [file] };
+    expect(assessGlobalProcesses(config, tables(...rows))).toMatchObject({ status: 'stopped', writers: 10, consumers: 0 });
+    const observed = assessGlobalProcesses({ ...config, observeConfigWriters: true }, tables(...rows));
+    expect(observed).toMatchObject({ status: 'ready', writers: 0, consumers: 0, counts: { observation: 10 } });
+    expect(observed.records).toHaveLength(10);
+    expect(observed.records.every(row => row.classification === 'observation' && row.resolution.action === 'observe' && row.configIdentity?.ino === identity.ino)).toBe(true);
+    // Recovery still stops consumers and actual open writers, even in a Claude Code session.
+    const code = rows.find(row => processAppName(row) === 'Claude Code')!;
+    expect(assessGlobalProcesses({ ...config, observeConfigWriters: true }, tables({ ...code, argv: [...code.argv!, scope.packageRoot + '/dist/caveat.js'] })))
+      .toMatchObject({ status: 'stopped', consumers: 1 });
+    expect(assessGlobalProcesses({ ...config, observeConfigWriters: true }, tables({ ...code, openWriters: [identity] })))
+      .toMatchObject({ status: 'stopped', writers: 1, records: [{ reason: 'protected_file_open_writer' }] });
+  });
+  it('matches Code entry tokens on Windows and ignores later arguments and desktop images', () => {
+    for (const image of ['C:\\tools\\bin\\claude.exe', '/usr/lib/node_modules/@anthropic-ai/claude-code/cli.js'])
+      expect(processAppName(record(20, image))).toBe('Claude Code');
+    expect(processAppName(record(20, '/Applications/Claude.app/Contents/MacOS/Claude', ['Claude', '/usr/bin/claude']))).not.toBe('Claude Code');
+    expect(processAppName(record(20, '/usr/bin/tool', ['tool', '--example', '/usr/bin/claude']))).not.toBe('Claude Code');
+    expect(processAppName(record(20, '/other/Claude Helper', ['/other/Claude Helper']))).not.toBe('Claude Code');
   });
   it('counts an old consumer that has already exited without stopping', () => {
     const value = tables(record(20, '/runtime/node', ['node', scope.packageRoot + '/index.js'])); value.after.pop();

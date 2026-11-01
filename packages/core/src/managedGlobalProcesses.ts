@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
+import { isClaudeCodeProcess } from './managedClaudeProcess.js';
 import { statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { nativeGlobalProcessTables } from './managedProcessNative.js';
 import type { NativeProcessRecord, NativeProcessTables, ProcessProbeEvent } from './managedProcessNative.js';
 
-export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[] };
+export type GlobalProcessScope = { packageRoot?: string; npmRoot?: string; binAliases: string[]; protectedPaths?: string[]; observeConfigWriters?: boolean };
 export type GlobalProcessAssessment = { pid: number; birth: string | null; parentPid: number | null; parentApp: string;
   protectedPaths?: string[];
-  classification: 'consumer' | 'writer'; reason: string; resolution: { action: 'close-process' | 'finish-npm-operation'; instruction: string } };
+  configIdentity?: { dev: string; ino: string };
+  classification: 'consumer' | 'writer' | 'observation'; reason: string; resolution: { action: 'close-process' | 'finish-npm-operation' | 'observe'; instruction: string } };
 const normalized = (value: string, fold: boolean) => {
   const slash = value.replaceAll('\\', '/').replace(/\/$/, ''); return fold ? slash.toLowerCase() : slash;
 };
@@ -29,7 +31,7 @@ function hasLiteral(value: string, path: string) {
 export function processAppName(row: NativeProcessRecord | undefined) {
   if (!row) return 'unavailable';
   const text = [row.executable?.path, ...(row.argv?.slice(0, 2) ?? [])].filter(Boolean).join(' ').replaceAll('\\', '/');
-  if (/(?:@anthropic-ai\/claude-code\/|(?:^|\/)claude(?:\.exe)?(?: |$))/i.test(text)) return 'Claude Code';
+  if (isClaudeCodeProcess(row.argv, row.executable?.path)) return 'Claude Code';
   if (/(?:^|\/)codex(?:\.exe)?(?: |$)/i.test(text)) return 'Codex';
   if (/(?:^|\/)cursor(?:\.exe)?(?: |$)/i.test(text)) return 'Cursor';
   if (/(?:^|\/)grok(?:\.exe)?(?: |$)/i.test(text)) return 'Grok';
@@ -52,7 +54,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
   const before = new Set(tables.before.map(row => row.pid)), after = new Set(tables.after.map(row => row.pid));
   for (const row of [...tables.before, ...tables.after]) rows.set(row.pid, [...(rows.get(row.pid) ?? []), row]);
   const records: GlobalProcessAssessment[] = [];
-  const counts = { observed: rows.size, unreadable: 0, foreign: 0, kernel: 0, shortLived: 0, consumer: 0, writer: 0 };
+  const counts = { observed: rows.size, unreadable: 0, foreign: 0, kernel: 0, shortLived: 0, consumer: 0, writer: 0, observation: 0 };
   const own = rows.get(tables.selfPid)?.at(-1);
   const protectedFiles = (scope.protectedPaths ?? []).flatMap(path => {
     const stat = statSync(path, { bigint: true, throwIfNoEntry: false });
@@ -86,17 +88,19 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
         && (argv.some(arg => hasLiteral(arg, root)) || argv.some(arg => ['-g', '--global'].includes(arg)) && argv.some(arg => /^caveat-cli(?:@|$)/.test(arg)));
     });
     if (!consumer && !claudeWriter && !writer && !openFiles.length) continue;
-    const classification = writer || claudeWriter || openFiles.length ? 'writer' : 'consumer'; counts[classification]++;
+    const classification = writer || openFiles.length || claudeWriter && !scope.observeConfigWriters ? 'writer' : consumer ? 'consumer' : 'observation'; counts[classification]++;
     const parentApp = processAppName(rows.get(row.ppid ?? -1)?.at(-1));
     records.push({ pid, birth: row.birth, parentPid: row.ppid, parentApp, classification,
       ...(openFiles.length ? { protectedPaths: openFiles.map(file => file.path) } : {}),
-      reason: openFiles.length ? 'protected_file_open_writer' : claudeWriter ? 'claude_config_writer' : writer ? 'old_global_npm_writer' : 'old_global_reference',
-      resolution: { action: writer ? 'finish-npm-operation' : 'close-process', instruction: writer
+      ...(claudeWriter ? { configIdentity: row.claudeConfig! } : {}),
+      reason: openFiles.length ? 'protected_file_open_writer' : writer ? 'old_global_npm_writer' : consumer ? 'old_global_reference' : 'claude_config_writer',
+      resolution: { action: classification === 'observation' ? 'observe' : writer ? 'finish-npm-operation' : 'close-process', instruction: classification === 'observation'
+        ? `Claude Code PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) may update its configuration; recovery does not write it.` : writer
         ? `Let npm PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) finish, then retry.`
         : `Save work and close ${parentApp} (parent PID ${row.ppid ?? 'unavailable'}, consumer PID ${pid}), then retry.` } });
   }
   return { schema: 'caveat.global_process_preflight.v1' as const,
-    status: records.length ? 'stopped' as const : 'ready' as const, observedAt: new Date().toISOString(),
+    status: counts.consumer || counts.writer ? 'stopped' as const : 'ready' as const, observedAt: new Date().toISOString(),
     consumers: counts.consumer, writers: counts.writer, unknown: counts.unreadable, counts, errors: tables.errors, records,
     residualRisks: globalProcessResidualRisks, existingProcessOperations: 0, filesystemWrites: 0, privilegeElevation: false as const };
 }

@@ -769,15 +769,37 @@ file identities and reported with their process PID, birth and parent app, inclu
 global migration. Unreadable handles and writers that close or replace files between
 observations remain residual risks. Windows retains its write/delete exclusion;
 open-handle writer attribution is unavailable there.
-Recovery protects client configuration, the active deployment and unrelated globals
-by capturing their current native identities at inspection, rather than requiring
-that they still match the original migration's historical values. These objects
-are never recovery mutation targets. A versioned admission binds this fresh
-protection snapshot into the evidence digest; changes after planning require a new
-read-only plan. Execution rechecks the same snapshot before and between mutations,
-and independent post-close readback compares against that snapshot too. Original,
-working, quarantined and generated Caveat objects retain their journal bindings.
-Existing recovery source formats remain readable without rewriting old evidence.
+Global recovery protects external client settings by never writing them. The
+validated original plan derives their input paths and aliases; they never grant
+mutation authority. Their current metadata, device/inode identities and available
+Claude Code writer PIDs are observations in the plan and execution result
+(`configObservations`). Receipts use path/canonical-path digests and contain no
+setting contents. Changes, atomic replacement, disappearance and appearance during
+execution or independent post-close readback are observations. Settings hold no
+long-lived Windows write/delete exclusion handle. A bounded summary retains the
+first/latest observation and the number of observed changes; an unobserved ABA
+between samples cannot be attributed or proved absent.
+
+The v3 recovery admission binds the external settings path scope, source evidence,
+and a fresh strict snapshot of the active deployment (including active.json,
+entry and payload), npm and unrelated globals. Those strict objects must match
+before/between mutations and at independent readback; their post-plan changes
+require a new plan. Recovery rechecks mutation paths against all settings names
+and current alias targets, and excludes their observed identities from all moved
+trees, including immediately after intent flush. A new alias/hardlink overlapping
+a mutation target still stops recovery. Original, working, quarantined and
+generated Caveat objects, vacancies, parents, evidence, journals and locks retain
+their strict native bindings. Existing v1/v2 recovery source/admission formats
+remain readable without rewriting old evidence; a new v3 plan is required before
+execution under the new scope.
+
+Claude Code is recognized from executable/entry tokens in its npm package, bin
+entry or versioned embedded app. The desktop Claude.app and Chromium helpers are
+excluded. In global recovery only, identity-bound `claude_config_writer` records
+are observations with an `observe` resolution. Old-global consumers, actual
+protected open writers and npm writers still stop the operation. Migration and
+registration plans that write settings retain the existing writer stop. No
+client process is killed or closed by Caveat.
 Stopped plans collect bounded consumer/writer observations when their validated
 source provides a trusted process scope, preserving both the original inspection
 reason and process assessment. Invalid source evidence cannot supply a probe scope.
