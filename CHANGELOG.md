@@ -2,6 +2,13 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.16] — 2026-11-01
+
+### Fixed
+- Identify Claude Code from its executable and entry tokens, excluding desktop Claude.app and its helpers from configuration-writer detection.
+- Observe external client-setting changes during global recovery while preserving strict Caveat-owned object bindings and consumer, open-writer and npm-writer stops.
+- Return the CLI product version from MCP initialize and verify it in the isolated packed-package smoke.
+
 ## [0.21.15] — 2026-11-01
 
 ### Fixed
