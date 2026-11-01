@@ -10,7 +10,7 @@ export async function startMcpStdioServer(
 ): Promise<void> {
   const ctx = buildMcpContext(overrides);
   const server = new McpServer(
-    { name: 'caveat', version: '0.0.0' },
+    { name: 'caveat', version: overrides.productVersion ?? '0.0.0' },
     { capabilities: { tools: {} } },
   );
   registerAllTools(server, ctx, overrides.productVersion);
