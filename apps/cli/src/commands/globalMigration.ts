@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { lstatSync } from 'node:fs';
+import { lstatSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { executeGlobalMigration, executeGlobalRecovery, globalNpmLayout, inspectGlobalMigrationRecovery, inspectGlobalRecoveryAttempt, managedDeploymentPaths, planGlobalMigration, planGlobalRecovery,
-  readGlobalPackageJson, readManagedDeployment, snapshotGlobalTree, type GlobalMigrationInput } from '@caveat/core';
+  externalGlobalConfigPaths, readGlobalPackageJson, readManagedDeployment, snapshotGlobalTree, type GlobalMigrationInput } from '@caveat/core';
 import { resolveAgentConfigPaths } from '../installShared.js';
 
 export type GlobalMigrationOptions = { globalRoot: string; npmCli: string; expectedPlanSha256?: string };
@@ -16,10 +16,13 @@ export function globalMigrationInput(options: GlobalMigrationOptions, userHome =
   const candidates = [...new Set([paths.pointer, join(userHome, '.caveatrc.json'), configs.claudeMcp, join(configs.claudeDir, 'settings.json'),
     join(configs.codexHome, 'config.toml'), join(configs.codexHome, 'hooks.json'), join(configs.grokHome, 'config.toml'),
     join(configs.cursorDir, 'mcp.json'), join(configs.cursorDir, 'hooks.json')].map(file => resolve(file)))];
-  const pins: { file: string; sha256: string }[] = [], protectedAbsent: string[] = [];
+  const configPaths = externalGlobalConfigPaths(candidates, [paths.root, globalRoot, globalNpmLayout(globalRoot).binDirectory, dirname(dirname(realpathSync(options.npmCli)))]);
+  const protectedFiles: string[] = [], pins: { file: string; sha256: string }[] = [], protectedAbsent: string[] = [];
   for (const file of candidates) {
     try { lstatSync(file); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; protectedAbsent.push(file); continue; }
+    protectedFiles.push(file);
+    if (configPaths.includes(file)) continue;
     const tree = snapshotGlobalTree(file, { observeOnly: true, maxBytes: 1024 * 1024 });
     assert.ok(tree.length === 1 && tree[0]!.kind === 'file' && tree[0]!.sha256, 'global_cli_protected_file_invalid');
     pins.push({ file, sha256: tree[0]!.sha256! });
@@ -28,7 +31,7 @@ export function globalMigrationInput(options: GlobalMigrationOptions, userHome =
   assert.ok(pkg.name === 'caveat-cli' && typeof pkg.version === 'string', 'global_cli_package_invalid');
   return { binDirectory: globalNpmLayout(globalRoot).binDirectory, protectedAbsent, snapshot: {
     globalRoot, packageRoot, expectedPackageVersion: pkg.version, node: process.execPath, nodeVersion: process.version, npmAlias: resolve(options.npmCli),
-    pointer: paths.pointer, expectedRelease: selected.pointer.release, protectedFiles: pins.map(row => row.file), pins,
+    pointer: paths.pointer, expectedRelease: selected.pointer.release, protectedFiles, pins,
   } };
 }
 
@@ -41,15 +44,15 @@ export async function runGlobalMigrationCommand(mode: 'plan' | 'execute', option
     if (mode === 'plan') {
       const result = await planGlobalMigration(input, event => output({ schema: 'caveat.global_migration_event.v1', ...event }));
       output({ schema: 'caveat.global_migration_plan_result.v1', status: 'ready', planSha256: result.planSha256,
-        packageVersion: result.plan.baseline.packageVersion, release: input.snapshot.expectedRelease, protectedFiles: input.snapshot.protectedFiles.length,
-        protectedAbsences: input.protectedAbsent!.length, processAssessment: result.processAssessment, residualRisks: result.processAssessment?.residualRisks, filesystemWrites: 0, existingProcessOperations: 0 });
+        packageVersion: result.plan.baseline.packageVersion, release: input.snapshot.expectedRelease, protectedFiles: result.plan.baseline.protectedFiles.length,
+        protectedAbsences: result.plan.absences.length, processAssessment: result.processAssessment, configObservations: result.configObservations, residualRisks: result.processAssessment?.residualRisks, filesystemWrites: 0, existingProcessOperations: 0 });
     } else {
       const result = await executeGlobalMigration(input, options.expectedPlanSha256 ?? '', event => output({ ...event }));
       output({ ...result }); if (result.status !== 'completed') process.exitCode = 1;
     }
   } catch (error) {
     output({ schema: 'caveat.global_migration_result.v1', status: 'stopped', phase: 'input-or-preflight',
-      reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? null, processAssessment: (error as { preflight?: unknown }).preflight ?? null,
+      reason: error instanceof Error ? error.message : String(error), diagnostic: (error as { diagnostic?: unknown }).diagnostic ?? null, processAssessment: (error as { preflight?: unknown }).preflight ?? null, configObservations: (error as { configObservations?: unknown }).configObservations ?? [],
       errorSha256: createHash('sha256').update(error instanceof Error ? error.name + ':' + error.message : String(error)).digest('hex'),
       ...(mode === 'plan' ? { filesystemWrites: 0 } : {}), existingProcessOperations: 0 }); process.exitCode = 1;
   }

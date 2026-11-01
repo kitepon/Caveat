@@ -493,13 +493,15 @@ describe('read-only admission and native-v2 independent status', () => {
         primaryUsers: () => ({ uids: [process.geteuid!()] }) })))).rejects.toThrow('global_guard_writable_parent');
     expect(readdirSync(f.paths.root)).toEqual(before); expect(existsSync(f.paths.lock)).toBe(false); expect(existsSync(f.packageRoot)).toBe(true);
   });
-  it('binds absent settings and their nearest existing parent before mutation', { timeout: 60000 }, async () => {
+  it('observes newly appearing external settings without binding their parent', { timeout: 60000 }, async () => {
     const f = fixture(), absent = join(f.profile, 'new-client', 'settings.json'), input = { ...f.input, protectedAbsent: [absent] };
     const admission = await bindGlobalAdmission(input, () => {}, async () => tables());
     try {
-      expect(admission.plan.absences).toMatchObject([{ path: absent, parent: f.profile }]);
-      mkdirSync(dirname(absent));
-      await expect(admission.prepare(admission.planSha256)).rejects.toThrow('global_migration_absence_changed'); expect(existsSync(f.paths.lock)).toBe(false);
+      expect(admission.plan.absences).toEqual([]);
+      expect(admission.plan.configPaths).toContain(absent);
+      mkdirSync(dirname(absent)); writeFileSync(absent, 'third-party');
+      await admission.verify();
+      expect(admission.configState.records().some(row => row.changes > 0)).toBe(true); expect(existsSync(f.paths.lock)).toBe(false);
     } finally { admission.close(); }
   });
   it('reopens native-v2 status after release and detects a missing wrapper without altering it', { timeout: 120000 }, async () => {
@@ -692,7 +694,9 @@ describe('recovery fresh boundaries and immutable source evidence', () => {
     const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
     try {
       const plan = structuredClone(admission.plan);
-      plan.aliases.find(row => row.path === f.config)!.canonical = f.paths.pointer;
+      plan.schema = 'caveat.global_migration_plan.v1';
+      plan.aliases.push({ path: f.config, canonical: f.paths.pointer });
+      plan.baseline.protectedFiles.push({ file: f.config, rows: snapshotGlobalTree(f.config) });
       const observed = globalRecoveryConfigPaths(plan);
       expect(observed).not.toContain(f.config); expect(observed).not.toContain(f.paths.pointer);
     } finally { admission.close(); }
@@ -1223,4 +1227,117 @@ it('still refuses active pointer changes during independent recovery readback', 
     if (event.phase === 'readback' && event.event === 'issued') appendFileSync(r.f.paths.pointer, ' ');
   }, async () => tables());
   expect(result).toMatchObject({ status: 'unknown', phase: 'readback' }); r.unchanged();
+});
+
+
+describe('migration external client-setting observations', () => {
+  it('admits Claude Code config writers and preserves the reviewed digest across external edits', { timeout: 120000 }, async () => {
+    const f = fixture(), file = join(f.profile, '.claude.json'); renameSync(f.config, file);
+    f.input.snapshot.protectedFiles = f.input.snapshot.protectedFiles.map(path => path === f.config ? file : path);
+    f.input.snapshot.pins = f.input.snapshot.pins.map(row => row.file === f.config ? { ...row, file } : row);
+    const collect = async () => {
+      const data = tables(), st = statSync(file, { bigint: true });
+      const code = { ...data.before[0]!, pid: process.pid + 123, birth: 'fixture-Code',
+        executable: { path: '/usr/bin/claude', dev: '1', ino: '2' }, argv: ['claude', '--resume'], claudeConfig: { dev: String(st.dev), ino: String(st.ino) } };
+      data.before.push(code); data.after.push(structuredClone(code)); return data;
+    };
+    const admission = await bindGlobalAdmission(f.input, () => {}, collect), digest = admission.planSha256;
+    expect(admission.plan.schema).toBe('caveat.global_migration_plan.v2');
+    expect(admission.plan.baseline.protectedFiles.map(row => row.file)).not.toContain(file);
+    expect(admission.processAssessment()).toMatchObject({ status: 'ready', writers: 0,
+      records: [{ classification: 'observation', reason: 'claude_config_writer', resolution: { action: 'observe' } }] });
+    admission.close(); appendFileSync(file, ' ');
+    const fresh = await bindGlobalAdmission(f.input, () => {}, collect);
+    expect(fresh.planSha256).toBe(digest);
+    const result = await coordinateGlobalMigration(f.input, digest, event => {
+      if (event.phase === 'working-copy' || event.phase === 'readback') appendFileSync(file, ' ');
+    }, async () => fixtureCoordinatorAdmission(fresh));
+    expect(result).toMatchObject({ status: 'completed', phase: 'readback' });
+    expect(result.configObservations.some(row => row.changes > 0 && row.writerPids.includes(process.pid + 123))).toBe(true);
+    expect(JSON.stringify(result.configObservations)).not.toContain(f.root);
+  });
+  it.each(['pointer', 'package', 'npm', 'other-global'] as const)('keeps owned %s changes strict', { timeout: 60000 }, async kind => {
+    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    try {
+      const file = kind === 'pointer' ? f.paths.pointer : kind === 'package' ? join(f.packageRoot, 'package.json')
+        : kind === 'npm' ? f.input.snapshot.npmAlias : join(f.globalRoot, 'other/index.js');
+      if (isWindows() && kind === 'pointer') {
+        const before = readFileSync(file); let denied: unknown;
+        try { appendFileSync(file, ' '); } catch (error) { denied = error; }
+        expect(denied).toMatchObject({ code: expect.stringMatching(/^(EBUSY|EACCES|EPERM)$/) });
+        expect(readFileSync(file)).toEqual(before); await admission.verify();
+      } else {
+        appendFileSync(file, ' ');
+        await expect(admission.prepare(admission.planSha256)).rejects.toThrow();
+      }
+      expect(existsSync(f.paths.lock)).toBe(false);
+    } finally { admission.close(); }
+  });
+  it('rejects a client-config hardlink into an owned mutation object', { timeout: 60000 }, async () => {
+    const f = fixture(); rmSync(f.config); linkSync(join(f.packageRoot, 'package.json'), f.config);
+    f.input.snapshot.pins = f.input.snapshot.pins.map(row => row.file === f.config ? { ...row, sha256: sha(readFileSync(f.config)) } : row);
+    await expect(bindGlobalAdmission(f.input, () => {}, async () => tables())).rejects.toThrow('global_migration_config_mutation_identity');
+    expect(existsSync(f.paths.lock)).toBe(false);
+  });
+  it('reads persisted v1 migration plans without adding v2 fields or changing evidence', { timeout: 60000 }, async () => {
+    const f = fixture(), session = await bindGlobalMigration(f.input, () => {}, async () => tables()); session.close();
+    const directory = session.runDirectory, file = join(directory, 'plan.json');
+    const oldDigest = session.planSha256, plan = JSON.parse(readFileSync(file, 'utf8'));
+    plan.schema = 'caveat.global_migration_plan.v1'; delete plan.configPaths;
+    const digest = sha(Buffer.from(JSON.stringify(plan))); writeFileSync(file, JSON.stringify(plan) + '\n');
+    for (const name of readdirSync(directory).filter(name => name !== 'plan.json' && /\.jsonl?$/.test(name))) {
+      const path = join(directory, name); writeFileSync(path, readFileSync(path, 'utf8').replaceAll(oldDigest, digest));
+    }
+    const before = readdirSync(directory).map(name => ({ name, bytes: readFileSync(join(directory, name)) }));
+    expect(await inspectGlobalMigrationRecovery(directory, digest)).toMatchObject({ status: 'observed', reason: 'no_recorded_mutation' });
+    for (const row of before) expect(readFileSync(join(directory, row.name))).toEqual(row.bytes);
+  });
+});
+
+
+it.each(['consumer', 'open-writer', 'npm-writer'] as const)('migration still stops an actual %s', { timeout: 60000 }, async kind => {
+  const f = fixture(), file = join(f.profile, '.claude.json'); renameSync(f.config, file);
+  f.input.snapshot.protectedFiles = f.input.snapshot.protectedFiles.map(path => path === f.config ? file : path);
+  f.input.snapshot.pins = f.input.snapshot.pins.map(row => row.file === f.config ? { ...row, file } : row);
+  const collect = async () => {
+    const data = tables(kind === 'npm-writer'), st = statSync(file, { bigint: true });
+    if (kind !== 'npm-writer') {
+      const code = { ...data.before[0]!, pid: process.pid + 123, birth: 'fixture-Code',
+        executable: { path: '/usr/bin/claude', dev: '1', ino: '2' },
+        argv: kind === 'consumer' ? ['claude', join(f.packageRoot, 'dist/caveat.js')] : ['claude', '--resume'],
+        claudeConfig: { dev: String(st.dev), ino: String(st.ino) },
+        openWriters: kind === 'open-writer' ? [{ dev: String(st.dev), ino: String(st.ino) }] : [] };
+      data.before.push(code); data.after.push(structuredClone(code));
+    }
+    return data;
+  };
+  await expect(bindGlobalAdmission(f.input, () => {}, collect)).rejects.toMatchObject({ message: 'global_migration_process_preflight_stopped',
+    preflight: { status: 'stopped' }, configObservations: expect.any(Array) });
+  const result = await coordinateGlobalMigration(f.input, '0'.repeat(64), () => {}, (input, emit) => bindGlobalAdmission(input, emit, collect));
+  expect(result.status).toBe('stopped'); expect(result.configObservations).toHaveLength(1);
+  expect(existsSync(f.paths.lock)).toBe(false);
+});
+
+it('stops an external config replaced with a hardlink into an owned object after planning', { timeout: 60000 }, async () => {
+  const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+  try {
+    rmSync(f.config); linkSync(join(f.packageRoot, 'package.json'), f.config);
+    await expect(admission.prepare(admission.planSha256)).rejects.toThrow('global_migration_config_mutation_identity');
+    expect(existsSync(f.paths.lock)).toBe(false);
+  } finally { admission.close(); }
+});
+
+
+it('observes external alias retargeting without changing the admitted v2 path scope', { timeout: 60000 }, async () => {
+  const f = fixture(), first = join(f.profile, 'first-config'), second = join(f.profile, 'second-config');
+  mkdirSync(first); mkdirSync(second); rmSync(f.config); symlinkSync(first, f.config, isWindows() ? 'junction' : 'dir');
+  const admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+  try {
+    rmSync(f.config); symlinkSync(second, f.config, isWindows() ? 'junction' : 'dir');
+    await admission.verify();
+    expect(globalRecoveryConfigPaths(admission.plan)).toEqual(admission.plan.configPaths);
+    expect(admission.configState.records().some(row => row.changes > 0)).toBe(true);
+    const bad = structuredClone(admission.plan); bad.configPaths = [f.paths.pointer];
+    expect(() => globalRecoveryConfigPaths(bad)).toThrow('global_config_owned_scope');
+  } finally { admission.close(); }
 });

@@ -769,7 +769,7 @@ file identities and reported with their process PID, birth and parent app, inclu
 global migration. Unreadable handles and writers that close or replace files between
 observations remain residual risks. Windows retains its write/delete exclusion;
 open-handle writer attribution is unavailable there.
-Global recovery protects external client settings by never writing them. The
+Global migration and recovery protect external client settings by never writing them. The
 validated original plan derives their input paths and aliases; they never grant
 mutation authority. Their current metadata, device/inode identities and available
 Claude Code writer PIDs are observations in the plan and execution result
@@ -779,6 +779,11 @@ execution or independent post-close readback are observations. Settings hold no
 long-lived Windows write/delete exclusion handle. A bounded summary retains the
 first/latest observation and the number of observed changes; an unobserved ABA
 between samples cannot be attributed or proved absent.
+
+Migration plan v2 records the external settings path scope without binding their contents
+or metadata into the reviewed digest; existing v1 plans remain readable. Migration
+checks current settings aliases and identities against its owned mutation objects
+before every mutation. Config observations are refreshed through post-close readback.
 
 The v3 recovery admission binds the external settings path scope, source evidence,
 and a fresh strict snapshot of the active deployment (including active.json,
@@ -795,10 +800,10 @@ execution under the new scope.
 
 Claude Code is recognized from executable/entry tokens in its npm package, bin
 entry or versioned embedded app. The desktop Claude.app and Chromium helpers are
-excluded. In global recovery only, identity-bound `claude_config_writer` records
+excluded. In global migration and recovery, identity-bound `claude_config_writer` records
 are observations with an `observe` resolution. Old-global consumers, actual
-protected open writers and npm writers still stop the operation. Migration and
-registration plans that write settings retain the existing writer stop. No
+protected open writers and npm writers still stop the operation. Registration plans replace client settings and explicitly retain
+the existing writer stop. No
 client process is killed or closed by Caveat.
 Stopped plans collect bounded consumer/writer observations when their validated
 source provides a trusted process scope, preserving both the original inspection

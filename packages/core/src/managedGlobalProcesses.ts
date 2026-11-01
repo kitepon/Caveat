@@ -45,7 +45,7 @@ export const globalProcessResidualRisks = [
   'Windows open-handle writer attribution is unavailable; retained protected handles still exclude writes and deletion',
 ] as const;
 
-/** Only readable references to the old package and readable config writers stop migration. */
+/** Consumers and actual open writers stop; external setting writers may remain observations. */
 export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeProcessTables) {
   validateScope(scope);
   const norm = (value: string) => normalized(value, tables.caseInsensitive);
@@ -95,7 +95,7 @@ export function assessGlobalProcesses(scope: GlobalProcessScope, tables: NativeP
       ...(claudeWriter ? { configIdentity: row.claudeConfig! } : {}),
       reason: openFiles.length ? 'protected_file_open_writer' : writer ? 'old_global_npm_writer' : consumer ? 'old_global_reference' : 'claude_config_writer',
       resolution: { action: classification === 'observation' ? 'observe' : writer ? 'finish-npm-operation' : 'close-process', instruction: classification === 'observation'
-        ? `Claude Code PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) may update its configuration; recovery does not write it.` : writer
+        ? `Claude Code PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) may update its configuration; this operation only observes it.` : writer
         ? `Let npm PID ${pid} (parent ${parentApp}, PID ${row.ppid ?? 'unavailable'}) finish, then retry.`
         : `Save work and close ${parentApp} (parent PID ${row.ppid ?? 'unavailable'}, consumer PID ${pid}), then retry.` } });
   }
