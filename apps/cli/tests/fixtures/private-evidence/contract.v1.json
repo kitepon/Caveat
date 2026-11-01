@@ -1,6 +1,6 @@
 {
   "notice": "Synthetic contract values only. No measured HEAD, host, account or verified transport capability.",
-  "public_bytes_utf8": "{\"schema\":\"caveat.native_factory_diagnostics.v1\",\"product\":\"caveat\",\"version\":\"0.20.3\",\"overall\":{\"status\":\"not_ready\"},\"sync\":{\"status\":\"not_ready\",\"reason_code\":\"remote_mismatch\"}}\n",
+  "public_bytes_utf8": "{\"schema\":\"caveat.native_factory_diagnostics.v1\",\"product\":\"caveat\",\"version\":\"0.20.3\",\"overall\":{\"status\":\"ready\"},\"sync\":{\"status\":\"ready\",\"reason_code\":\"remote_changed\"}}\n",
   "request_env": {
     "CAVEAT_FACTORY_PRIVATE_EVIDENCE": "v1",
     "CAVEAT_FACTORY_PRIVATE_COLLECTION_ID": "00000000-0000-4000-8000-000000000001",
@@ -44,17 +44,17 @@
     "execution_id": "00000000-0000-4000-8000-000000000002",
     "type": "diagnostic_result",
     "public_output": {
-      "bytes": 183,
-      "sha256": "199f6ee49e9201fc704d1dad12dedb9d4c068ef90dc34b39887fd2dcc368800e"
+      "bytes": 174,
+      "sha256": "748368908e63935dde3b640522d5cd4a1287b1c97b5aef7e303fc2bb82c612cf"
     },
     "public_result": {
       "schema": "caveat.native_factory_diagnostics.v1",
-      "overall_status": "not_ready",
-      "planned_exit_code": 1
+      "overall_status": "ready",
+      "planned_exit_code": 0
     },
     "sync_observation": {
-      "status": "not_ready",
-      "reason_code": "remote_mismatch",
+      "status": "ready",
+      "reason_code": "remote_changed",
       "repo_identity": {
         "status": "available",
         "algorithm": "origin-descriptor-sha256-v1",

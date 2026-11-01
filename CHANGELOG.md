@@ -2,6 +2,11 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+- Treat clean event-driven sync waiting for a changed remote as healthy, while retaining cached divergence, pending local changes and recorded autosync failures.
+
 ## [0.21.17] — 2026-11-01
 
 ### Fixed
@@ -149,8 +154,6 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 - Check whether pull actually started a rebase before aborting it. Failed recovery remains a high-impact runtime report. Local entries/commits survive a remote failure and a retry checks the remote branch before pushing.
 - Determine runtime severity from the observed operation/feature/recovery impact, rather than the code or occurrence count. Preserve serious unresolved impact and all historical fingerprints/counts/times; retain legacy records for evidence-based review.
 - Keep the existing signed-report JSON contract, unacknowledged report retention and duplicate-safe cumulative retry behavior.
-
-## Unreleased
 
 ## [0.20.2] — 2026-10-06
 

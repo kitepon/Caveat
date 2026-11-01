@@ -254,6 +254,12 @@ For a targeted Codex repair, run `caveat codex-hook diagnostics` and then
 from whether Caveat-owned hooks are installed.
 
 For a machine-readable product gate, use `caveat factory-diagnostics --json`.
+Sync readiness describes a healthy event-driven mechanism, not identical HEADs at
+all times. A clean repository matching its cached upstream, with no recorded
+autosync failures, stays `ready/remote_changed` when the live remote differs.
+Known cached ahead/behind/diverged states and dirty worktrees remain non-ready;
+recorded autosync failures remain non-ready and an unreadable existing state is
+unverified. Diagnostics never fetch or sync; scheduled reception remains opt-in.
 The versioned `caveat.native_factory_diagnostics.v1` output includes
 `connectors.cursor.compatibility_status`, while the base command preserves the
 existing Claude/Codex readiness meaning. A host that requires Cursor runs

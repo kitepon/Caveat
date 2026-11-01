@@ -196,7 +196,11 @@ GitHub identityを切り替えず、host別Caveat hook installerを前後に重�
 Codexだけを修復する時は`caveat codex-hook diagnostics`の後に`caveat codex-hook install`を使います。
 diagnosticsはCodex hook runtimeが使えるかと、Caveat-owned hooksがinstall済みかを分けて表示します。
 
-機械判定には`caveat factory-diagnostics --json`を使います。version付きschema
+機械判定には`caveat factory-diagnostics --json`を使います。同期診断は同期の仕組みの健全性を判定します。
+変更なし・cached upstreamと一致・autosync失敗記録なしなら、live remoteだけ異なる待機状態は
+`ready/remote_changed`です。HEADが常時同一であることや祖先関係は保証しません。
+cachedのahead/behind/diverged、未確定の編集、記録されたautosync失敗は非ready、既存stateの読取不能は
+unverifiedとして保持します。診断でfetchや同期をせず、定期受信は明示登録のままです。version付きschema
 `caveat.native_factory_diagnostics.v1`は`connectors.cursor.compatibility_status`を公開し、引数なしの
 既存Claude/Codex readiness契約は変えません。Cursorを必須とするhostは
 `caveat factory-diagnostics --json --require-connector cursor`を実行します。Cursor connectorが
