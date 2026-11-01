@@ -72,7 +72,7 @@ privateなチーム共有は`caveat sync`、公開は`caveat publish`の封緘mi
 | AI が自覚しないもがきも検出 | ✅ transcript シグナル抽出 | ❌ | ❌ | ❌ | ❌ |
 | 外部仕様の罠と repo 固有メモを混在管理 | ✅ public / private 2 tier | ⚠️ 分離なし | ⚠️ 分離なし | ⚠️ | ⚠️ |
 
-**ステータス**: v0.21.15候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
+**ステータス**: v0.21.16候補。Claude Code、Codex、Cursorにnative統合経路があり、GrokにもMCPを登録します。
 
 managed導入のAI案内は、PATHのcommandではなく登録済みの `caveat_get`・`caveat_update`・`caveat_record`・`caveat_sync` を使います。`caveat_sync` は既定remoteへ私有知識をpushし、clientの確認方針を維持します。client timeoutでも進行中のsyncは中断せず、遅れて完了した結果は deployment status の ownSync に残します。runningは成功ではありません。MCP toolが無い場合はglobal CLIや別contextへ戻さず停止します。
 
