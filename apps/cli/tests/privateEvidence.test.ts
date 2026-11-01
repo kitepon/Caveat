@@ -85,7 +85,7 @@ describe('same-run pure projection', () => {
   });
   it('separates public reason_code and private reason, never invents relation counts/receipt', () => {
     const projection = projectSync(run, {origin:acquired(fixture.origin_input),local:acquired('a'.repeat(40)),remote:acquired('b'.repeat(40))},
-      {status:'not_ready',reason_code:'remote_mismatch'});
+      {status:'ready',reason_code:'remote_changed'});
     expect(projection).toEqual(fixture.result.sync_observation);
     expect(projection.repo_identity).not.toHaveProperty('reason_code');
     expect(projection.relation_counts).toEqual({status:'not_supported',behind:null,ahead:null});
@@ -179,7 +179,7 @@ describe('complete synthetic frame exchange', () => {
     if(kind==='receipt')result.operation_receipt.receipt={ok:true};
     if(kind==='public_hash')result.public_output.sha256='0'.repeat(64);
     if(kind==='public_status')result.sync_observation.reason_code='ready';
-    if(kind==='exit')result.public_result.planned_exit_code=0;
+    if(kind==='exit')result.public_result.planned_exit_code=1;
     if(kind==='process_missing_reason')hello.process.entry_realpath=null;
     if(kind==='unexpected_key')result.raw='secret';
     if(kind==='peer')hello.process.pid++;

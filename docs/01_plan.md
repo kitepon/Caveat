@@ -86,6 +86,11 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
   `caveat factory-diagnostics --json --require-connector cursor`を使う。Caveatが
   `connectors.cursor.compatibility_status`とoverall、exitを決める。呼出し側はschemaとtop-level
   `overall.status`、exitだけで合否を決め、Cursorのhook名、必要集合、command、timeoutを複製しない。
+- sync診断は同期機構の健全性を判定する。dirty、cached upstreamに対するahead/behind/diverged、
+  origin/upstream/資格の不正、記録されたautosync失敗はreadyにしない。既存autosync stateが読めなければunverified。
+  clean・cached 0/0・失敗記録なしでlive remoteだけ異なる時はready/remote_changedとする。
+  event-driven同期の待機状態であり、HEAD同一性やremoteの祖先関係を証明しない。fetchや同期は診断で実行しない。
+  native定期受信の登録は引き続き明示opt-inである。
 - Grokを必須とするhostは`caveat factory-diagnostics --json --require-connector grok`を使う。
   `connectors.grok.mcp`は登録の有無、有効状態、実行先の正規性を診断する。ComposerもGrok CLIの
   MCP登録を使うが、モデル認証と回答は実機smokeで別に確認する。
@@ -289,7 +294,8 @@ public JSONが途中で失われた時はpublic_output hashを使って内容を
 - `relation_counts`: `{status:"not_supported", behind:null, ahead:null}`固定。
 
 各値は既存sync関数がそのrunで得た変数だけをsinkへ渡す。
-remote_mismatchでreturnする前に取得済み値を渡すが、後からrev-list/ls-remote/fetchを足さない。
+判定完了前に取得済み値を渡すが、private証跡のためにrev-list/ls-remote/fetchを足さない。
+ready/remote_changedでも取得済みHEADが異なればcomparison=differentを保持する。
 dirty/origin不在/通信不能等で未到達ならnull+固定reason。過去/current値は使わない。
 v1はSHA-1の40hexだけを対象にし、異なるrepo hash形式はunverifiedとして補完しない。
 

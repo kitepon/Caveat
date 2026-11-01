@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openDb, recordRuntimeError, runtimeErrorsConfigPath, runtimeErrorsStatePath } from '@caveat/core';
+import { openDb, recordRuntimeError, runtimeErrorsConfigPath, runtimeErrorsStatePath, writeAutoSyncState } from '@caveat/core';
 import { stringify as stringifyToml } from 'smol-toml';
 import { timedFixtureStep } from './fixtures/commandTiming.js';
 
@@ -55,6 +55,15 @@ function readyFactory(fixture: ReturnType<typeof isolated>) {
   mkdirSync(join(fixture.home, '.claude'), { recursive: true }); writeFileSync(join(fixture.home, '.claude', 'settings.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [{ command: `${nodeCommand} ${cliCommand} hook user-prompt-submit` }] }], PostToolUse: [{ hooks: [{ command: `${nodeCommand} ${cliCommand} hook post-tool-use` }] }], PostToolUseFailure: [{ hooks: [{ command: `${nodeCommand} ${cliCommand} hook post-tool-use` }] }], Stop: [{ hooks: [{ command: `${nodeCommand} ${cliCommand} hook stop` }] }] } }));
   const codexHook = (subcommand: string) => ({ type: 'command', command: `${nodeCommand} ${cliCommand} codex-hook ${subcommand}`, timeout: 5, async: false, statusMessage: null });
   mkdirSync(fixture.codexHome, { recursive: true }); writeFileSync(join(fixture.codexHome, 'config.toml'), '[features]\nhooks = true\n'); writeFileSync(join(fixture.codexHome, 'hooks.json'), JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: [codexHook('user-prompt-submit')] }], PostToolUse: [{ hooks: [codexHook('post-tool-use')] }], Stop: [{ hooks: [codexHook('stop')] }] } }));
+}
+
+function advanceRemote(fixture: ReturnType<typeof isolated>) {
+  const writer = join(fixture.root, 'writer');
+  const git = (args: string[]) => execFileSync('git', args, { cwd: fixture.root, env: fixture.env, stdio: 'pipe' });
+  git(['clone', '--branch', 'main', join(fixture.root, 'remote.git'), writer]);
+  git(['-C', writer, 'config', 'user.email', 'fixture@example.test']); git(['-C', writer, 'config', 'user.name', 'Fixture']);
+  writeFileSync(join(writer, 'remote.md'), 'remote change\n');
+  git(['-C', writer, 'add', '.']); git(['-C', writer, 'commit', '-m', 'remote change']); git(['-C', writer, 'push']);
 }
 
 function readyCursor(fixture: ReturnType<typeof isolated>) {
@@ -298,19 +307,67 @@ describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
     }
   });
 
-  it('does not report own sync ready for dirty, remotely-behind, or unreachable worktrees', () => {
-    const dirty = isolated(); readyFactory(dirty); writeFileSync(join(dirty.caveatHome, 'own', 'dirty.md'), 'uncommitted\n');
-    expect(json(run(['factory-diagnostics', '--json'], dirty.env)).sync).toMatchObject({ status: 'not_ready', reason_code: 'worktree_dirty' });
+  it('accepts an idle remote change without fetching, but refuses a known cached behind state', () => {
+    const fixture = isolated(); readyFactory(fixture);
+    try {
+      const own = join(fixture.caveatHome, 'own');
+      const git = (args: string[]) => execFileSync('git', args, { cwd: own, env: fixture.env, encoding: 'utf8', stdio: 'pipe' });
+      const before = git(['show-ref']); const head = git(['rev-parse', 'HEAD']);
+      advanceRemote(fixture);
+      const idle = run(['factory-diagnostics', '--json'], fixture.env);
+      expect(json(idle)).toMatchObject({ sync: { status: 'ready', reason_code: 'remote_changed' }, overall: { status: 'ready' } });
+      expect(idle.status).toBe(0);
+      expect(git(['show-ref'])).toBe(before); expect(git(['rev-parse', 'HEAD'])).toBe(head);
+      expect(git(['status', '--porcelain'])).toBe('');
+      expect(existsSync(join(fixture.caveatHome, 'sync'))).toBe(false);
+      // Only the fixture fetches: diagnostics must retain known pending reception.
+      git(['fetch', 'origin']);
+      const behind = run(['factory-diagnostics', '--json'], fixture.env);
+      expect(json(behind).sync).toEqual({ status: 'not_ready', reason_code: 'behind' });
+      expect(behind.status).toBe(1);
+    } finally { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  });
 
-    const behind = isolated(); readyFactory(behind); const remote = join(behind.root, 'remote.git'); const writer = join(behind.root, 'writer');
-    execFileSync('git', ['clone', '--branch', 'main', remote, writer], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, stdio: 'pipe' }); execFileSync('git', ['config', 'user.email', 'fixture@example.test'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer }); execFileSync('git', ['config', 'user.name', 'Fixture'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer });
-    writeFileSync(join(writer, 'remote.md'), 'remote advance\n'); execFileSync('git', ['add', '.'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer }); execFileSync('git', ['commit', '-m', 'remote advance'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer, stdio: 'pipe' }); execFileSync('git', ['push'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: writer, stdio: 'pipe' });
-    execFileSync('git', ['fetch', 'origin'], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: join(behind.caveatHome, 'own'), stdio: 'pipe' });
-    expect(json(run(['factory-diagnostics', '--json'], behind.env)).sync).toMatchObject({ status: 'not_ready', reason_code: 'remote_mismatch' });
+  it.each(['dirty', 'ahead', 'diverged', 'unreachable'])(
+    'does not hide %s worktrees as an idle remote change', kind => {
+      const fixture = isolated(); readyFactory(fixture);
+      try {
+        const own = join(fixture.caveatHome, 'own');
+        const git = (args: string[]) => execFileSync('git', args, { cwd: own, env: fixture.env, stdio: 'pipe' });
+        if (kind === 'dirty') writeFileSync(join(own, 'dirty.md'), 'uncommitted\n');
+        if (kind === 'ahead' || kind === 'diverged') {
+          writeFileSync(join(own, 'local.md'), 'local change\n'); git(['add', '.']); git(['commit', '-m', 'local change']);
+        }
+        if (kind === 'diverged') { advanceRemote(fixture); git(['fetch', 'origin']); }
+        if (kind === 'unreachable') git(['remote', 'set-url', 'origin', join(fixture.root, 'missing-remote.git')]);
+        const result = run(['factory-diagnostics', '--json'], fixture.env);
+        expect(json(result).sync).toEqual({ status: kind === 'unreachable' ? 'unverified' : 'not_ready',
+          reason_code: kind === 'dirty' ? 'worktree_dirty' : kind === 'unreachable' ? 'upstream_unavailable' : kind });
+        expect(result.status).toBe(1);
+      } finally { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+    });
 
-    const unreachable = isolated(); readyFactory(unreachable); const own = join(unreachable.caveatHome, 'own');
-    execFileSync('git', ['remote', 'set-url', 'origin', join(unreachable.root, 'missing-remote.git')], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, cwd: own });
-    expect(json(run(['factory-diagnostics', '--json'], unreachable.env)).sync.status).not.toBe('ready');
+  it.each([0, 1, 3])('keeps autosync failure count %i visible when the remote changes', failures => {
+    const fixture = isolated(); readyFactory(fixture);
+    try {
+      advanceRemote(fixture);
+      writeAutoSyncState(fixture.caveatHome, { finishedAt: '2026-01-01T00:00:00Z', signature: '',
+        ownSync: { consecutiveFailureCount: failures, consecutiveFailureSignature: failures ? 'failure' : null } });
+      const result = run(['factory-diagnostics', '--json'], fixture.env);
+      expect(json(result).sync).toEqual(failures ? { status: 'not_ready', reason_code: 'autosync_failed' }
+        : { status: 'ready', reason_code: 'remote_changed' });
+      expect(result.status).toBe(failures ? 1 : 0);
+    } finally { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  });
+
+  it('does not hide an unreadable existing autosync state', () => {
+    const fixture = isolated(); readyFactory(fixture);
+    try {
+      mkdirSync(join(fixture.caveatHome, 'sync')); writeFileSync(join(fixture.caveatHome, 'sync', '.last-autosync.json'), '{');
+      const result = run(['factory-diagnostics', '--json'], fixture.env);
+      expect(json(result).sync).toEqual({ status: 'unverified', reason_code: 'autosync_state_unreadable' });
+      expect(result.status).toBe(1);
+    } finally { rmSync(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
   });
 });
 

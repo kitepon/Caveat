@@ -1,5 +1,5 @@
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
-import { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets } from '@caveat/core';
+import { githubGitConfig, githubGitEnvironment, githubCredentialFailureCode, assertNamedGithubTargets, autoSyncStatePath, readAutoSyncState } from '@caveat/core';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -73,7 +73,7 @@ function codexHooks(codexHome: string, nodePath: string, cliScriptPath: string) 
   const hooks = value.hooks as Record<string, unknown>; const present = (event: string, subcommand: 'user-prompt-submit' | 'post-tool-use' | 'stop') => Array.isArray(hooks[event]) && hooks[event].some((entry) => isRecord(entry) && Array.isArray(entry.hooks) && entry.hooks.some((item) => isCanonicalCaveatCodexHookEntry(item, subcommand, nodePath, cliScriptPath)));
   return { userPromptSubmit: present('UserPromptSubmit', 'user-prompt-submit'), postToolUse: present('PostToolUse', 'post-tool-use'), stop: present('Stop', 'stop') };
 }
-function sync(own: string, githubUser?: string | null) {
+function sync(own: string, caveatHome: string, githubUser?: string | null) {
   let config: string[];
   try { config = githubGitConfig(githubUser, own); } catch (error) { return unverified(githubCredentialFailureCode(error, githubUser) ?? 'upstream_unavailable'); }
   const git = (args: string[], options: Partial<ExecFileSyncOptionsWithStringEncoding> = {}) => execFileSync('git',
@@ -90,14 +90,18 @@ function sync(own: string, githubUser?: string | null) {
     const upstream = git(['rev-parse', '--symbolic-full-name', '@{upstream}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim();
     if (!upstream.startsWith('refs/remotes/origin/')) return status(false, 'upstream_not_origin');
     const remoteRef = `refs/heads/${upstream.slice('refs/remotes/origin/'.length)}`;
-    const remote = git(['ls-remote', '--exit-code', 'origin', remoteRef], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000, maxBuffer: 16_384 }).trim().split(/\s+/)[0];
     const head = git(['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim();
-    if (!/^[0-9a-f]{40}$/.test(remote ?? '') || !/^[0-9a-f]{40}$/.test(head)) return unverified('sync_hash_unparseable');
-    if (remote !== head) return status(false, 'remote_mismatch');
+    if (!/^[0-9a-f]{40}$/.test(head)) return unverified('sync_hash_unparseable');
     const counts = git(['rev-list', '--left-right', '--count', '@{upstream}...HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5_000 }).trim().split(/\s+/).map(Number);
     if (counts.length !== 2 || counts.some((value) => !Number.isSafeInteger(value) || value < 0)) return unverified('sync_count_unparseable');
-    if (counts[0] === 0 && counts[1] === 0) return status(true, 'ready');
-    return status(false, counts[0] && counts[1] ? 'diverged' : counts[0] ? 'behind' : 'ahead');
+    if (counts[0] || counts[1]) return status(false, counts[0] && counts[1] ? 'diverged' : counts[0] ? 'behind' : 'ahead');
+    const autoSync = readAutoSyncState(caveatHome);
+    if (!autoSync && existsSync(autoSyncStatePath(caveatHome))) return unverified('autosync_state_unreadable');
+    // Degraded/suspended retries derive from this same persisted failure count.
+    if ((autoSync?.ownSync.consecutiveFailureCount ?? 0) > 0) return status(false, 'autosync_failed');
+    const remote = git(['ls-remote', '--exit-code', 'origin', remoteRef], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 10_000, maxBuffer: 16_384 }).trim().split(/\s+/)[0];
+    if (!/^[0-9a-f]{40}$/.test(remote ?? '')) return unverified('sync_hash_unparseable');
+    return { status: 'ready' as const, reason_code: remote === head ? 'ready' : 'remote_changed' };
   } catch (error) { return unverified(githubCredentialFailureCode(error, githubUser) ?? 'upstream_unavailable'); }
 }
 export function factoryDiagnostics(
@@ -110,7 +114,7 @@ export function factoryDiagnostics(
   const db = database(ctx.paths.dbPath); const feature = codexFeature(codexHome); let installedCodexHooks: { userPromptSubmit: boolean; postToolUse: boolean; stop: boolean } | null = null; try { installedCodexHooks = codexHooks(codexHome, nodePath, cliScriptPath); } catch {}
   const codexHook = (present: boolean | undefined) => present === undefined ? unverified('config_unreadable') : !present ? hook(false) : feature.status === 'ready' ? hook(true) : { ...feature };
   const grokMcp = grokRegistration(join(grokHome, 'config.toml'), nodePath, cliScriptPath);
-  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo, ctx.config.githubUser), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(claudeMcp, nodePath, cliScriptPath), hooks: claudeHooks(claudeDir, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(cursorDir, nodePath, cliScriptPath), grok: { status: grokMcp.status, mcp: grokMcp } } };
+  const output = { schema: 'caveat.native_factory_diagnostics.v1', product: 'caveat', version: CAVEAT_VERSION, overall: { status: 'unverified' as Status }, database: db, sync: sync(ctx.paths.knowledgeRepo, ctx.caveatHome, ctx.config.githubUser), connectors: { claude: { status: 'unverified' as Status, mcp: claudeRegistration(claudeMcp, nodePath, cliScriptPath), hooks: claudeHooks(claudeDir, nodePath, cliScriptPath) }, codex: { status: 'unverified' as Status, hooks: { user_prompt_submit: codexHook(installedCodexHooks?.userPromptSubmit), post_tool_use: codexHook(installedCodexHooks?.postToolUse), stop: codexHook(installedCodexHooks?.stop) } }, cursor: diagnoseCursorHookConnector(cursorDir, nodePath, cliScriptPath), grok: { status: grokMcp.status, mcp: grokMcp } } };
   const aggregate = (all: Status[]): Status => all.includes('not_ready') ? 'not_ready' : all.includes('unverified') ? 'unverified' : 'ready';
   const connectorStatus = (connector: { mcp?: { status: Status }; hooks: Record<string, { status: Status }> }): Status => aggregate([...Object.values(connector.hooks), ...(connector.mcp ? [connector.mcp] : [])].map((v) => v.status));
   output.connectors.claude.status = connectorStatus(output.connectors.claude); output.connectors.codex.status = connectorStatus(output.connectors.codex);
