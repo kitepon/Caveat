@@ -1261,8 +1261,15 @@ describe('migration external client-setting observations', () => {
     try {
       const file = kind === 'pointer' ? f.paths.pointer : kind === 'package' ? join(f.packageRoot, 'package.json')
         : kind === 'npm' ? f.input.snapshot.npmAlias : join(f.globalRoot, 'other/index.js');
-      appendFileSync(file, ' ');
-      await expect(admission.prepare(admission.planSha256)).rejects.toThrow();
+      if (isWindows() && kind === 'pointer') {
+        const before = readFileSync(file); let denied: unknown;
+        try { appendFileSync(file, ' '); } catch (error) { denied = error; }
+        expect(denied).toMatchObject({ code: expect.stringMatching(/^(EBUSY|EACCES|EPERM)$/) });
+        expect(readFileSync(file)).toEqual(before); await admission.verify();
+      } else {
+        appendFileSync(file, ' ');
+        await expect(admission.prepare(admission.planSha256)).rejects.toThrow();
+      }
       expect(existsSync(f.paths.lock)).toBe(false);
     } finally { admission.close(); }
   });
