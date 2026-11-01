@@ -1,3 +1,4 @@
+import { isClaudeCodeProcess } from './managedClaudeProcess.js';
 import assert from 'node:assert/strict';
 import { claudeConfigIdentity, type ClaudeConfigIdentity } from './managedClaudeConfig.js';
 import { closeSync, fstatSync, openSync, statSync } from 'node:fs';
@@ -74,7 +75,7 @@ export function readMacProcessArguments(pid: number, query: MacSysctl, errno: ()
     if (!Number.isSafeInteger(used) || used < 6 || used > buffer.length) return { argv: null, failure: { stage: 'read-bound', nativeCode: null, sizeQuerySucceeded: true } };
     try {
       const data = decodeMacArgumentData(buffer.subarray(0, used));
-      return { argv: data.argv, ...(readConfig && data.argv.some(arg => /(?:^|\/)claude$|@anthropic-ai\/claude-code\//i.test(arg))
+      return { argv: data.argv, ...(readConfig && isClaudeCodeProcess(data.argv)
         ? { claudeConfig: claudeConfigIdentity(buffer.subarray(data.cursor, used)) } : {}) };
     }
     catch (error) {

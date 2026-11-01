@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, chmodSync, appendFileSync, symlinkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync, truncateSync, openSync, writeSync, closeSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, cpSync, chmodSync, appendFileSync, symlinkSync, linkSync, renameSync, realpathSync, statSync, rmSync, readdirSync, existsSync, truncateSync, openSync, writeSync, closeSync } from 'node:fs';
 import { join, dirname, basename, delimiter } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +9,7 @@ import { recoverGlobalMigration, inspectGlobalRecoveryAttempt } from '../src/man
 import { recoveryModelFromMigration } from '../src/managedGlobalRecoveryModel.js';
 import { withGlobalRecoveryAttemptEvidence } from '../src/managedGlobalRecoveryAttempt.js';
 import { planGlobalRecoveryWithCollector } from '../src/managedGlobalRecoveryChain.js';
+import { globalRecoveryConfigPaths } from '../src/managedGlobalRecoveryConfig.js';
 import { parseGlobalMutationJournal } from '../src/managedGlobalJournal.js';
 import { coordinateGlobalMigration } from '../src/managedGlobalCoordinator.js';
 import { managedShellStatusCurrent } from '../src/managedGlobalShellStatus.js';
@@ -687,15 +688,21 @@ describe('separately journaled persisted recovery execution', () => {
 
 
 describe('recovery fresh boundaries and immutable source evidence', () => {
-  for (const changed of ['original', 'working', 'generated', 'protected', 'absent-setting', 'absent-management'] as const) it('refuses changed ' + changed + ' before private run creation', { timeout: 120000 }, async () => {
-    const r = await recoveryFixture(changed === 'working' ? 'working' : 'installed', f => {
-      if (changed === 'absent-setting') Object.assign(f.input, { protectedAbsent: [join(f.profile, 'new-settings.json')] });
-    });
+  it('keeps owned deployment paths strict when a settings input aliases them', { timeout: 60000 }, async () => {
+    const f = fixture(), admission = await bindGlobalAdmission(f.input, () => {}, async () => tables());
+    try {
+      const plan = structuredClone(admission.plan);
+      plan.aliases.find(row => row.path === f.config)!.canonical = f.paths.pointer;
+      const observed = globalRecoveryConfigPaths(plan);
+      expect(observed).not.toContain(f.config); expect(observed).not.toContain(f.paths.pointer);
+    } finally { admission.close(); }
+  });
+  for (const changed of ['original', 'working', 'generated', 'owned-pointer', 'absent-management'] as const) it('refuses changed ' + changed + ' before private run creation', { timeout: 120000 }, async () => {
+    const r = await recoveryFixture(changed === 'working' ? 'working' : 'installed');
     if (changed === 'original') appendFileSync(join(r.session.runDirectory, 'original-package/package.json'), ' ');
     if (changed === 'working') appendFileSync(join(r.f.packageRoot, 'package.json'), ' ');
     if (changed === 'generated') appendFileSync(join(r.f.binDirectory, 'caveat'), 'changed');
-    if (changed === 'protected') appendFileSync(r.f.config, ' ');
-    if (changed === 'absent-setting') writeFileSync(join(r.f.profile, 'new-settings.json'), '{}');
+    if (changed === 'owned-pointer') appendFileSync(r.f.paths.pointer, ' ');
     if (changed === 'absent-management') writeFileSync(join(r.f.globalRoot, '.package-lock.json'), '{}');
     const before = readdirSync(r.f.paths.root), result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, () => {}, async () => tables());
     expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0, runId: null }); expect(readdirSync(r.f.paths.root)).toEqual(before); r.unchanged();
@@ -806,13 +813,20 @@ describe('fresh recovery from confirmed partial attempts', () => {
   for (const [mode, stop] of [['backup', 'restore-package'], ['working', 'quarantine-working'], ['installed', 'quarantine-generated'], ['partial', 'quarantine-generated'], ['failed-known', 'quarantine-working']] as const)
     it('rebinds a ' + mode + ' partial attempt and restores through a separate journal', { timeout: 180000 }, async () => {
       const r = await partialRecovery(mode, stop);
-      if (mode === 'backup') { const file = join(r.attempt, 'source.json'), header = JSON.parse(readFileSync(file, 'utf8')); const digest = header.admission.sourceEvidenceSha256;
-        header.schema = 'caveat.global_recovery_source.v1'; header.evidenceSha256 = digest; delete header.admission; writeFileSync(file, JSON.stringify(header) + '\n');
+      if (mode === 'backup' || mode === 'working') { const file = join(r.attempt, 'source.json'), header = JSON.parse(readFileSync(file, 'utf8'));
+        if (mode === 'backup') {
+          header.schema = 'caveat.global_recovery_source.v1'; header.evidenceSha256 = header.admission.sourceEvidenceSha256; delete header.admission;
+        } else {
+          header.admission.schema = 'caveat.global_recovery_admission.v2'; delete header.admission.protection.configPaths;
+          header.admission.protection.objects = r.session.plan.protectedObjects;
+          header.evidenceSha256 = sha(Buffer.from(JSON.stringify(header.admission)));
+        }
+        const digest = header.evidenceSha256, legacy = join(r.f.paths.root, 'global-recovery-' + digest.slice(0, 32)); writeFileSync(file, JSON.stringify(header) + '\n');
         const journalFile = join(r.attempt, 'journal.jsonl'), journal = parseGlobalMutationJournal(readFileSync(journalFile), r.session.planSha256);
         const stateHashes = new Map<number, string>();
         for (const event of journal.records) if (event.kind === 'result' && event.stateSha256) {
           const stateFile = join(r.attempt, 'state-' + journal.header.runId + '-' + event.sequence + '.json');
-          const state = JSON.parse(readFileSync(stateFile, 'utf8')); state.sourceEvidenceSha256 = digest; state.state.sourceEvidenceSha256 = digest;
+          const state = JSON.parse(readFileSync(stateFile, 'utf8').replaceAll(JSON.stringify(r.attempt), JSON.stringify(legacy))); state.sourceEvidenceSha256 = digest; state.state.sourceEvidenceSha256 = digest;
           const bytes = Buffer.from(JSON.stringify(state) + '\n'); writeFileSync(stateFile, bytes); stateHashes.set(event.sequence, sha(bytes));
         }
         let model = await withGlobalMigrationEvidence(r.session.runDirectory, r.session.planSha256, async source => recoveryModelFromMigration(source, r.session.runDirectory));
@@ -826,7 +840,7 @@ describe('fresh recovery from confirmed partial attempts', () => {
           if (event.kind === 'result' && event.stateSha256) model = JSON.parse(readFileSync(join(r.attempt, 'state-' + journal.header.runId + '-' + event.sequence + '.json'), 'utf8')).state;
         }
         writeFileSync(journalFile, encoded);
-        const legacy = join(r.f.paths.root, 'global-recovery-' + digest.slice(0, 32)); renameSync(r.attempt, legacy); r.attempt = legacy; }
+        renameSync(r.attempt, legacy); r.attempt = legacy; }
       const unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
       expect((await freshRecoveryPlan(r)).evidenceSha256).toBe(plan.evidenceSha256);
       const result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables());
@@ -839,17 +853,17 @@ describe('fresh recovery from confirmed partial attempts', () => {
       const dirs = readdirSync(r.f.paths.root), repeated = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables());
       expect(repeated).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(dirs); unchanged(); r.unchanged();
     });
-  for (const changed of ['current', 'source', 'protected', 'absent', 'writer', 'alias-parent'] as const) it('rejects a fresh plan after changed ' + changed, { timeout: 180000 }, async () => {
+  for (const changed of ['current', 'source', 'owned-pointer', 'absent', 'writer', 'alias-parent'] as const) it('rejects a fresh plan after changed ' + changed, { timeout: 180000 }, async () => {
     const r = await partialRecovery(), unchanged = savedRecoveryFiles(r.attempt), plan = await freshRecoveryPlan(r);
     if (changed === 'current') appendFileSync(join(r.f.packageRoot, 'package.json'), 'changed');
     if (changed === 'source') appendFileSync(join(r.attempt, 'source.json'), ' ');
-    if (changed === 'protected') appendFileSync(r.f.config, ' ');
+    if (changed === 'owned-pointer') appendFileSync(r.f.paths.pointer, ' ');
     if (changed === 'absent') writeFileSync(join(r.f.binDirectory, 'caveat'), 'foreign object', { mode: 0o600 });
     if (changed === 'alias-parent') { const moved = r.attempt + '.moved'; renameSync(r.attempt, moved); symlinkSync(moved, r.attempt, isWindows() ? 'junction' : 'dir'); }
     const before = readdirSync(r.f.paths.root), result = await recoverGlobalMigration(r.attempt, r.session.planSha256, plan.evidenceSha256, () => {}, async () => tables(changed === 'writer'));
     expect(result).toMatchObject({ status: 'stopped', filesystemWrites: 0 }); expect(readdirSync(r.f.paths.root)).toEqual(before); r.unchanged();
     if (changed !== 'source') unchanged();
-    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables(changed === 'writer'))).status).toBe(changed === 'protected' ? 'ready' : 'stopped');
+    expect((await planGlobalRecoveryWithCollector(r.attempt, r.session.planSha256, async () => tables(changed === 'writer'))).status).toBe(changed === 'owned-pointer' ? 'ready' : 'stopped');
   });
   for (const kind of ['pending', 'torn', 'unknown'] as const) it('never resumes an attempt with a ' + kind + ' intent', { timeout: 180000 }, async () => {
     const r = await partialRecovery(), file = join(r.attempt, 'journal.jsonl'), j = r.journal;
@@ -1094,9 +1108,9 @@ for (const changed of ['protected-after-A', 'other-global', 'owned-wrapper'] as 
   expect(readdirSync(f.paths.root)).toEqual(before); unchanged();
 });
 
-for (const changed of ['protected', 'other-global'] as const) it('requires a new recovery digest after fresh ' + changed + ' changes', { timeout: 180000 }, async () => {
+for (const changed of ['owned-pointer', 'other-global'] as const) it('requires a new recovery digest after fresh ' + changed + ' changes', { timeout: 180000 }, async () => {
   const r = await recoveryFixture('backup'), before = readdirSync(r.f.paths.root);
-  if (changed === 'protected') appendFileSync(r.f.config, ' ');
+  if (changed === 'owned-pointer') appendFileSync(r.f.paths.pointer, ' ');
   else appendFileSync(join(r.f.globalRoot, 'other/index.js'), '// new content');
   const rejected = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, () => {}, async () => tables());
   expect(rejected).toMatchObject({ status: 'stopped', filesystemWrites: 0, runId: null });
@@ -1108,12 +1122,12 @@ for (const changed of ['protected', 'other-global'] as const) it('requires a new
   expect(readFileSync(r.f.config)).toEqual(protectedBytes); expect(readFileSync(join(r.f.globalRoot, 'other/index.js'))).toEqual(otherBytes); r.unchanged();
 });
 
-it('compares independent recovery readback with the same fresh protected snapshot', { timeout: 180000 }, async () => {
+it('observes third-party config changes during independent recovery readback', { timeout: 180000 }, async () => {
   const r = await recoveryFixture('backup');
   const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
     if (event.phase === 'readback' && event.event === 'issued') appendFileSync(r.f.config, 'changed after close');
   }, async () => tables());
-  expect(result).toMatchObject({ status: 'unknown', phase: 'readback' });
+  expect(result).toMatchObject({ status: 'restored', phase: 'readback', configObservations: [expect.objectContaining({ changes: 1 })] });
   expect(readFileSync(r.f.config, 'utf8')).toContain('changed after close'); r.unchanged();
 });
 
@@ -1137,4 +1151,76 @@ it('includes a protected writer PID and parent in an object-stopped recovery pla
     processAssessment: { status: 'stopped', writers: 1, records: [expect.objectContaining({ pid: process.pid + 123,
       parentPid: process.pid, parentApp: expect.any(String), reason: 'protected_file_open_writer', protectedPaths: [r.f.config] })] } });
   r.unchanged();
+});
+
+
+it('keeps the recovery digest stable across external settings edits and records edits during plan, intent and readback', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture('backup'), content = Buffer.from('{"thirdParty":true}\n');
+  writeFileSync(r.f.config, content);
+  const fresh = await planGlobalRecoveryWithCollector(r.session.runDirectory, r.session.planSha256, async () => {
+    appendFileSync(r.f.config, ' '); return tables();
+  });
+  expect(fresh).toMatchObject({ status: 'ready', evidenceSha256: r.evidenceSha256, configObservations: [expect.objectContaining({ changes: 1 })] });
+  let updates = 0;
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
+    if (event.event === 'intent-persisted') { appendFileSync(r.f.config, ' '); updates++; }
+    if (event.phase === 'readback' && event.event === 'issued') { writeFileSync(r.f.config, content); updates++; }
+  }, async () => tables());
+  expect(result).toMatchObject({ status: 'restored', phase: 'readback', configObservations: [expect.objectContaining({ changes: updates })] });
+  expect(updates).toBeGreaterThan(1); expect(readFileSync(r.f.config)).toEqual(content); r.unchanged();
+  expect(JSON.stringify(result.configObservations)).not.toContain(r.f.root);
+});
+
+it.each(['absent', 'appeared', 'replaced'] as const)('observes an external setting that is %s without mutating its name or contents', { timeout: 180000 }, async kind => {
+  const r = await recoveryFixture('backup', f => {
+    if (kind === 'appeared') { const path = join(f.profile, 'new-config.json'); (f.input as typeof f.input & { protectedAbsent: string[] }).protectedAbsent = [path]; }
+  });
+  const file = kind === 'appeared' ? join(r.f.profile, 'new-config.json') : r.f.config;
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
+    if (event.event !== 'intent-persisted') return;
+    if (kind === 'absent') rmSync(file, { force: true });
+    else if (kind === 'appeared') writeFileSync(file, 'third party', { mode: 0o600 });
+    else { const temp = file + '.third-party'; writeFileSync(temp, 'atomic third party', { mode: 0o600 }); renameSync(temp, file); }
+  }, async () => tables());
+  expect(result).toMatchObject({ status: 'restored' });
+  expect(result.configObservations.some(row => row.changes > 0)).toBe(true);
+  if (kind === 'absent') expect(existsSync(file)).toBe(false);
+  else expect(readFileSync(file, 'utf8')).toBe(kind === 'appeared' ? 'third party' : 'atomic third party');
+  r.unchanged();
+});
+
+it('records Claude Code writers as observations in a real recovery scope', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture('backup', f => {
+    const file = join(f.profile, '.claude.json'); renameSync(f.config, file);
+    f.input.snapshot.protectedFiles = f.input.snapshot.protectedFiles.map(path => path === f.config ? file : path);
+    f.input.snapshot.pins = f.input.snapshot.pins.map(row => row.file === f.config ? { ...row, file } : row); f.config = file;
+  });
+  const collect = async () => {
+    const value = tables(), stat = statSync(r.f.config, { bigint: true });
+    const code = { ...value.before[0]!, pid: process.pid + 123, ppid: process.pid, birth: 'fixture-Code',
+      executable: { path: '/usr/bin/claude', dev: '1', ino: '2' }, argv: ['claude', '--resume'], claudeConfig: { dev: String(stat.dev), ino: String(stat.ino) } };
+    value.before.push(code); value.after.push(structuredClone(code)); return value;
+  };
+  expect(await planGlobalRecoveryWithCollector(r.session.runDirectory, r.session.planSha256, collect)).toMatchObject({ status: 'ready',
+    processAssessment: { writers: 0, records: [{ classification: 'observation', reason: 'claude_config_writer', resolution: { action: 'observe' } }] } });
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, () => {}, collect);
+  expect(result).toMatchObject({ status: 'restored', configObservations: [expect.objectContaining({ writerPids: [process.pid + 123] })] }); r.unchanged();
+});
+
+it.each(['hardlink', 'symlink'] as const)('refuses a third-party config %s to a recovery mutation object after intent', { timeout: 180000 }, async kind => {
+  if (kind === 'symlink' && isWindows()) return; // Windows file symlinks require an unrelated host privilege.
+  const r = await recoveryFixture('backup'), original = join(r.session.runDirectory, 'original-package/package.json'); let linked = false;
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
+    if (event.event !== 'intent-persisted' || linked) return;
+    rmSync(r.f.config); (kind === 'hardlink' ? linkSync : symlinkSync)(original, r.f.config); linked = true;
+  }, async () => tables());
+  expect(linked).toBe(true); expect(result).toMatchObject({ status: 'unknown' }); expect(existsSync(r.f.packageRoot)).toBe(false); r.unchanged();
+});
+
+it('still refuses active pointer changes during independent recovery readback', { timeout: 180000 }, async () => {
+  const r = await recoveryFixture('backup');
+  const result = await recoverGlobalMigration(r.session.runDirectory, r.session.planSha256, r.evidenceSha256, event => {
+    if (event.phase === 'readback' && event.event === 'issued') appendFileSync(r.f.paths.pointer, ' ');
+  }, async () => tables());
+  expect(result).toMatchObject({ status: 'unknown', phase: 'readback' }); r.unchanged();
 });

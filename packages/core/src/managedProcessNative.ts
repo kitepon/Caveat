@@ -1,3 +1,4 @@
+import { isClaudeCodeProcess } from './managedClaudeProcess.js';
 import assert from 'node:assert/strict';
 import { claudeConfigIdentity, type ClaudeConfigIdentity } from './managedClaudeConfig.js';
 import { spawn } from 'node:child_process';
@@ -170,7 +171,7 @@ function linuxRecord(procRoot: string, pid: number, protectedFiles: { dev: strin
       try { row.argv = command(); } catch { /* Preserve owner/birth independently from unreadable argv. */ }
       const exe = () => executable(join(root, 'exe'), readlinkSync(join(root, 'exe')));
       try { row.executable = exe(); } catch { /* A foreign uid can deny exe while retaining readable argv. */ }
-      if (row.uid === process.geteuid?.() && row.argv?.some(arg => /(?:^|[\\/])claude(?:\.exe)?$|@anthropic-ai[\\/]claude-code[\\/]/i.test(arg))) {
+      if (row.uid === process.geteuid?.() && isClaudeCodeProcess(row.argv, row.executable?.path)) {
         try {
           const environment = bounded(join(root, 'environ'), 1024 * 1024);
           try {
