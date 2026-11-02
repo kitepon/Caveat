@@ -1,0 +1,17 @@
+digraph pack {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Build, isolated acceptance and release archive\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ contract [label="CI owns toolchain contract + frozen dependencies\nNode version/affected-range check -> FTS capability probe\nWindows .cmd/.bat invoked via literal PowerShell wrapper"];
+ build [label="tsup core / MCP / Web -> bundled CLI\nrestore node: prefix; copy bootstrap + stable entry\nschema / migrations / private codec schemas"];
+ native [label="Pack native koffi 3.3.4 for 6 OS/arch targets\nproduct-relative loader + license\nfixed managed runtime excludes installer / SQLite / child scans"];
+ pack [label="Pack candidate into owned fixture\nmanifest/bin/mode/dependency closure / all native targets\nprivate capability transports=[]: no verified OS channel"];
+ smoke [label="Isolated extraction: --version + MCP initialize\nowned npm prefix install -> managed stage/activate\npackaged native getpid + stable --version/--help\nold0.20.3/candidate hook output and same-host timing"];
+ tests [label="Workspace tests + release/fake-session contracts\nreal native process fixture: ready -> own consumer -> ready\nCodex initialize/hooks-list only: A -> B -> A hash unchanged\nindependent keyserver frozen/typecheck/tests in full CI"];
+ clean [label="Wait owned detached fixture workers; close owned pipes/processes\nthen remove only fixture directory\nclose unknown -> retain failure receipt + fail; combine cleanup errors"];
+ candidate [shape=cylinder,fillcolor="#fff0d7",label="Separate main-only candidate packaging workflow\none archive + source/tree/version/run/attempt/tools/SHA\nGitHub retention 30 days"];
+ approval [label="Separate approval + annotated tag + candidate run + accepted SHA\nverify landed clean commit, successful same-repo main run\nexact artifact file set and archive bytes -> npm OIDC publish"];
+ contract -> build -> native -> pack -> smoke -> tests -> clean;
+ clean -> candidate [style=dashed,label="candidate generation is separate stage"];
+ candidate -> approval;
+}

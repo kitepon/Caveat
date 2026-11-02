@@ -59,7 +59,11 @@ test('native CI uses host Node without setup-node or exact pin and checks actual
   const full = workflow('product-full-ci.yml').jobs.full.steps;
   assert.ok(!full.some(step => step.uses?.startsWith('actions/setup-node@')));
   const command = workflow('ci.yml').jobs.full.with['full-command'];
-  assert.match(command, /ci-toolchain\.mjs version && corepack pnpm build && node scripts\/ci-toolchain\.mjs native/);
+  const commands = command.split('&&').map(part => part.trim());
+  const version = commands.indexOf('node scripts/ci-toolchain.mjs version');
+  const build = commands.indexOf('corepack pnpm build');
+  assert.ok(version >= 0 && build > version);
+  assert.equal(commands[build + 1], 'node scripts/ci-toolchain.mjs native');
   const checker = read('./ci-toolchain.mjs');
   assert.match(checker, /assertSqliteSearchCapability\(\)/);
   assert.match(checker, /node: process\.version, execPath: process\.execPath, sqlite: process\.versions\.sqlite/);

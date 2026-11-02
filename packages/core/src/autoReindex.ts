@@ -15,11 +15,12 @@ import { scanSource, walkMarkdown, type ScanResult } from './indexer.js';
 import {
   detectSealedBundle,
   scanSealedSource,
+  prewarmSealedKeys,
 } from './sealedIndex.js';
 import type { Source } from './types.js';
-import type { Logger } from './db.js';
+import { openDb, type Logger } from './db.js';
 import type { ResolvedPaths } from './paths.js';
-import type { ContentKeyProvider } from './sealedKeys.js';
+import { createKeyserverKeyProvider, type ContentKeyProvider } from './sealedKeys.js';
 
 export interface EntriesDigest {
   digest: string;
@@ -271,5 +272,22 @@ function withSourceSavepoint<T>(db: DatabaseSync, fn: () => T): T {
       // Preserve the original source-level failure for the warning path.
     }
     throw err;
+  }
+}
+
+// Callers retain the existing index/repository lock order.
+export async function reindexAndMark(opts: { caveatHome: string; paths: Pick<ResolvedPaths, 'dbPath' | 'entriesDir' | 'communityDir'>; logger: Logger }): Promise<void> {
+  const keyProvider = createKeyserverKeyProvider({ caveatHome: opts.caveatHome });
+  const failures = await prewarmSealedKeys({ paths: opts.paths, keyProvider });
+  for (const failure of failures) {
+    opts.logger.warn(`${failure.source}: sealed key prewarm failed: ${errorMessage(failure.error)}`);
+  }
+  mkdirSync(dirname(opts.paths.dbPath), { recursive: true });
+  const db = openDb({ path: opts.paths.dbPath, logger: opts.logger });
+  try {
+    reindexAllSources({ db, paths: opts.paths, logger: opts.logger, keyProvider });
+    writeDigestMarker(opts.caveatHome, computeEntriesDigest(opts.paths));
+  } finally {
+    db.close();
   }
 }

@@ -87,3 +87,13 @@ Caveat の手順（`GET /v1/keys/<id>`）を再現すれば、人間は封緘バ
   リクエストの手前に挿入するだけで済む
 
 現時点ではこの昇格は行わない（YAGNI。実需が出るまで keyserver-lite は無認証のまま）。
+
+## 独立keyserverの検証
+
+keyserverはroot workspaceへ含めず、製品full CIの3OSで独立して検証する。実KVや公開操作は使わない。
+
+```sh
+corepack pnpm --dir keyserver install --frozen-lockfile
+corepack pnpm --dir keyserver typecheck
+corepack pnpm --dir keyserver test
+```

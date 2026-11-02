@@ -1,0 +1,21 @@
+digraph read {
+ graph [rankdir=TB,bgcolor="white",pad="0.3",nodesep="0.4",ranksep="0.6",fontname="Arial",labelloc=t,label="Read adapters, context and DB ownership"];
+ node [shape=box,style="rounded,filled",fillcolor="#edf4ff",color="#45618a",fontname="Arial",fontsize=12,margin="0.6,0.2"];
+ edge [fontname="Arial",fontsize=10,color="#526276"];
+
+ config [label="config.loadConfig + paths.findCaveatHome/resolvePaths\nuserHome / CAVEAT_HOME / knowledgeRepo -> resolved paths\nconfiguration read and validation; no implicit sync"];
+ cli [label="CLI buildContext: no retained DB\nsearch/show/list/stale/stats command owns open/close"];
+ mcp [label="buildMcpContext owns server DB\nrequired onEntryWritten callback; no background work on reads"];
+ web [label="buildWebContext: injected DB or opened server DB\nWebContext owns paths/logger; routes own HTML"];
+ query [label="repository.search / listRecent / get; stale.listStale\nFTS literal token query, filters, selected rows\nrepository.toSearchResult owns result projection"];
+ raw [label="entryRead.readEntryDocument\n(source,id) or raw byte window; realpath containment\nsealed cached index or cached-key in-memory decrypt"];
+ output [label="CLI stdout / MCP JSON tool result / Web HTML\nWeb escape + Markdown raw HTML disabled + encoded links\nresponse is local view, not remote propagation proof"];
+ fail [fillcolor="#ffe3e3",label="Invalid input / missing entry / read or DB failure\nexisting adapter error/404; no repair or success substitution"];
+ close [label="CLI finally closes owned DB\nMCP SIGINT/TERM: server.close -> await pending syncs -> DB.close\nWeb close callback -> DB.close; duplicate shutdown guarded\nforced process death does not promise finally cleanup"];
+ config -> {cli mcp web}; {cli mcp web} -> query;
+ query -> raw [label="document retrieval"];
+ query -> output; raw -> output;
+ query -> fail; raw -> fail;
+ output -> close [style=dashed,label="request vs server lifetime"];
+ fail -> close;
+}

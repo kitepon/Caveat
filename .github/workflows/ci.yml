@@ -46,6 +46,9 @@ jobs:
       documentation-command: node scripts/check-current-docs.mjs
       full-command: >-
         node scripts/ci-toolchain.mjs version &&
+        corepack pnpm --dir keyserver install --frozen-lockfile &&
+        corepack pnpm --dir keyserver typecheck &&
+        corepack pnpm --dir keyserver test &&
         corepack pnpm build &&
         node scripts/ci-toolchain.mjs native &&
         node scripts/check-global-processes.mjs &&

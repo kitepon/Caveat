@@ -2,14 +2,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync,
 import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import type { Logger } from './db.js';
-import { openDb } from './db.js';
-import { acquireFileLock, acquireReindexLock, computeEntriesDigest, reindexAllSources, releaseFileLock, writeDigestMarker, type FileLock } from './autoReindex.js';
+import { acquireFileLock, acquireReindexLock, reindexAndMark, releaseFileLock, type FileLock } from './autoReindex.js';
 import type { ResolvedPaths } from './paths.js';
 import { deriveAnonymousProbeUrl, probeAnonymousRead, type RemoteAccess } from './remoteVisibility.js';
 import { createGit } from './gitRuntime.js';
-import { createKeyserverKeyProvider } from './sealedKeys.js';
 import { normalizePathCase } from './platform.js';
-import { prewarmSealedKeys } from './sealedIndex.js';
 
 import { SyncError } from './syncErrors.js';
 import { githubCredentialFailureCode, assertNamedGithubTargets } from './githubCredential.js';
@@ -187,21 +184,6 @@ export async function preflightSync(
   return { ownDir: requested, branch, pushUrls, probe };
 }
 
-async function reindexAndMark(opts: Pick<SyncOwnOptions, 'caveatHome' | 'paths' | 'logger'>): Promise<void> {
-  const keyProvider = createKeyserverKeyProvider({ caveatHome: opts.caveatHome });
-  const failures = await prewarmSealedKeys({ paths: opts.paths, keyProvider });
-  for (const failure of failures) {
-    opts.logger.warn(`${failure.source}: sealed key prewarm failed: ${errorMessage(failure.error)}`);
-  }
-  mkdirSync(dirname(opts.paths.dbPath), { recursive: true });
-  const db = openDb({ path: opts.paths.dbPath, logger: opts.logger });
-  try {
-    reindexAllSources({ db, paths: opts.paths, logger: opts.logger, keyProvider });
-    writeDigestMarker(opts.caveatHome, computeEntriesDigest(opts.paths));
-  } finally {
-    db.close();
-  }
-}
 
 export async function syncOwn(opts: SyncOwnOptions): Promise<SyncOwnResult> {
   // All sync entry points take index then repository locks. The repository lock

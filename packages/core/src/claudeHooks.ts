@@ -1,13 +1,13 @@
+import { toSearchResult } from './repository.js';
 import type { DatabaseSync } from 'node:sqlite';
 import { homedir, userInfo } from 'node:os';
-import type { SearchResult, Source, Confidence, Visibility } from './types.js';
+import type { SearchResult } from './types.js';
 import { extractSections } from './frontmatter.js';
 import type { SessionSignals } from './transcriptSignals.js';
 
 const PROMPT_TOKEN_MIN_LENGTH = 3;
 const PROMPT_MAX_CANDIDATE_TOKENS = 50;
 const DEFAULT_REMINDER_HIT_LIMIT = 5;
-const SYMPTOM_EXCERPT_LENGTH = 200;
 const SYMPTOM_LINE_MAX = 120;
 const REMINDER_ID_MAX = 160;
 const REMINDER_SOURCE_MAX = 160;
@@ -211,20 +211,6 @@ interface EntryRow {
   symptom_text: string | null;
 }
 
-function toSearchResult(row: EntryRow): SearchResult {
-  const fm = JSON.parse(row.frontmatter_json);
-  const symptomMatch = /##\s+Symptom\s*\n([\s\S]*?)(?=\n##|\n*$)/.exec(row.body);
-  const symptom = symptomMatch?.[1]?.trim() ?? row.body;
-  return {
-    id: row.id,
-    source: row.source as Source,
-    title: row.title,
-    symptomExcerpt: symptom.slice(0, SYMPTOM_EXCERPT_LENGTH),
-    confidence: row.confidence as Confidence,
-    visibility: (row.visibility as Visibility) ?? 'private',
-    environment: fm.environment ?? {},
-  };
-}
 
 /**
  * Search the caveat DB for entries that share ≥ N distinct prompt groups,

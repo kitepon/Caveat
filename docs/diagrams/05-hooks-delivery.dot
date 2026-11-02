@@ -1,0 +1,38 @@
+digraph hooks {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Hook retrieval and delivery ownership | refactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ host [label="Host adapter owns payload + output\nClaude: system-reminder\nCodex: hookSpecificOutput\nCursor: additional_context"];
+ prompt [label="UserPromptSubmit\npeek session + global pending"];
+ choice [shape=diamond, label="Jev enabled?\nClaude / Codex only"];
+ legacy [label="hookShared.searchCaveatsSafely\nopen DB -> structural retrieval -> OS filter\nmarkHit OR opt-in miss log -> close DB"];
+ jev [label="jevStruggle.runJevStruggle\nThroughline completed 3 turns\nstruggle judgment -> local FTS -> relevance\nobservation saved as pending / suppressed / none"];
+ tool [label="PostToolUse failure\nClaude: detached work file + worker\nCodex: current job; legacy worker entry retained\nCursor: current event search"];
+ stop [label="Stop\nhousekeeping + optional background triggers\nrecursion guard; structural signals if not Jev\nno immediate final-answer stdout"];
+ claim [label="pendingReminders owns durable queue\nSQLite queue lock -> TTL claim\nbuild -> immutable .ready -> release claim"];
+ dedupe [label="hookDelivery.prepareSessionDelivery\nremove delivered IDs / signal kinds\ncompose host-specific context"];
+ stdout [label="emitHookContext\nawait stdout callback"];
+ commit [label="Only after successful output\nrecord delivery IDs + Jev delivery\nacknowledge peeked pending paths"];
+ fail [fillcolor="#fff0d7", label="Output failure\nfixed stderr diagnostic\nleave pending and delivery unacknowledged"];
+ leak [fillcolor="#ffe3e3", label="DB lifetime: one outer finally\nsearch/filter/diagnostic failure or early return closes DB\nclose/diagnostic throw reaches existing host error handler"];
+ host -> {prompt tool stop};
+ prompt -> choice;
+ choice -> legacy [label="off / Cursor"];
+ choice -> jev [label="on"];
+ tool -> legacy [label="legacy enabled / Cursor"];
+ stop -> legacy [label="legacy enabled; per-error segments"];
+ legacy -> claim [label="Claude/Codex tool; Stop result"];
+ claim -> prompt [label="next eligible hook", style=dashed];
+ legacy -> dedupe [label="prompt / Cursor current event"];
+ jev -> dedupe;
+ prompt -> dedupe [label="peeked context"];
+ dedupe -> stdout;
+ stdout -> commit [label="callback succeeds"];
+ stdout -> fail [label="callback fails"];
+ legacy -> leak [label="every opened-DB exit"];
+
+ jevskip [label="Claude/Codex Jev enabled\ntool and stop suppress legacy search\nCursor remains an independent adapter"];
+ tool -> jevskip [label="Jev enabled"];
+ stop -> jevskip [label="Jev enabled"];
+
+}

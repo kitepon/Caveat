@@ -1,0 +1,20 @@
+digraph registration {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Registration token migration\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ source [label="Saved observation + proposal\n7 configuration files / 15 MCP and hook definitions"];
+ projection [label="registrationFileSpecs owns scope projection\nderive actual host paths / fixed handlers / managed entry\nassert saved identity + node + command/suffix/args hashes\npaths in evidence are assertions, not scope authority"];
+ codec [label="editRegistrationNodeBytes is pure\nchange only Node prefix; preserve BOM / suffix bytes\nreject ambiguous/multiline TOML target\nparse after edit; compare every other semantic value"];
+ admission [label="bindRegistrationAdmission\nrecheck 7 original identities/bytes + 4 protected objects\nstop actual config writers; compute immutable plan digest"];
+ plan [label="planRegistrationMigration -> ready + digest\nno writes / no execution permission"];
+ run [label="Explicit execute with matching digest + fresh checks\nprivate run + 7 backups + installer lock + fresh journal"];
+ replace [label="For each file: durable intent\nexclusive same-directory temp + original hash check\natomic rename + readback; persist state + confirmed result\n7-file sequence is not one atomic transaction"];
+ complete [label="Checkpoint -> archive lock / close -> loadHistory\nindependent current before/after hashes + protected readback\ncompleted only after all files and history agree"];
+ unknown [fillcolor="#ffe8e8", label="Before run: stopped; after run: unknown\npreserve backup and journal; do not auto replay"];
+ recovery [label="Fresh recovery of confirmed ready/complete history only\nmax 8 source levels; bind evidence/current hashes + process check\nnew run restores changed files from original backup\nindependent readback -> restored"];
+ source -> projection -> codec -> admission -> plan -> run -> replace -> complete;
+ admission -> unknown [label="writer / identity / semantic refusal"];
+ replace -> unknown [label="partial / persistence / readback failure"];
+ complete -> unknown [label="cleanup or final verification failure"];
+ unknown -> recovery [style=dashed, label="explicit fresh plan; pending/torn/unknown refused"];
+}

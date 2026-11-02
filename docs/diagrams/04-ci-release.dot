@@ -1,0 +1,28 @@
+digraph ci {
+ graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.3", ranksep="0.55", fontname="Arial", label="Product-owned CI and release gates | refactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ event [label="main push / PR / manual\nci.yml"];
+ owner [label="ownership gate\nlocal workflow; pinned action SHAs"];
+ classify [label="product-full-ci.yml classify\nall changed files Markdown?\nunknown base / manual / tag -> full"];
+ docs [label="Markdown only\ninstall -> toolchain -> docs check"];
+ matrix [label="3 self-hosted OS jobs\nmacos-native / linux-workstation / windows-native\nfail-fast false; 30m / Windows 45m"];
+ full [label="frozen install -> toolchain -> build\nnative / process checks -> typecheck\nrelease smoke -> fresh-session smoke\nindependent keyserver + workspace tests\nnative hash proof"];
+ green [label="Exact-head terminal results\nall full gates successful\nCI success is not publication permission"];
+ pack [label="main-only pack-release.yml\nverify commit -> frozen install -> build\ndocs / pack checks -> one accepted archive"];
+ archive [shape=cylinder, fillcolor="#fff0d7", label="caveat-release-pack\narchive + provenance + digest\n30-day GitHub retention"];
+ permit [label="Separate release approval\ntag + candidate run + accepted SHA256"];
+ verify [label="publish-npm.yml\nannotated tag / landed commit\ncandidate run + artifact bytes verify"];
+ npm [label="npm OIDC publish\naccepted archive; no repack"];
+ event -> owner;
+ event -> classify;
+ classify -> docs [label="Markdown only"];
+ classify -> matrix [label="product change"];
+ matrix -> full -> green;
+ green -> pack [style=dashed, label="separate approved stage"];
+ pack -> archive -> permit -> verify -> npm;
+
+ failed [fillcolor="#ffe3e3",label="Failure / timeout / cancel\nretain run/job/head and logs; candidate not accepted"];
+ full -> failed [label="any gate non-success"];
+
+}

@@ -1,0 +1,31 @@
+digraph sealed {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Sealed publication and subscription\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ own [shape=cylinder, fillcolor="#fff0d7", label="Own Markdown\npublic + private"];
+ collect [label="collectPublishSet\nstrict visibility classification\nonly public enters publication set"];
+ scan [label="scanPublishFiles\nfixed secret / entropy / identity rules\nmasked excerpt + finding digest\nexplicit allow digest; warnings stay separate"];
+ reject [fillcolor="#ffe3e3", label="Invalid entry or blocking finding\nstop before mirror publication"];
+ codec [label="sealBundle\ncanonical UTF-8 path order + base64 JSONL\nHKDF-separated encryption / nonce keys\nAES-256-GCM, authenticated header"];
+ mirror [label="Generated public mirror only\nREADME + entries.caveat\nverify tree / bytes / public visibility / count\nconfirm or dry-run; one-commit history"];
+ public [shape=cylinder, fillcolor="#fff0d7", label="Public Git remote\nsealed bundle + showcase README"];
+ subscribe [label="communityPull\nfetch/reset/clean cache\nper-handle success/failure"];
+ header [label="sealedIndex detects bundle\nprewarmSealedKeys -> key provider\ncache or bounded keyserver GET"];
+ key [label="Keyserver Worker\nvalidate method + id\nKV key -> exact keyId/key JSON"];
+ unseal [label="unsealBundle\nmagic/version/header/key/AEAD validation\nnonce invariant + relative paths + duplicate/count checks"];
+ index [label="scanSealedSource\ndecrypted content in process memory\nSQLite derived rows + constraint diagnostics\nno decrypted Markdown files"];
+ keep [fillcolor="#fff0d7", label="Key / bundle / source failure\nwarn + preserve prior source index\nno success inferred from another source"];
+ own -> collect -> scan -> codec -> mirror -> public -> subscribe -> header -> unseal -> index;
+ collect -> reject [label="invalid"];
+ scan -> reject [label="blocked"];
+ header -> key [label="when uncached"];
+ key -> header [label="matching 32-byte key"];
+ header -> keep [label="unavailable"];
+ unseal -> keep [label="validation fails"];
+
+ cancel [fillcolor="#fff0d7",label="Dry-run or confirmation cancelled\nno push; own Markdown unchanged"];
+ pushunknown [fillcolor="#ffe3e3",label="Push fails or receipt unavailable\nretain local mirror; remote outcome unverified"];
+ mirror -> cancel [label="before push"];
+ mirror -> pushunknown [label="push failure"];
+
+}

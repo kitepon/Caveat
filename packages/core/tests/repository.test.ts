@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { openDb } from '../src/db.js';
 import { upsertEntry } from '../src/indexer.js';
 import { search, get, listRecent } from '../src/repository.js';
+import { findCaveatsForPrompt } from '../src/claudeHooks.js';
 
 const insert = (db: ReturnType<typeof openDb>, id: string, source: 'own' | `community/${string}` = 'own', overrides: Partial<{ title: string; body: string; tags: string[]; confidence: string; updated_at: string; visibility: string }> = {}) => {
   const fm = {
@@ -145,5 +146,22 @@ describe('listRecent', () => {
     insert(db, 'c', 'own', { updated_at: '2026-04-15' });
     const r = listRecent(db);
     expect(r.map((x) => x.id)).toEqual(['b', 'c', 'a']);
+  });
+});
+
+
+describe('shared search result contract', () => {
+  it('keeps hook and repository fields identical for a long symptom', () => {
+    const db = openDb({ path: ':memory:' });
+    try {
+      const symptom = 'Quasar junction ' + 'failure '.repeat(40);
+      insert(db, 'shared', 'own', { title: 'Quasar junction boot', body: `## Symptom\n${symptom}\n\n## Cause\nseparate cause`, visibility: 'private' });
+      const result = search(db, { query: 'Quasar junction' });
+      expect(findCaveatsForPrompt(db, 'Quasar junction')).toEqual(result);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ id: 'shared', visibility: 'private', environment: { os: 'windows-11' } });
+      expect(result[0]!.symptomExcerpt).toHaveLength(200);
+      expect(result[0]!.symptomExcerpt).not.toContain('separate cause');
+    } finally { db.close(); }
   });
 });
