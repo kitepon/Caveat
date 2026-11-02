@@ -1,0 +1,15 @@
+# 機能図からの責務整理
+
+現行の入口は [機能と責務の地図](../01_plan.md)。全体図、16枚の詳細図、主要関数、source164ファイルと補助40ファイルの対応をそこへ統合した。図はDOTを正本としてSVGへ描画する。
+
+検索失敗時にhook検索のDBが閉じられない経路を、開いたDB全体のfinallyで修理した。検索例外は空結果、ヒット記録の失敗後は検索結果を保持する既契約を維持した。新42回帰ケースは変更前18失敗、変更後42成功。
+
+同期の再索引処理は既autoReindexへ、検索結果の投影は既repositoryへ、Web購読一覧は既communityListへ責任を集約した。host固有の形式・表示、DBとlockの所有者、検索gate/rankingは各窓口に残した。未使用のprivate Codex spawnを削除し、legacy worker入口は保持した。全件索引のhelpを実際の保持動作に合わせた。
+
+独立keyserverのlock importer指定を既解決版へ整合し、3OS full CIに独立frozen install/typecheck/testを接続した。workflowの責任・承認・timeoutと既検証順の契約は保持した。
+
+最初の候補34f4383ではLinux/macOS/Windowsのfull CIが成功した。局所ではDB寿命42ケース、実SQLite再索引2ケース、mapperとWeb一覧のcharacterizationを確認した。図の最終照合で見つかった自動同期後半、一般通知、購読操作、配送の部分確定、process観測限界等の不足を図へ追記した。これらはruntimeを変更するものではない。修正後headのCIと最終レビュー結果はPRの検証欄を参照する。
+
+未確認はlive Jev/provider、Cloudflare live Worker/KV、本番と全実host/client。OS別skip、強制終了時の後始末、未観測writerや閉じたhandle等の限界を残す。CI成功は公開・本番反映の許可を意味しない。
+
+最終照合の説明訂正：Jevのsession状態と判定/配送記録の所有者、matched IDとgeneric termの抑止、順次commitの部分反映を図14へ明示。initのClaude→Codex→Cursor→後続MCP順、cache更新と別callerのindex、process観測図の可読性、主要表のACK/保存例外を同期した。runtime契約は変更しない。

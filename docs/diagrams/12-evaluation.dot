@@ -1,0 +1,22 @@
+digraph evaluation {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Evaluation artifacts and execution provenance\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ private [shape=cylinder,fillcolor="#fff0d7",label="Private local-eval artifacts outside knowledge repo\n0700 parent / 0600 files; schema + exact keys + digests"];
+ search [label="Hook search / provenance golden + own corpus\ntemporary SQLite -> real retrieval functions\nvalidate all refs / positive and negative cases\nrepeat top5 order; expose tie-break limitation"];
+ metrics [label="Pure evaluation owns metrics\nprecision / recall / hit / negative rate\nexplicit numerator + denominator; zero denominator null"];
+ study [label="prepare-study: scenario / evidence / policy\nrandom opaque IDs + hash-sort half assignment\ncontrol and caveat conditions; at least 4 even runs"];
+ plan [label="prepare-execution: no model calls\nfixed executable path / version / digest / argv / environment\nexact stdin bytes + plan + suite digest; private dedicated cwd"];
+ run [label="Explicit run owns CLI subprocess + artifact writes\nverify binary/version -> durable start marker -> spawnSync\nresult marker -> raw stdout/stderr -> terminal receipt"];
+ interruption [fillcolor="#fff0d7",label="Start-only / missing cwd -> unavailable, no repeat call\nresult + raw present -> reparse saved result\nnot_attempted / passed_to_spawn_sync / indeterminate kept distinct"];
+ compile [label="Compiler joins exact suite/plan/receipt/raw set\nreparse protocol and exact output bytes\ncompleted / unavailable / protocol_error / tool_attempted / nonzero_exit\nrequested model separate from provider-reported model"];
+ review [label="Completed output only -> masked shuffled review packets\nexplicit independent judge or saved raw input\nexact IDs / rubric / prompt / model provenance"];
+ aggregate [label="All planned runs remain in denominator\nnoncompleted and unclear retained as bounds + status counts\nscenario macro difference by host / model / runtime / policy"];
+ cleanup [label="Failure destination: safe fixed error + exit1\nDB close / temporary fixture cleanup in finally\nno private prompt/body in aggregate stdout"];
+ private -> search -> metrics;
+ private -> study -> plan -> run -> compile -> review -> aggregate;
+ run -> interruption -> compile;
+ compile -> aggregate [label="noncompleted: unclear"];
+ search -> cleanup [label="failure or finalization"];
+ review -> cleanup [label="protocol / output / cleanup failure"];
+}

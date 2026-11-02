@@ -6,14 +6,11 @@ import { dirname, join } from 'node:path';
 import {
   acquireFileLock,
   acquireReindexLock,
-  computeEntriesDigest,
-  reindexAllSources,
+  reindexAndMark,
   releaseFileLock,
-  writeDigestMarker,
 } from './autoReindex.js';
 import { communityPull } from './community.js';
 import type { Logger } from './db.js';
-import { openDb } from './db.js';
 import { BACKGROUND_GIT_TIMEOUT_MS } from './gitRuntime.js';
 import { appendGlobalPendingReminder } from './pendingReminders.js';
 import type { ResolvedPaths } from './paths.js';
@@ -22,8 +19,6 @@ import {
   probeAnonymousRead,
   type RemoteAccess,
 } from './remoteVisibility.js';
-import { createKeyserverKeyProvider } from './sealedKeys.js';
-import { prewarmSealedKeys } from './sealedIndex.js';
 import { SyncError, SyncRemoteError, SyncRecoveryError, syncOwn, type ProbeImpl } from './sync.js';
 
 // Knowledge is worthless to the other terminals until it reaches the private
@@ -476,21 +471,6 @@ function resolveTriggerDebounceMs(fallback: number): number {
   return parsed;
 }
 
-async function reindexAndMark(opts: RunAutoSyncOptions): Promise<void> {
-  const keyProvider = createKeyserverKeyProvider({ caveatHome: opts.caveatHome });
-  const failures = await prewarmSealedKeys({ paths: opts.paths, keyProvider });
-  for (const failure of failures) {
-    opts.logger.warn(`${failure.source}: sealed key prewarm failed: ${errorMessage(failure.error)}`);
-  }
-  mkdirSync(dirname(opts.paths.dbPath), { recursive: true });
-  const db = openDb({ path: opts.paths.dbPath, logger: opts.logger });
-  try {
-    reindexAllSources({ db, paths: opts.paths, logger: opts.logger, keyProvider });
-    writeDigestMarker(opts.caveatHome, computeEntriesDigest(opts.paths));
-  } finally {
-    db.close();
-  }
-}
 
 function sha256(input: string): string {
   return createHash('sha256').update(input).digest('hex');

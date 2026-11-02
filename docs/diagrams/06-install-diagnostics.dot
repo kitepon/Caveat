@@ -1,0 +1,38 @@
+digraph installation {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Installation and diagnostics\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ init [label="runInit\nSQLite capability before writes\nresolve normal config + managed CLI path"];
+ data [label="ensureUserConfig + scaffold own entries\nlegacy community move\nkey prewarm -> source scan -> digest\nstale pending cleanup"];
+ optional [label="Explicit sync / publish-target options\nTTY confirmation or --yes for repo creation\nnamed GitHub user requires explicit URL"];
+ consent [label="Codex native hook admission\nexplicit false / conflicting alias -> blocked\nno feature override or hooks write"];
+ claude [label="Claude integration first (or explicit skip)\nClaude hooks settings + Claude MCP .claude.json\nClaude MCP failure throws before later host stages"];
+ codex [label="installCodexHooks\nhooks.json + consented features in TOML"];
+ cursor [label="Cursor hooks next (or skip / unavailable)\ninstallCursorHooks owns hooks.json"];
+ mcp [label="Codex / Grok / Cursor MCP loop, when available\ninstallMcpClient owns stdio registration\npreserve other servers / env / timeouts / disabled\nJSON or TOML semantic roundtrip\nbackup -> write -> independent readback"];
+ result [label="CLI installation summary\nMCP registration failure propagates nonzero\nclient restart / use is a separate action"];
+ diag [label="factoryDiagnostics (read only)\nexact DB schema / FTS / triggers\ncanonical host registrations + feature consent\nGit local status + cached counts + failure state\nlive remote read; no fetch or repair"];
+ status [label="Versioned JSON + overall status + exit\nnot_ready takes priority over unverified\nCursor / Grok required only when requested"];
+ init -> data -> optional -> claude -> consent;
+
+ codex -> cursor -> mcp -> result;
+
+ consent -> codex [label="allowed"];
+ consent -> cursor [label="skip / unavailable",style=dashed];
+ result -> diag [style=dashed, label="separate invocation"];
+ diag -> status;
+
+ partial [fillcolor="#ffe3e3",label="Stage failure: nonzero error / retained backup\nearlier successful stages may remain; no cross-host rollback\npublish optional setup warning differs from sync setup failure"];
+ data -> partial [label="throw"];
+ {claude codex cursor} -> partial [label="write/readback fails"];
+ mcp -> partial [label="registration fails"];
+ blocked [fillcolor="#fff0d7",label="Codex hook registration skipped\nexplicit false / alias conflict retained\nnot a rollback of unrelated host settings"];
+ consent -> blocked [label="blocked"];
+
+
+ blocked -> cursor [label="continue; Codex hooks unchanged"];
+ skipped [label="Skipped / dry-run is not a completed write\nMCP stage remains separate from native hook consent"];
+ {claude codex cursor} -> skipped [style=dashed,label="per-host result"];
+ mcp -> skipped [style=dashed,label="per-client result"];
+
+}
