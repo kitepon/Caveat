@@ -425,3 +425,13 @@ Before completion, require all three real OS runners to pass normal ready, old-g
 For Main15, retain seven-file/fifteen-pointer codec tests, backup bytes, same-directory atomic replacement without a missing original name, readable Claude writer refusal, known-only backup recovery, changed-target refusal, and immutable source journals. Node is a declared dependency with installation guidance; binary/libnode/FTS5/shared-build proofs are not migration gates. Deployment status must report remaining old MCP PIDs and parent apps with reopen instructions, independently of BellTeam seat operations.
 
 Record residual risks: later dynamic import failure after quarantine, closed-handle views and JS caches, root/administrator writes. Review and bind the exact source/tree and packaged artifact before normal landing. Public release and live-machine changes remain separate existing authorization boundaries.
+
+## 独立keyserverの検証
+
+keyserverはroot workspaceへ含めず、製品full CIの3OSで独立して検証する。実KVや公開操作は使わない。
+
+```sh
+corepack pnpm --dir keyserver install --frozen-lockfile
+corepack pnpm --dir keyserver typecheck
+corepack pnpm --dir keyserver test
+```

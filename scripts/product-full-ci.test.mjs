@@ -60,3 +60,13 @@ test('the local caller always supplies the product-owned documentation check', (
   assert.equal(command, 'node scripts/check-current-docs.mjs');
   assert.equal(caller?.jobs?.full?.with?.['dependency-command'], 'corepack pnpm install --frozen-lockfile');
 });
+
+
+test('full CI checks the independent keyserver with frozen dependencies', () => {
+  const caller = yaml.load(readFileSync(callerPath, 'utf8'), { schema: yaml.JSON_SCHEMA });
+  const commands = caller.jobs.full.with['full-command'].split('&&').map(s => s.trim());
+  const install = commands.indexOf('corepack pnpm --dir keyserver install --frozen-lockfile');
+  assert.ok(install >= 0);
+  assert.equal(commands[install + 1], 'corepack pnpm --dir keyserver typecheck');
+  assert.equal(commands[install + 2], 'corepack pnpm --dir keyserver test');
+});
