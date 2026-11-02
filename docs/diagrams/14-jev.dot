@@ -3,18 +3,19 @@ digraph jev {
  node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
  edge [fontname="Arial", fontsize=10, color="#526276"];
  enable [label="Explicit jev enable: validate key then owner-only credential + config\nClaude/Codex host adapter suppresses legacy retrieval when enabled"];
- context [label="runJevStruggle owns request lifecycle\nThroughline public context: completed last3 turns, 1.5s guard\nraw user/assistant/thinking stays in current request memory"];
+ context [label="runJevStruggle owns request lifecycle\nThroughline public context: completed last3 turns, 1.5s guard\ncompleted turn text sent to Jev API; not persisted by Caveat"];
  state [shape=cylinder,fillcolor="#fff0d7",label="jevObservations owns private outcome / cursor / term / delivery state\nturn IDs and decisions, not raw conversation text"];
- score [label="Fixed jev-1.13.0: repeated problem AND clearly stuck >= .8\nchoose at most3 search terms above none probability"];
- fts [label="Local SQLite AND FTS, at most20 candidates\nJev relevance ranking >= .8 selects reference\nselection owns its DB; finally closes after search/failure"];
+ score [label="Fixed jev-1.13.0: repeated problem AND clearly stuck >= .8\nchoose at most3 search terms above none probability\nAPI receives completed conversation text"];
+ fts [label="Local SQLite AND FTS, at most20 candidates\nfinally close search DB BEFORE relevance API call\ncandidate excerpts sent to Jev; >= .8 selects reference"];
  prepare [label="Save decision + pending delivery\nconstruct proposed context for host adapter\nno delivery count or markHit at mere selection"];
- output [label="Host prepares deduped output\nawait stdout callback -> then delivered()\ndelivery opens a separate DB for markHit; finally closes"];
+ output [label="Host prepares deduped output\nawait stdout callback -> then delivered()\ndelivered records terms for generic or matched reminder\nselected reference only: separate markHit DB, finally closes"];
  review [label="CLI cases / review and Web Jev view\nshow denominator / reasons / delivery / owner judgment"];
- none [fillcolor="#fff0d7",label="Disabled / missing context / not struggling / no term / no match\nrecord applicable outcome; no fabricated match"];
+ none [fillcolor="#fff0d7",label="Disabled / missing context / no new turn / not struggling\nsilent; applicable outcome recorded"];
  enable -> context -> score -> fts -> prepare -> output;
  context -> none [label="unavailable / no new turn"];
- score -> none [label="threshold / none"];
- fts -> none [label="no eligible candidate"];
+ score -> none [label="below struggle threshold"];
+ score -> generic [label="struggling, no_terms"];
+ fts -> generic [label="no_candidates / below_match_threshold"];
  prepare -> state; none -> state; output -> state [label="after output succeeds"];
  state -> context [style=dashed,label="cursor / session dedupe"];
  state -> review;
@@ -22,5 +23,13 @@ digraph jev {
  error [fillcolor="#ffe3e3",label="Context/API/DB error or timeout\nfixed diagnostic / applicable failure observation\nnot a fabricated no-match or delivered result"];
  context -> error [label="request failure"];
  fts -> error [label="search/ranking failure"];
+
+
+ generic [label="Generic reminder(null), no selected reference\nif same term already delivered -> suppressed\notherwise save pending generic delivery"];
+ suppressed [fillcolor="#fff0d7",label="Suppressed: same term already delivered\nno new output"];
+ generic -> prepare [label="not previously notified"];
+ generic -> suppressed [label="already notified"];
+ suppressed -> state;
+ score -> error [label="API error"];
 
 }

@@ -3,21 +3,21 @@ digraph sync {
  node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
  edge [fontname="Arial", fontsize=10, color="#526276"];
  request [label="CLI sync / MCP caveat_sync\nAutoSync worker / periodic adapter"];
- cycle [label="AutoSync only: cycle lock -> index lock\ninterval / request coalescing / backoff\ncommunity pull before own sync"];
- lock [label="syncOwn\nindex lock -> Git common-dir repo lock"];
+ cycle [label="AutoSync only: cycle lock -> index lock\ndisabled / busy / interval may return before cycle\nrequest coalescing / backoff\ncommunity pull before own sync"];
+ lock [label="syncOwn\nacquire index lock OR use caller-held lock\nthen Git common-dir repo lock"];
  preflight [label="preflightSync\nexact repo root, no active rebase, branch\nall effective push URLs private; named credentials"];
  dirty [label="syncOwnLocked\nscheduled dirty refusal OR commit local changes"];
  inspect [label="remote inspect\nls-remote origin branch"];
  pull [label="if branch exists: pull --rebase\non conflict: abort and verify no active rebase"];
  index [label="autoReindex.reindexAndMark\nprewarm keys -> open DB -> per-source scan\nwrite digest -> finally close DB"];
  push [label="push origin branch -u"];
- done [label="Return successful result\nCLI log / MCP saved success\nAutoSync state + optional pending notice"];
+ done [label="Return successful result\nCLI log / MCP saved success\nmanual return only; wrapper continues separately"];
  refuse [fillcolor="#fff0d7", label="Typed refusal / busy / dirty\ninput retained; scheduled marker not advanced\nMCP write worker waits bounded 30s for busy"];
  unknown [fillcolor="#ffe3e3", label="SyncRemoteError inspect/pull/push\nremote result may be unknown\nrecovery failure is distinct; inspect before retry"];
- cleanup [label="finally release owned locks\nclient cancellation does not cancel MCP sync\nshutdown waits for pending syncs"];
+ cleanup [label="syncOwn finally: release only its owned locks\nclient cancellation does not cancel MCP sync\nshutdown waits for pending syncs"];
  request -> cycle [label="background / periodic"];
  request -> lock [label="manual / MCP"];
- cycle -> lock;
+ cycle -> lock [label="own enabled / not degraded; pass held index lock"];
  lock -> preflight -> dirty -> inspect;
  inspect -> pull [label="branch exists"];
  inspect -> index [label="branch absent"];
@@ -35,8 +35,24 @@ digraph sync {
  local [fillcolor="#ffe3e3",label="Local reindex/marker failure\npropagate failure; no push; owned locks released"];
  init [label="initOwnSync: explicit repository initialization\nexisting remote branch: fetch/checkout then index\nnew remote branch: local commit -> push -> index\nfailed new .git removed; existing entries retained"];
  request -> init [label="explicit init only"];
- init -> cleanup [label="return or exception"];
+ init -> initend [label="return or exception"];
  dirty -> dry -> cleanup;
  index -> local -> cleanup;
+
+
+ initend [label="initOwnSync has no index/repo lock acquisition\nremove only newly created .git on failure; entries retained\nremote push is not rolled back by later index failure"];
+ autoresult [label="AutoSync wrapper classifies own result\nWORKTREE_DIRTY / SYNC_BUSY -> early skip\nother own failure / success / degraded skip -> continue"];
+ outerindex [label="AutoSync outer reindexAndMark (even after own failure)\nthen notice signature / backoff / state persistence\ncycle/index locks still owned by wrapper"];
+ autofinal [label="AutoSync finally releases cycle + index locks\nsuccess / skipped / failure state is distinct from remote push"];
+ cyclefail [fillcolor="#ffe3e3",label="Outer reindex / notice / state throws: cycle_failed\nprior successful push remains; persistence may itself fail"];
+ cleanup -> autoresult [label="AutoSync caller only"];
+ cycle -> autoresult [label="own disabled / degraded skip"];
+ autoresult -> autofinal [label="dirty / busy"];
+ autoresult -> outerindex [label="all other outcomes"];
+ outerindex -> autofinal [label="persisted result"];
+ outerindex -> cyclefail -> autofinal;
+ periodic [label="runPeriodicSync: separate periodic lock\ninvoke cycle; save success / skipped / failed result\nfinally release periodic lock"];
+ request -> periodic [label="native periodic entry"];
+ periodic -> cycle;
 
 }

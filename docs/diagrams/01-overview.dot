@@ -3,9 +3,9 @@ digraph overview {
  node [shape=box,style="rounded,filled",fillcolor="#edf4ff",color="#45618a",fontname="Arial",fontsize=13,margin="0.6,0.2"];
  edge [fontname="Arial",fontsize=11,color="#526276"];
  api [label="Entry adapters\nCLI commands / MCP 7 tools / Web routes\nHost hooks: Claude / Codex / Cursor",URL="05-hooks-delivery.svg"];
- content [label="Knowledge lifecycle [02, 03, 08]\nMarkdown truth -> derived SQLite -> search/read\nPrivate Git sync; public-only sealed community",URL="02-entry-lifecycle.svg"];
+ content [label="Knowledge lifecycle [02, 03, 08, 16]\nMarkdown truth -> derived SQLite -> search/read\nPrivate Git sync; public-only sealed community",URL="02-entry-lifecycle.svg"];
  delivery [label="Context delivery [05, 14]\nStructural search or opted-in Jev\nDurable pending -> stdout callback -> delivery commit",URL="05-hooks-delivery.svg"];
- ops [label="Product operation [06, 09, 10, 11]\nInstall/settings; managed stage and activate\nMigration / known-object recovery / native guard",URL="09-managed-migration.svg"];
+ ops [label="Product operation [06, 09, 10, 11, 17]\nInstall/settings; managed stage and activate\nMigration / known-object recovery / native guard",URL="09-managed-migration.svg"];
  report [label="Observed failures [07]\nOpt-in local records -> signed report\nMatching signed ACK advances cursor",URL="07-runtime-reporting.svg"];
  build [label="Build and verification [04, 13]\nWorkspace + independent keyserver\n3 OS jobs; isolated pack and native proofs",URL="04-ci-release.svg"];
  eval [label="Offline evaluation [12]\nRetrieval golden / planned execution / masked judgment\nCompleted and unknown outcomes keep their denominators",URL="12-evaluation.svg"];

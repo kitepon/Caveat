@@ -7,7 +7,7 @@ digraph ci {
  classify [label="product-full-ci.yml classify\nall changed files Markdown?\nunknown base / manual / tag -> full"];
  docs [label="Markdown only\ninstall -> toolchain -> docs check"];
  matrix [label="3 self-hosted OS jobs\nmacos-native / linux-workstation / windows-native\nfail-fast false; 30m / Windows 45m"];
- full [label="frozen install -> toolchain -> build\nnative / process checks -> typecheck\nrelease smoke -> fresh-session smoke\nindependent keyserver + workspace tests\nnative hash proof"];
+ full [label="root frozen install -> toolchain version\nkeyserver frozen install -> typecheck -> tests\nbuild -> native -> process -> typecheck\nrelease smoke -> fresh-session smoke\nworkspace tests -> native hash proof"];
  green [label="Exact-head terminal results\nall full gates successful\nCI success is not publication permission"];
  pack [label="main-only pack-release.yml\nverify commit -> frozen install -> build\ndocs / pack checks -> one accepted archive"];
  archive [shape=cylinder, fillcolor="#fff0d7", label="caveat-release-pack\narchive + provenance + digest\n30-day GitHub retention"];
@@ -24,5 +24,11 @@ digraph ci {
 
  failed [fillcolor="#ffe3e3",label="Failure / timeout / cancel\nretain run/job/head and logs; candidate not accepted"];
  full -> failed [label="any gate non-success"];
+
+
+ owner -> failed [label="non-success"];
+ classify -> failed [label="non-success"];
+ docs -> failed [label="non-success"];
+ owner -> green [label="required successful gate"];
 
 }

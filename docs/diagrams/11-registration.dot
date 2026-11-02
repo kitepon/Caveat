@@ -5,7 +5,7 @@ digraph registration {
  source [label="Saved observation + proposal\n7 configuration files / 15 MCP and hook definitions"];
  projection [label="registrationFileSpecs owns scope projection\nderive actual host paths / fixed handlers / managed entry\nassert saved identity + node + command/suffix/args hashes\npaths in evidence are assertions, not scope authority"];
  codec [label="editRegistrationNodeBytes is pure\nchange only Node prefix; preserve BOM / suffix bytes\nreject ambiguous/multiline TOML target\nparse after edit; compare every other semantic value"];
- admission [label="bindRegistrationAdmission\nrecheck 7 original identities/bytes + 4 protected objects\nstop actual config writers; compute immutable plan digest"];
+ admission [label="bindRegistrationAdmission\nrecheck 7 original identities/bytes + 4 protected objects\nrefuse migration while actual config writer detected\ncompute immutable plan digest; never stop existing processes"];
  plan [label="planRegistrationMigration -> ready + digest\nno writes / no execution permission"];
  run [label="Explicit execute with matching digest + fresh checks\nprivate run + 7 backups + installer lock + fresh journal"];
  replace [label="For each file: durable intent\nexclusive same-directory temp + original hash check\natomic rename + readback; persist state + confirmed result\n7-file sequence is not one atomic transaction"];

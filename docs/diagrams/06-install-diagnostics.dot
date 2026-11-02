@@ -11,8 +11,10 @@ digraph installation {
  result [label="CLI installation summary\nMCP registration failure propagates nonzero\nclient restart / use is a separate action"];
  diag [label="factoryDiagnostics (read only)\nexact DB schema / FTS / triggers\ncanonical host registrations + feature consent\nGit local status + cached counts + failure state\nlive remote read; no fetch or repair"];
  status [label="Versioned JSON + overall status + exit\nnot_ready takes priority over unverified\nCursor / Grok required only when requested"];
- init -> data -> optional -> adapters -> mcp -> result;
- optional -> consent;
+ init -> data -> optional -> consent;
+
+ adapters -> mcp -> result;
+
  consent -> adapters [label="allowed"];
  result -> diag [style=dashed, label="separate invocation"];
  diag -> status;
@@ -21,7 +23,13 @@ digraph installation {
  data -> partial [label="throw"];
  adapters -> partial [label="write/readback fails"];
  mcp -> partial [label="registration fails"];
- blocked [fillcolor="#fff0d7",label="Codex registration refused\nexplicit false / alias conflict retained\nnot a rollback of unrelated host settings"];
+ blocked [fillcolor="#fff0d7",label="Codex hook registration skipped\nexplicit false / alias conflict retained\nnot a rollback of unrelated host settings"];
  consent -> blocked [label="blocked"];
+
+
+ blocked -> adapters [label="continue other host hooks; leave Codex hook config unchanged"];
+ skipped [label="Skipped / dry-run is not a completed write\nMCP stage remains separate from native hook consent"];
+ adapters -> skipped [style=dashed,label="per-host result"];
+ mcp -> skipped [style=dashed,label="per-client result"];
 
 }

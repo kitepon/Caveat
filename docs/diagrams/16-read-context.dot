@@ -11,9 +11,10 @@ digraph read {
  raw [label="entryRead.readEntryDocument\n(source,id) or raw byte window; realpath containment\nsealed cached index or cached-key in-memory decrypt"];
  output [label="CLI stdout / MCP JSON tool result / Web HTML\nWeb escape + Markdown raw HTML disabled + encoded links\nresponse is local view, not remote propagation proof"];
  fail [fillcolor="#ffe3e3",label="Invalid input / missing entry / read or DB failure\nexisting adapter error/404; no repair or success substitution"];
- close [label="CLI finally closes owned DB\nMCP SIGINT/TERM: server.close -> await pending syncs -> DB.close\nWeb close callback -> DB.close; duplicate shutdown guarded\nforced process death does not promise finally cleanup"];
+ close [label="CLI finally closes owned DB\nMCP SIGINT/TERM: server.close -> await pending syncs -> DB.close\nMCP only: duplicate shutdown guarded\nWeb close callback -> DB.close; no duplicate guard\nrunServe has no SIGINT/TERM close handler\nforced process death does not promise finally cleanup"];
  config -> {cli mcp web}; {cli mcp web} -> query;
- query -> raw [label="document retrieval"];
+ cli -> raw [label="show"]; mcp -> raw [label="get"];
+ raw -> query [label="repository.get when id supplied"];
  query -> output; raw -> output;
  query -> fail; raw -> fail;
  output -> close [style=dashed,label="request vs server lifetime"];

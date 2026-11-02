@@ -10,13 +10,24 @@ digraph runtime {
  credentials [label="Validate owner-only credential file\nread exact file identity\nconfigured URL / key id / signing secret"];
  post [label="Signed POST of exact JSON bytes\nno redirects; bounded request timeout"];
  verify [shape=diamond, label="HTTP 200 + accepted\nsame report id\nvalid signed receipt?"];
- ack [label="acknowledge claimed cursor\nsave accepted + retry time\nreturn sent"];
- retry [fillcolor="#fff0d7", label="Keep runtime rows pending\nsave fixed failure outcome + retry time\nnever register send failure as another runtime error"];
+ ack [label="acknowledge claimed cursor under lock"];
+ retry [fillcolor="#fff0d7", label="No valid ACK: do not acknowledge claimed rows\nsave fixed failure outcome + retry time\nnever register send failure as another runtime error"];
  producer -> local;
  local -> inspect;
  local -> due -> claim -> credentials -> post -> verify;
- verify -> ack [label="yes"];
+ verify -> ack [label="valid signed receipt"];
+ ack -> finish -> sent;
  verify -> retry [label="no / timeout / unreachable"];
  credentials -> retry [label="unsafe / missing / invalid"];
  retry -> due [style=dashed, label="later opportunity"];
+
+ finish [label="finish: persist accepted outcome + retry time"];
+ sent [label="Return sent only after persistence succeeds"];
+ nohttp [fillcolor="#fff0d7",label="No POST: disabled / not_configured / nothing_pending / waiting\nreturn explicit skipped reason"];
+ storefail [fillcolor="#ffe3e3",label="Store / claim / ACK / finish exception\nfailed / store_unavailable; cursor may already have advanced\nno claim that every row remains pending; no recursive report"];
+ claim -> nohttp [label="opt-in / pending / backoff gate"];
+ claim -> storefail [label="store or claim fails"];
+ ack -> storefail [label="cursor persistence fails"];
+ finish -> storefail [label="finish persistence fails"];
+
 }

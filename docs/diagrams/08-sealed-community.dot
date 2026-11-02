@@ -28,4 +28,21 @@ digraph sealed {
  mirror -> cancel [label="before push"];
  mirror -> pushunknown [label="push failure"];
 
+
+ subgraph cluster_subscription {
+ label="Subscription ownership and caller-specific completion";
+ add [label="communityAdd: validate GitHub URL + handle\nreject collision -> clone cache; indexing is separate"];
+ listing [label="communityList: directory enumeration + SQLite source counts\nCLI display / Web escaped HTML and mtime"];
+ remove [label="communityRemove: validate handle; own excluded\ndry-run OR delete cache directory -> delete source DB rows\nFS + DB are not one transaction; partial failure can remain"];
+ cacheonly [label="community command pull: communityPull only\nupdate cache; tell user to index separately"];
+ clipull [label="CLI pull: communityPull -> reindex own + community\nwrite digest -> finally close owned DB"];
+ mcppull [label="MCP handlePull: communityPull -> reindex\nserver-owned DB; return pulled / indexed; no digest write"];
+ callers [label="Subscription CLI / MCP / Web callers"];
+ callers -> add;
+ add -> listing -> remove -> cacheonly -> clipull -> mcppull [style=invis];
+ callers -> {listing remove cacheonly clipull mcppull} [constraint=false];
+ cacheonly -> subscribe [constraint=false]; clipull -> subscribe [constraint=false]; mcppull -> subscribe;
+ }
+ subscribe -> keep [label="per-handle failure / warning"];
+
 }

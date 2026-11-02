@@ -25,9 +25,9 @@
 <!-- content -->
 <g id="node2" class="node">
 <title>content</title>
-<g id="a_node2"><a xlink:href="02-entry-lifecycle.svg" xlink:title="Knowledge lifecycle [02, 03, 08]\nMarkdown truth &#45;&gt; derived SQLite &#45;&gt; search/read\nPrivate Git sync; public&#45;only sealed community">
+<g id="a_node2"><a xlink:href="02-entry-lifecycle.svg" xlink:title="Knowledge lifecycle [02, 03, 08, 16]\nMarkdown truth &#45;&gt; derived SQLite &#45;&gt; search/read\nPrivate Git sync; public&#45;only sealed community">
 <path fill="#edf4ff" stroke="#45618a" d="M539.03,-545.8C539.03,-545.8 194.11,-545.8 194.11,-545.8 188.11,-545.8 182.11,-539.8 182.11,-533.8 182.11,-533.8 182.11,-482.2 182.11,-482.2 182.11,-476.2 188.11,-470.2 194.11,-470.2 194.11,-470.2 539.03,-470.2 539.03,-470.2 545.03,-470.2 551.03,-476.2 551.03,-482.2 551.03,-482.2 551.03,-533.8 551.03,-533.8 551.03,-539.8 545.03,-545.8 539.03,-545.8"/>
-<text xml:space="preserve" text-anchor="middle" x="366.57" y="-519.7" font-family="Arial" font-size="13.00">Knowledge lifecycle [02, 03, 08]</text>
+<text xml:space="preserve" text-anchor="middle" x="366.57" y="-519.7" font-family="Arial" font-size="13.00">Knowledge lifecycle [02, 03, 08, 16]</text>
 <text xml:space="preserve" text-anchor="middle" x="366.57" y="-504.1" font-family="Arial" font-size="13.00">Markdown truth &#45;&gt; derived SQLite &#45;&gt; search/read</text>
 <text xml:space="preserve" text-anchor="middle" x="366.57" y="-488.5" font-family="Arial" font-size="13.00">Private Git sync; public&#45;only sealed community</text>
 </a>
@@ -61,9 +61,9 @@
 <!-- ops -->
 <g id="node4" class="node">
 <title>ops</title>
-<g id="a_node4"><a xlink:href="09-managed-migration.svg" xlink:title="Product operation [06, 09, 10, 11]\nInstall/settings; managed stage and activate\nMigration / known&#45;object recovery / native guard">
+<g id="a_node4"><a xlink:href="09-managed-migration.svg" xlink:title="Product operation [06, 09, 10, 11, 17]\nInstall/settings; managed stage and activate\nMigration / known&#45;object recovery / native guard">
 <path fill="#edf4ff" stroke="#45618a" d="M351.15,-397.2C351.15,-397.2 12,-397.2 12,-397.2 6,-397.2 0,-391.2 0,-385.2 0,-385.2 0,-333.6 0,-333.6 0,-327.6 6,-321.6 12,-321.6 12,-321.6 351.15,-321.6 351.15,-321.6 357.15,-321.6 363.15,-327.6 363.15,-333.6 363.15,-333.6 363.15,-385.2 363.15,-385.2 363.15,-391.2 357.15,-397.2 351.15,-397.2"/>
-<text xml:space="preserve" text-anchor="middle" x="181.57" y="-371.1" font-family="Arial" font-size="13.00">Product operation [06, 09, 10, 11]</text>
+<text xml:space="preserve" text-anchor="middle" x="181.57" y="-371.1" font-family="Arial" font-size="13.00">Product operation [06, 09, 10, 11, 17]</text>
 <text xml:space="preserve" text-anchor="middle" x="181.57" y="-355.5" font-family="Arial" font-size="13.00">Install/settings; managed stage and activate</text>
 <text xml:space="preserve" text-anchor="middle" x="181.57" y="-339.9" font-family="Arial" font-size="13.00">Migration / known&#45;object recovery / native guard</text>
 </a>

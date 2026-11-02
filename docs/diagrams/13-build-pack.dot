@@ -1,8 +1,8 @@
 digraph pack {
- graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Build, isolated acceptance and release archive\nrefactor candidate", labelloc=t];
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Build, isolated acceptance and release archive\nResponsibility connections, NOT full-command execution order (see 04)", labelloc=t];
  node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
  edge [fontname="Arial", fontsize=10, color="#526276"];
- contract [label="CI owns toolchain contract + frozen dependencies\nNode version/affected-range check -> FTS capability probe\nWindows .cmd/.bat invoked via literal PowerShell wrapper"];
+ contract [label="CI owns toolchain contract + frozen dependencies\nNode version/affected-range check; FTS probe follows build in full CI\nWindows .cmd/.bat invoked via literal PowerShell wrapper"];
  build [label="tsup core / MCP / Web -> bundled CLI\nrestore node: prefix; copy bootstrap + stable entry\nschema / migrations / private codec schemas"];
  native [label="Pack native koffi 3.3.4 for 6 OS/arch targets\nproduct-relative loader + license\nfixed managed runtime excludes installer / SQLite / child scans"];
  pack [label="Pack candidate into owned fixture\nmanifest/bin/mode/dependency closure / all native targets\nprivate capability transports=[]: no verified OS channel"];
