@@ -123,7 +123,7 @@ export function listRecent(db: DatabaseSync, limit = 20): SearchResult[] {
   return rows.map(toSearchResult);
 }
 
-function toSearchResult(row: EntryRow): SearchResult {
+export function toSearchResult(row: EntryRow): SearchResult {
   const fm = JSON.parse(row.frontmatter_json);
   const symptomMatch = /##\s+Symptom\s*\n([\s\S]*?)(?=\n##|\n*$)/.exec(row.body);
   const symptom = symptomMatch?.[1]?.trim() ?? row.body;

@@ -1,9 +1,8 @@
 import { usesManagedGuidance } from '@caveat/core';
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 import {
   buildAndPublishPendingReminder,
   buildPendingSemanticKey,
@@ -212,41 +211,6 @@ export function codexContextOutput(text: string, eventName = 'UserPromptSubmit')
 
 export function codexPendingCleanupFailureText(): string {
   return pendingCleanupFailureText(CODEX_HOST);
-}
-
-function spawnCodexWorker(job: CodexWorkerJob): void {
-  const workFile = join(
-    tmpdir(),
-    `caveat-codex-worker-${Date.now()}-${randomBytes(4).toString('hex')}.json`,
-  );
-  try {
-    writeFileSync(workFile, JSON.stringify(job), {
-      encoding: 'utf-8',
-      mode: 0o600,
-      flag: 'wx',
-    });
-  } catch (err: unknown) {
-    process.stderr.write(`[caveat:codex-hook] worker writefile error: ${errorMessage(err)}\n`);
-    return;
-  }
-
-  const cliScript = process.argv[1];
-  if (!cliScript) return;
-  try {
-    const child = spawn(
-      process.execPath,
-      ['--disable-warning=ExperimentalWarning', cliScript, 'codex-hook', 'worker', workFile],
-      { detached: true, stdio: 'ignore', windowsHide: true },
-    );
-    child.unref();
-  } catch (err: unknown) {
-    process.stderr.write(`[caveat:codex-hook] worker spawn error: ${errorMessage(err)}\n`);
-    try {
-      unlinkSync(workFile);
-    } catch {
-      // ignore
-    }
-  }
 }
 
 async function waitForTranscriptOutput(

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   jevObservationId,
+  upsertEntry,
   openDb,
   recordEntry,
   loadConfig,
@@ -239,6 +240,23 @@ describe('web routes', () => {
       expect(res.status).toBe(200);
       const html = await res.text();
       expect(html).toContain('no community repos imported');
+    });
+
+    it('uses indexed per-source counts and escapes a handle in HTML and URLs', async () => {
+      const handle = 'a&b';
+      mkdirSync(join(f.ctx.paths.communityDir, handle), { recursive: true });
+      mkdirSync(join(f.ctx.paths.communityDir, 'empty'), { recursive: true });
+      for (const source of ['own', `community/${handle}`] as const) {
+        upsertEntry(f.db, { id: 'same', source, path: 'same.md', title: 'Same', body: '## Symptom\nFailure',
+          frontmatter_json: '{}', tags: '[]', confidence: 'confirmed', visibility: 'private',
+          file_mtime: '2026-11-02', indexed_at: '2026-11-02' });
+      }
+      const html = await (await f.app.request('/community')).text();
+      expect(html).toContain('a&amp;b');
+      expect(html).toContain('source=community/a%26b');
+      expect(html).toContain('1 entries');
+      expect(html).toContain('0 entries');
+      expect(html).not.toContain('2 entries');
     });
 
     it('lists imported community handles', async () => {

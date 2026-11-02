@@ -1,38 +1,14 @@
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { statSync } from 'node:fs';
+import { communityList } from '@caveat/core';
 import { Hono } from 'hono';
 import type { WebContext } from '../context.js';
 import { escapeHtml, layout } from '../layout.js';
-
-interface CommunityHandle {
-  handle: string;
-  path: string;
-  entriesCount: number;
-}
-
-function listCommunity(communityDir: string, db: WebContext['db']): CommunityHandle[] {
-  if (!existsSync(communityDir)) return [];
-  const handles: CommunityHandle[] = [];
-  for (const entry of readdirSync(communityDir, { withFileTypes: true })) {
-    if (!entry.isDirectory()) continue;
-    const handlePath = join(communityDir, entry.name);
-    const countRow = db
-      .prepare('SELECT COUNT(*) AS n FROM entries WHERE source = ?')
-      .get(`community/${entry.name}`) as { n: number } | undefined;
-    handles.push({
-      handle: entry.name,
-      path: handlePath,
-      entriesCount: countRow?.n ?? 0,
-    });
-  }
-  return handles;
-}
 
 export function createCommunityRoute(ctx: WebContext): Hono {
   const app = new Hono();
 
   app.get('/community', (c) => {
-    const handles = listCommunity(ctx.paths.communityDir, ctx.db);
+    const handles = communityList({ communityDir: ctx.paths.communityDir, db: ctx.db });
 
     const list = handles
       .map((h) => {
@@ -46,7 +22,7 @@ export function createCommunityRoute(ctx: WebContext): Hono {
       <li>
         <a class="title" href="/?source=community/${encodeURIComponent(h.handle)}">${escapeHtml(h.handle)}</a>
         <div class="meta">
-          <span class="badge">${h.entriesCount} entries</span>
+          <span class="badge">${h.entryCount} entries</span>
           ${mtime ? `<span>clone mtime: ${escapeHtml(mtime)}</span>` : ''}
         </div>
       </li>`;
