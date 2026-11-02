@@ -28,6 +28,6 @@ digraph managed {
 
 
  limits [fillcolor="#fff0d7",label="Observation limits: unreadable / short-lived / closed handles\nJS caches and root/admin actions are not ruled out\nno existing-process stop/kill operation"];
- check -> limits [style=dashed,label="not a safety proof for unseen writers"];
+ check -> limits [style=dashed];
 
 }

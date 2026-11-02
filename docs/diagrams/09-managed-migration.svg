@@ -103,7 +103,6 @@
 <title>check&#45;&gt;limits</title>
 <path fill="none" stroke="#526276" stroke-dasharray="5,2" d="M546.74,-878.25C549.89,-866.57 553.34,-853.8 556.55,-841.91"/>
 <polygon fill="#526276" stroke="#526276" points="559.91,-842.87 559.14,-832.3 553.16,-841.05 559.91,-842.87"/>
-<text xml:space="preserve" text-anchor="middle" x="633.9" y="-851.56" font-family="Arial" font-size="10.00">not a safety proof for unseen writers</text>
 </g>
 <!-- originals -->
 <g id="node5" class="node">

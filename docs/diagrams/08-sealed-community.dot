@@ -15,7 +15,9 @@ digraph sealed {
  unseal [label="unsealBundle\nmagic/version/header/key/AEAD validation\nnonce invariant + relative paths + duplicate/count checks"];
  index [label="scanSealedSource\ndecrypted content in process memory\nSQLite derived rows + constraint diagnostics\nno decrypted Markdown files"];
  keep [fillcolor="#fff0d7", label="Key / bundle / source failure\nwarn + preserve prior source index\nno success inferred from another source"];
- own -> collect -> scan -> codec -> mirror -> public -> subscribe -> header -> unseal -> index;
+ own -> collect -> scan -> codec -> mirror -> public -> subscribe;
+ header -> unseal -> index;
+ subscribe -> header [style=dashed,label="cache data for separate indexing caller / later scan"];
  collect -> reject [label="invalid"];
  scan -> reject [label="blocked"];
  header -> key [label="when uncached"];

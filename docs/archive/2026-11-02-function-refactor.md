@@ -11,3 +11,5 @@
 最初の候補34f4383ではLinux/macOS/Windowsのfull CIが成功した。局所ではDB寿命42ケース、実SQLite再索引2ケース、mapperとWeb一覧のcharacterizationを確認した。図の最終照合で見つかった自動同期後半、一般通知、購読操作、配送の部分確定、process観測限界等の不足を図へ追記した。これらはruntimeを変更するものではない。修正後headのCIと最終レビュー結果はPRの検証欄を参照する。
 
 未確認はlive Jev/provider、Cloudflare live Worker/KV、本番と全実host/client。OS別skip、強制終了時の後始末、未観測writerや閉じたhandle等の限界を残す。CI成功は公開・本番反映の許可を意味しない。
+
+最終照合の説明訂正：Jevのsession状態と判定/配送記録の所有者、matched IDとgeneric termの抑止、順次commitの部分反映を図14へ明示。initのClaude→Codex→Cursor→後続MCP順、cache更新と別callerのindex、process観測図の可読性、主要表のACK/保存例外を同期した。runtime契約は変更しない。
