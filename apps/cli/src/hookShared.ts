@@ -128,36 +128,36 @@ export function searchCaveatsSafely(
   let caveatHome: string | undefined;
   let hits: SearchResult[];
   try {
-    const ctx = buildContextSafely(host);
-    if (!ctx || !existsSync(ctx.paths.dbPath)) return [];
-    caveatHome = ctx.caveatHome;
-    db = openDb({ path: ctx.paths.dbPath });
-    const searchOptions = {
-      selfIdentity: defaultSelfIdentityTokens(),
-    };
-    const found = inputs.length === 1
-      ? findCaveatsForHook(db, inputs[0]!, searchOptions)
-      : findCaveatsForHookSegments(db, inputs, searchOptions);
-    const taskText = inputs.map(({ topicText, failureText }) => `${topicText}\n${failureText}`).join('\n');
-    hits = found.filter((hit) => environmentAppliesToTask(hit.environment, taskText, fingerprint().os));
-  } catch (err: unknown) {
-    reportHookError(host, 'search error', err);
-    return [];
-  }
-  if (hits.length > 0) {
     try {
-      markHit(db!, hits);
+      const ctx = buildContextSafely(host);
+      if (!ctx || !existsSync(ctx.paths.dbPath)) return [];
+      caveatHome = ctx.caveatHome;
+      db = openDb({ path: ctx.paths.dbPath });
+      const searchOptions = {
+        selfIdentity: defaultSelfIdentityTokens(),
+      };
+      const found = inputs.length === 1
+        ? findCaveatsForHook(db, inputs[0]!, searchOptions)
+        : findCaveatsForHookSegments(db, inputs, searchOptions);
+      const taskText = inputs.map(({ topicText, failureText }) => `${topicText}\n${failureText}`).join('\n');
+      hits = found.filter((hit) => environmentAppliesToTask(hit.environment, taskText, fingerprint().os));
     } catch (err: unknown) {
-      reportHookError(host, 'markHit error', err);
+      reportHookError(host, 'search error', err);
+      return [];
     }
-  } else {
-    try {
-      logHookQueryMiss({ caveatHome: caveatHome!, agent: host.agent, surface: inputs[0]!.surface, query: queryForLog });
-    } catch (err: unknown) {
-      reportHookError(host, 'query log error', err);
+    if (hits.length > 0) {
+      try {
+        markHit(db!, hits);
+      } catch (err: unknown) {
+        reportHookError(host, 'markHit error', err);
+      }
+    } else {
+      try {
+        logHookQueryMiss({ caveatHome: caveatHome!, agent: host.agent, surface: inputs[0]!.surface, query: queryForLog });
+      } catch (err: unknown) {
+        reportHookError(host, 'query log error', err);
+      }
     }
-  }
-  try {
     return hits;
   } finally {
     db?.close();
