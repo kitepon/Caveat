@@ -1,0 +1,33 @@
+digraph runtime {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Runtime collection and signed report acknowledgement | refactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ producer [label="Operation producer\nfixed code + observed impact\nexpected refusals handled separately"];
+ local [label="runtimeErrors owns opt-in local store\nowner-only file + SQLite mutation lock\nvalidate -> update fingerprint/sequence/severity\natomic file replace"];
+ inspect [label="snapshot / diagnostics / resolve / reopen\ncompact only old resolved + acknowledged rows"];
+ due [label="hook error or Stop\nruntimeErrorReportDue: cheap pending/backoff check\nspawn detached report worker; not send completion"];
+ claim [label="sendRuntimeErrorReport\ncollection AND credential-path opt-in\nclaim pending rows + in-flight state under lock"];
+ credentials [label="Validate owner-only credential file\nread exact file identity\nconfigured URL / key id / signing secret"];
+ post [label="Signed POST of exact JSON bytes\nno redirects; bounded request timeout"];
+ verify [shape=diamond, label="HTTP 200 + accepted\nsame report id\nvalid signed receipt?"];
+ ack [label="acknowledge claimed cursor under lock"];
+ retry [fillcolor="#fff0d7", label="No valid ACK: do not acknowledge claimed rows\nsave fixed failure outcome + retry time\nnever register send failure as another runtime error"];
+ producer -> local;
+ local -> inspect;
+ local -> due -> claim -> credentials -> post -> verify;
+ verify -> ack [label="valid signed receipt"];
+ ack -> finish -> sent;
+ verify -> retry [label="no / timeout / unreachable"];
+ credentials -> retry [label="unsafe / missing / invalid"];
+ retry -> due [style=dashed, label="later opportunity"];
+
+ finish [label="finish: persist accepted outcome + retry time"];
+ sent [label="Return sent only after persistence succeeds"];
+ nohttp [fillcolor="#fff0d7",label="No POST: disabled / not_configured / nothing_pending / waiting\nreturn explicit skipped reason"];
+ storefail [fillcolor="#ffe3e3",label="Store / claim / ACK / finish exception\nfailed / store_unavailable; cursor may already have advanced\nno claim that every row remains pending; no recursive report"];
+ claim -> nohttp [label="opt-in / pending / backoff gate"];
+ claim -> storefail [label="store or claim fails"];
+ ack -> storefail [label="cursor persistence fails"];
+ finish -> storefail [label="finish persistence fails"];
+
+}

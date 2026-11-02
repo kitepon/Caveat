@@ -1,0 +1,33 @@
+digraph managed {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Managed global migration\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ plan [label="CLI global-plan -> bindGlobalAdmission\nclone input; active pointer/payload/entry and npm snapshot\nprotect owned paths; external config metadata only"];
+ native [label="openGlobalPathGuard owns native ancestors + object pins\nPOSIX openat / xattr / ACL / no-replace rename\nWindows retained handles / SID-DACL / relative native calls"];
+ check [label="verifyProtected + processCheck before/after each stage\nconsumer / actual open writer -> refuse; collection exception -> stop\nindividual unreadable -> unknown count, not automatic refusal\nobserveConfigWriters: Claude association observation only"];
+ prepare [label="Explicit execute + same plan digest\nrepeat fresh checks; private run + evidence\nexclusive installer lock + fresh canonical chained journal"];
+ originals [label="Preservation engine owns original object state\npackage -> npm management -> bin leaves\nrename originals into private run; preserve identity + bytes"];
+ copies [label="Create and verify distinct-inode working copies\nrelease only working pins before npm child"];
+ npm [label="Owned Node/npm child; offline + ignore-scripts + empty npmrc\n60 s hang guard; bounded output hash only\nspawn + exit + close + exit0 required"];
+ inspect [label="Observe working objects after npm\nonly same known content/identity or deletion accepted\ncompleted receipt + non-management leaves absent -> removed"];
+ shell [label="Publish product-generated wrappers then shell manifest\nprivate stage -> seal -> no-replace -> readback\nretain and journal each result"];
+ readback [label="Coordinator checkpoint -> archive lock -> close guard\nindependent saved-journal AND current-shell readback\nonly then terminal completed"];
+ stopped [fillcolor="#fff0d7", label="Refusal / pre-mutation check failure\nstopped; no existing-process operations"];
+ unknown [fillcolor="#ffe8e8", label="Issued syscall / receipt / cleanup not confirmed\nunknown + private evidence + fresh recovery-plan entry\nno automatic rollback or replay"];
+ plan -> native -> check -> prepare -> originals -> copies -> npm -> inspect -> shell -> readback;
+ check -> stopped [label="unsafe / busy / changed / process refused"];
+ plan -> stopped [label="read-only plan refuses invalid scope"];
+ originals -> unknown [label="move / state persistence unknown"];
+ copies -> unknown [label="partial copy / publication unknown"];
+ npm -> unknown [label="timeout / exit or close unconfirmed"];
+ inspect -> unknown [label="new or changed working object"];
+ shell -> unknown [label="publication/readback failure"];
+ readback -> unknown [label="independent verification fails"];
+ check -> check [style=dashed, label="repeated through mutation stages"];
+
+
+
+ limits [fillcolor="#fff0d7",label="Observation limits: unreadable / short-lived / closed handles\nJS caches and root/admin actions are not ruled out\nno existing-process stop/kill operation"];
+ check -> limits [style=dashed];
+
+}

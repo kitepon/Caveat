@@ -1,0 +1,25 @@
+digraph entry {
+ graph [rankdir=TB, bgcolor="white", pad="0.25", nodesep="0.3", ranksep="0.5", fontname="Arial", label="Entry mutation, index, and response | refactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ req [label="MCP request\nregisterAllTools schemas"];
+ args [label="handleRecord / handleUpdate\nassertEntryArguments; own-only update"];
+ build [label="recordEntry / updateEntry\nID, immutable keys, merged fields\nbuildEntry -> YAML + final byte limits"];
+ refuse [fillcolor="#fff0d7", label="Typed input refusal BEFORE mutation\nisError + field / limit / guidance"];
+ write [shape=cylinder, fillcolor="#fff0d7", label="Markdown write\nwriteEntryFile / writeFileSync"];
+ upsert [label="upsertEntry\n(source,id) -> entries row"];
+ fts [shape=cylinder, fillcolor="#fff0d7", label="schema.sql triggers\nentries_fts update"];
+ failure [fillcolor="#ffe3e3", label="Write or index error\nMCP_TOOL_FAILED; mutation outcome unverified\nNo automatic entry replay or rollback"];
+ callback [label="onEntryWritten\ntriggerAutoSyncAfterWrite -> detached worker"];
+ response [label="JSON tool response\n{id,path,filePath}\nNot proof of remote propagation"];
+ reindex [label="reindexAllSources -> scanSource\nper-source savepoint; keep stale rows\nwhen entry exceeds input contract"];
+ query [label="search / get / readEntryDocument\nMCP JSON or rendered Web HTML"];
+ req -> args -> build -> write -> upsert -> fts -> callback -> response;
+ args -> refuse [label="arguments limit"];
+ build -> refuse [label="final format / size limits"];
+ write -> failure [label="exception"];
+ upsert -> failure [label="exception after file write"];
+ write -> reindex [label="later rescan", style=dashed];
+ reindex -> fts;
+ fts -> query [label="same-process visibility"];
+}

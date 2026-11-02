@@ -1,0 +1,25 @@
+digraph recovery {
+ graph [rankdir=TB, bgcolor="white", pad="0.3", nodesep="0.35", ranksep="0.5", fontname="Arial", label="Fresh known-object recovery\nrefactor candidate", labelloc=t];
+ node [shape=box, style="rounded,filled", fillcolor="#edf4ff", color="#45618a", fontname="Arial", fontsize=12, margin="0.8,0.18"];
+ edge [fontname="Arial", fontsize=10, color="#526276"];
+ source [label="Immutable migration / recovery source files\ncanonical plan + originals + journal + state bytes/SHA\nmax 8 chain levels; 256 files / 64 MiB; no cycle"];
+ model [label="RecoveryModel validates fixed role/name transitions\nsaved paths never authorize a syscall\nready/complete confirmed history; narrow confirmed-publication proof"];
+ bind [label="Fresh native binding of originals / working / generated objects\nexact identity, bytes, security; all vacant slots checked\nowned protection strict; external config metadata observed"];
+ plan [label="global-recovery-plan\nrepeat current/protected/process checks\nreturns fresh evidence digest; no lock or write; no execution permit"];
+ execute [label="Explicit execute with plan AND fresh evidence digest\nretain source read leases; revalidate current/process state\nnew private attempt + source receipt + lock + fresh journal"];
+ retire [label="Quarantine known generated manifest -> wrappers\nthen known working copies\ndurable intent -> repeated process check -> no-replace move\nprivate state + confirmed result; verify current state"];
+ restore [label="Restore original native objects in fixed order\npackage -> npm management -> bin leaves\nsame intent / move / result checks"];
+ final [label="Complete checkpoint; archive lock; close guard\nindependent new guard checks all objects / vacancies / evidence\nterminal restored only after readback"];
+ stop [fillcolor="#fff0d7", label="Unknown/torn/pending source or changed current object\nstopped; source retained; no replay authority"];
+ unknown [fillcolor="#ffe8e8", label="After attempt writes, result unconfirmed -> unknown\nretain attempt; request fresh evidence for later recovery\nnever assume rename failed or rollback safe"];
+ source -> model -> bind -> plan -> execute -> retire -> restore -> final;
+ source -> stop [label="invalid / incomplete history"];
+ model -> stop [label="unconfirmed transition"];
+ bind -> stop [label="changed / unknown / occupied slot"];
+ plan -> stop [label="process or protection refusal"];
+ execute -> stop [label="digest mismatch before writes"];
+ retire -> unknown [label="check / syscall / persistence failure"];
+ restore -> unknown [label="check / syscall / persistence failure"];
+ final -> unknown [label="close / independent readback failure"];
+ unknown -> source [style=dashed, label="new explicit plan; never automatic retry"];
+}

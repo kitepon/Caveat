@@ -1,0 +1,21 @@
+digraph deploy {
+ graph [rankdir=TB,bgcolor="white",pad="0.3",nodesep="0.4",ranksep="0.6",fontname="Arial",labelloc=t,label="Managed stage, activation and fixed startup"];
+ node [shape=box,style="rounded,filled",fillcolor="#edf4ff",color="#45618a",fontname="Arial",fontsize=12,margin="0.6,0.2"];
+ edge [fontname="Arial",fontsize=10,color="#526276"];
+
+ inspect [label="preflightManagedDeployment: read-only\nSQLite/source inventory/owner/ACL/ancestor/entry protocol\nexisting pointer verified; installer lock -> busy refusal"];
+ stage [label="stageManagedDeployment under installer lock\nfixed entry assets verified or exclusively created\ncopy package to private .stage; seal and compare inventory\nmanifest -> rename to side-by-side release -> checkRelease"];
+ activate [label="activateManagedDeployment under installer lock\nvalidate release + manifest; verify previous pointer\nexclusive same-dir temp pointer -> fsync -> ACL -> root recheck\nprevious bytes unchanged -> atomic rename active.json"];
+ startup [label="stable-entry / managedDeploymentRuntime\nread pointer + entry/manifest/security/bounded startup payload\nordinary node loads selected release; full inventory is separate"];
+ status [label="verifyManagedDeployment / deployment status\nfull release verification and separate MCP lifetime receipts\nold loaded process may require client reopen; never killed"];
+ preserved [shape=cylinder,fillcolor="#fff0d7",label="Old releases and existing processes remain\nstaging is not activation; pointer switch is not loaded-process update"];
+ fail [fillcolor="#ffe3e3",label="Refuse invalid/unknown identity, inventory or entry protocol\nowned temp cleanup in finally; installer lock release\nno claim that partial stage or atomic-switch error did nothing"];
+ recovery [fillcolor="#fff0d7",label="Explicit recoverInvalidPointer only\nretain original invalid pointer bytes before replacement\nstale installer lock recovery is a separate explicit operation"];
+ inspect -> stage [label="explicit stage"];
+ stage -> activate [label="separate explicit activation"];
+ activate -> startup [label="next invocation"];
+ startup -> status [style=dashed,label="separate diagnostic"];
+ stage -> preserved; activate -> preserved;
+ inspect -> fail; stage -> fail; activate -> fail; startup -> fail;
+ activate -> recovery [label="invalid previous pointer + explicit opt-in"];
+}

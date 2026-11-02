@@ -140,7 +140,7 @@ describe('index', () => {
     }
   });
 
-  it('--full DELETEs existing entries before rescan', async () => {
+  it('--full rescans existing entries', async () => {
     writeFileSync(
       join(fx.knowledgeRepo, 'entries', 'gpu', 'a.md'),
       sampleCaveat('a', 'A'),
@@ -157,7 +157,7 @@ describe('index', () => {
     db.close();
     expect(count).toBe(1);
 
-    // Full rebuild: delete 'a' first, then rescan (which re-inserts 'a' since md still exists)
+    // Force a rescan even though the file mtime is unchanged.
     await runIndex(ctx, { full: true });
 
     db = openDb({ path: ctx.paths.dbPath });

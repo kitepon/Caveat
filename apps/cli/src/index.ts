@@ -218,7 +218,7 @@ program
 program
   .command('index')
   .description('Index knowledge repo entries into SQLite')
-  .option('--full', 'full rebuild (DELETE all then rescan)', false)
+  .option('--full', 'rescan all entries regardless of mtime; retain prior rows for rejected input', false)
   .action(async (opts: { full: boolean }) => {
     const ctx = buildContext(stdoutLogger);
     await runIndex(ctx, { full: opts.full });
