@@ -863,3 +863,7 @@ simple-git4.0.2/argv-parser2.0.1へ固定し、検出したunsafe categoryの自
 | 一次データ / 各既存store | knowledge Markdown/Git、pending/claim/ACK、runtime report cursor、deployment journal・activation失敗証拠 → 各storeの既存保持契約 | 一時worker回収の対象へ入れず、未受領・unknownを再生成cacheと扱わない |
 
 保存経路はhook入力→予約root検証→private job作成→JSON書込→子起動→読取→終了時回収。異常経路は書込前の中断→空job残存→24時間超→次の通常sweepで回収、又は既知JSON残存→同じsweepで回収。未知の残存物は保持経路へ返す。worker root marker、所有・mode・非symlink確認と既存24時間の猶予は変更しない。
+
+### 空worker回収のpatch供給（0.21.19）
+
+上の保存・回収の機能/データフローを0.21.19で供給する。入出力・所有・24時間猶予・失敗時保持の契約は同表のまま。CLI package manifest/version表示とrelease metadataだけを次patchへ更新し、固定managed entry/runtimeと登録先は変更しない。
