@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  rmdirSync,
   writeFileSync,
 } from 'node:fs';
 import type { Stats } from 'node:fs';
@@ -256,8 +257,10 @@ export function sweepStaleWorkerDirs(now = Date.now(), root = workerRoot()): voi
     try {
       if (!isOwnedWorkerDir(path, root)) continue;
       const stat = lstatSync(path);
-      if (now - stat.mtimeMs <= WORKER_STALE_MS || !isStaleWorkerJobDir(path)) continue;
-      rmSync(path, { recursive: true, force: true });
+      if (now - stat.mtimeMs <= WORKER_STALE_MS) continue;
+      // A killed parent can leave an empty job; rmdir preserves a late writer.
+      if (readdirSync(path).length === 0) rmdirSync(path);
+      else if (isStaleWorkerJobDir(path)) rmSync(path, { recursive: true, force: true });
     } catch {
       process.stderr.write('[caveat:hook] worker stale cleanup failed\n');
     }

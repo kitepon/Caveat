@@ -104,6 +104,8 @@ describe('Claude hook output', () => {
     const testBase = mkdtempSync(join(tmpdir(), 'caveat-worker-test-'));
     const reserved = workerRoot(testBase);
     const stale = mkdtempSync(join(reserved, 'job-'));
+    const emptyStale = mkdtempSync(join(reserved, 'job-'));
+    const emptyFresh = mkdtempSync(join(reserved, 'job-'));
     const legacyStale = mkdtempSync(join(reserved, 'job-'));
     const legacyStaleWithContext = mkdtempSync(join(reserved, 'job-'));
     const legacyInvalidContext = mkdtempSync(join(reserved, 'job-'));
@@ -125,7 +127,10 @@ describe('Claude hook output', () => {
       writeFileSync(join(legacyInvalidContext, 'job.json'), JSON.stringify({ schemaVersion: 'caveat-worker-job/v1', sessionId: 's', searchText: 'legacy query', additionalContext: 'invalid' }), { encoding: 'utf-8', mode: 0o600 });
       chmodSync(invalid, 0o700);
       writeFileSync(join(invalid, 'job.json'), JSON.stringify({ unexpected: 'not a worker job' }), { encoding: 'utf-8', mode: 0o600 });
+      chmodSync(emptyStale, 0o700);
+      chmodSync(emptyFresh, 0o700);
       const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
+      utimesSync(emptyStale, old, old);
       utimesSync(join(stale, 'job.json'), old, old);
       utimesSync(stale, old, old);
       utimesSync(join(legacyStale, 'job.json'), old, old);
@@ -143,6 +148,8 @@ describe('Claude hook output', () => {
       sweepStaleWorkerDirs(Date.now(), reserved);
 
       expect(existsSync(stale)).toBe(false);
+      expect(existsSync(emptyStale)).toBe(false);
+      expect(existsSync(emptyFresh)).toBe(true);
       expect(existsSync(legacyStale)).toBe(false);
       expect(existsSync(legacyStaleWithContext)).toBe(false);
       expect(existsSync(legacyInvalidContext)).toBe(true);
@@ -153,6 +160,8 @@ describe('Claude hook output', () => {
       expect(existsSync(symlinkTarget)).toBe(true);
     } finally {
       rmSync(stale, { recursive: true, force: true });
+      rmSync(emptyStale, { recursive: true, force: true });
+      rmSync(emptyFresh, { recursive: true, force: true });
       rmSync(legacyStale, { recursive: true, force: true });
       rmSync(legacyStaleWithContext, { recursive: true, force: true });
       rmSync(legacyInvalidContext, { recursive: true, force: true });
