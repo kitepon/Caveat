@@ -859,7 +859,7 @@ simple-git4.0.2/argv-parser2.0.1へ固定し、検出したunsafe categoryの自
 | 機能 / writer・reader | 入力 → 変換 → 保存 → 利用 / 回収 | 失敗・不明時の保持 |
 | --- | --- | --- |
 | hook親 / worker子 | hook job → private予約root内の`job-*`とschema付きJSON → workerが読取 → 子の通常終了で自分のjobを回収 | 書込・spawn失敗は親が自分のjobを回収。強制終了で残ったjobは次の通常hook/worker起動時にsweep |
-| stale sweep / hook親 | 同じ所有者の非symlink private job directory → 24時間超の判定 → 空、又は既知schema JSON一件だけなら回収 | 作成直後の空dirは保持。JSON書込前の強制終了で残った古い空dirも回収。未知schema・余分なfile・link・所有不明は保持し、削除エラーはstderr診断 |
+| stale sweep / hook親 | 同じ所有者の非symlink private job directory → 24時間超の判定 → 空、又は既知schema JSON一件だけなら回収 | 作成直後の空dirは保持。JSON書込前の強制終了で残った古い空dirも、空directory専用のrmdirで回収。空判定後にfileが入れば削除を拒否して保持。未知schema・余分なfile・link・所有不明は保持し、削除エラーはstderr診断 |
 | 一次データ / 各既存store | knowledge Markdown/Git、pending/claim/ACK、runtime report cursor、deployment journal・activation失敗証拠 → 各storeの既存保持契約 | 一時worker回収の対象へ入れず、未受領・unknownを再生成cacheと扱わない |
 
 保存経路はhook入力→予約root検証→private job作成→JSON書込→子起動→読取→終了時回収。異常経路は書込前の中断→空job残存→24時間超→次の通常sweepで回収、又は既知JSON残存→同じsweepで回収。未知の残存物は保持経路へ返す。worker root marker、所有・mode・非symlink確認と既存24時間の猶予は変更しない。
