@@ -279,6 +279,8 @@ export function workerRoot(base = tmpdir()): string {
 
 function isStaleWorkerJobDir(path: string): boolean {
   const entries = readdirSync(path);
+  // A killed parent may leave its private job directory before writing JSON.
+  if (entries.length === 0) return true;
   if (entries.length !== 1 || !entries[0]!.endsWith('.json')) return false;
   const file = join(path, entries[0]!);
   const stat = lstatSync(file);
