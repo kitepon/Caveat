@@ -65,13 +65,14 @@ it('capture refuses modified plans and wrapper contents instead of claiming unkn
   writeFileSync(f.plan.files[0]!.path,'unknown');expect(()=>captureManagedShellManifest(f.plan)).toThrow('wrapper_bytes_changed');f.assertProtected();
 },60000);
 
+// PowerShell runs use process-scope Bypass so the check measures the wrapper, not the runner's ambient execution policy.
 function invoke(file: string, args: string[], cwd: string, input?: Buffer) {
   const options = { cwd, input, env:{...process.env,CAVEAT_SHELL_TEST:'inherited value 日本'}, timeout:30000, maxBuffer:1024*1024, windowsHide:true };
   if(!windows)return spawnSync(file,args,options);
   const psQuote=(v:string)=>"'"+v.replaceAll("'","''")+"'";
   if(file.endsWith('.ps1')){
     const command='& '+psQuote(file)+' '+args.map(psQuote).join(' ')+'; exit $LASTEXITCODE';
-    return spawnSync('pwsh.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(command,'utf16le').toString('base64')],options);
+    return spawnSync('pwsh.exe',['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(command,'utf16le').toString('base64')],options);
   }
   if(file.endsWith('.cmd')){
     const quote=(v:string)=>'"'+v.replace(/(\\*)"/g,'$1$1\\"').replace(/(\\+)$/g,'$1$1')+'"';
@@ -86,7 +87,7 @@ function invoke(file: string, args: string[], cwd: string, input?: Buffer) {
 it('real wrapper processes preserve argv, working directory, environment and exit status', () => {
   const f=fixture('node');f.install();const args=['','space value','quote"value','single\'quote','trailing\\','日本語','--leading','semi;colon','5%'];
   for(const file of f.plan.files){const r=invoke(file.path,['argv',...args],f.root);expect(r.error).toBeUndefined();expect(r.status, file.name+': '+String(r.stderr)).toBe(37);expect(JSON.parse(String(r.stdout)),file.name).toEqual({args,cwd:f.root,marker:'inherited value 日本'});}
-  if(windows){const ps1=f.plan.files.find(f=>f.name.endsWith('.ps1'))!.path;const q=(v:string)=>"'"+v.replaceAll("'","''")+"'";const source='& '+q(ps1)+' '+['argv',...args].map(q).join(' ')+'; exit $LASTEXITCODE';const r=spawnSync(join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',Buffer.from(source,'utf16le').toString('base64')],{cwd:f.root,env:{...process.env,CAVEAT_SHELL_TEST:'inherited value 日本'},timeout:30000});expect(r.error,'Windows PowerShell 5.1 absolute OS entry').toBeUndefined();expect(r.status,String(r.stderr)).toBe(37);expect(JSON.parse(String(r.stdout)).args).toEqual(args);}
+  if(windows){const ps1=f.plan.files.find(f=>f.name.endsWith('.ps1'))!.path;const q=(v:string)=>"'"+v.replaceAll("'","''")+"'";const source='& '+q(ps1)+' '+['argv',...args].map(q).join(' ')+'; exit $LASTEXITCODE';const r=spawnSync(join(process.env.SystemRoot??'C:/Windows','System32/WindowsPowerShell/v1.0/powershell.exe'),['-NoLogo','-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-EncodedCommand',Buffer.from(source,'utf16le').toString('base64')],{cwd:f.root,env:{...process.env,CAVEAT_SHELL_TEST:'inherited value 日本'},timeout:30000});expect(r.error,'Windows PowerShell 5.1 absolute OS entry').toBeUndefined();expect(r.status,String(r.stderr)).toBe(37);expect(JSON.parse(String(r.stdout)).args).toEqual(args);}
   f.assertProtected();
 },90000);
 it('real wrappers preserve binary stdin/stdout/stderr without PowerShell pipeline decoding', () => {
