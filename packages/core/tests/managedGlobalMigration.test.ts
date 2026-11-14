@@ -59,7 +59,8 @@ function fixture() {
   return { root, profile, prefix, globalRoot, packageRoot, binDirectory, paths, config, input };
 }
 describe('product global migration caller', () => {
-  it('persists a bounded plan and prepares with unrelated metadata exceeding 16 MiB', { timeout: 60000 }, async () => {
+  // Bound check, not a benchmark: 20000 file creations plus metadata scans took 71s on an 8-logical-CPU Windows runner slice.
+  it('persists a bounded plan and prepares with unrelated metadata exceeding 16 MiB', { timeout: 180000 }, async () => {
     const f = fixture();
     let directory = join(f.globalRoot, 'other');
     // Stay below macOS PATH_MAX while retaining a real metadata set larger than 16 MiB.

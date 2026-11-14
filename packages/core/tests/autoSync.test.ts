@@ -76,7 +76,7 @@ describe('auto sync trigger', () => {
     }
   });
 
-  it('carries the write request time despite a configured interval and future marker mtime', { timeout: 10_000 }, async () => {
+  it('carries the write request time despite a configured interval and future marker mtime', async () => {
     const { home, cleanup } = fresh(); const cliScript = join(home, 'worker.mjs'); const receipt = cliScript + '.receipt';
     try {
       markCycleFinished(home, -10_000); process.env[CAVEAT_AUTO_SYNC_DEBOUNCE_ENV] = '60000';

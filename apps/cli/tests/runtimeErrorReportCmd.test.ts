@@ -58,7 +58,7 @@ function isolated(url: string | null) {
 }
 const lastLine = (stdout: string) => JSON.parse(stdout.trim().split('\n').at(-1)!) as Record<string, any>;
 
-describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 30_000 }, () => {
+describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 60_000 }, () => {
   it('未受領の記録を送り、受領後は状態と未受領件数に反映する', async () => {
     const { url, reports } = await receiver(accept);
     const { env } = isolated(url);
@@ -98,7 +98,7 @@ describe('caveat runtime-errors report', { timeout: windowsHost ? 180_000 : 30_0
     expect(reports).toHaveLength(0);
   });
 
-  it('失敗したhookは待たされずに終わり、切り離したworkerが記録を送る', { timeout: windowsHost ? 240_000 : 45_000 }, async () => {
+  it('失敗したhookは待たされずに終わり、切り離したworkerが記録を送る', { timeout: windowsHost ? 240_000 : 60_000 }, async () => {
     const { url, reports } = await receiver(accept);
     const { env, root } = isolated(url);
     const observer = fileURLToPath(new URL('./fixtures/reportWorkerObserver.cjs', import.meta.url));

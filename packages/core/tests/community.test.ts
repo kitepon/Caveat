@@ -18,8 +18,6 @@ import {
 // process bound, not a CI job limit; the surrounding bounds leave enough time
 // to report the failing git phase.
 const GIT_PROCESS_TIMEOUT_MS = 20_000;
-const GIT_FIXTURE_SETUP_TIMEOUT_MS = 45_000;
-const GIT_FIXTURE_CLEANUP_TIMEOUT_MS = 30_000;
 const GIT_E2E_TEST_TIMEOUT_MS = 60_000;
 const COMMUNITY_FIXTURE_NAME = 'community integration fixture';
 
@@ -147,11 +145,11 @@ describe('communityAdd / communityPull / communityList (integration)', { timeout
     remote = initBareWithContent();
     playground = mkdtempSync(join(tmpdir(), 'caveat-play-'));
     mkdirSync(join(playground, 'community'), { recursive: true });
-  }, GIT_FIXTURE_SETUP_TIMEOUT_MS);
+  });
   afterEach(() => {
     rmSync(remote.root, { recursive: true, force: true });
     rmSync(playground, { recursive: true, force: true });
-  }, GIT_FIXTURE_CLEANUP_TIMEOUT_MS);
+  });
 
   it('add rejects non-github URLs without touching filesystem', async () => {
     await expect(

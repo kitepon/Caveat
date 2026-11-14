@@ -50,7 +50,7 @@ function host(url: string | null, credential: unknown = undefined) {
 const at = (iso: string, env: NodeJS.ProcessEnv, extra: RuntimeErrorReportOptions = {}): RuntimeErrorReportOptions => ({ ...fast, env, version: VERSION, now: iso, ...extra });
 const pending = (env: NodeJS.ProcessEnv) => runtimeErrorsSnapshot(0, 256, { ...fast, env, version: VERSION }).diagnostics.pending_count;
 
-describe('runtime error report', { timeout: windowsHost ? 60_000 : 10_000 }, () => {
+describe('runtime error report', () => {
   it('署名は契約の試験値と一致する', () => {
     const body = Buffer.from('{"schema_version":"1.0","report_id":"00000000-0000-4000-8000-000000000001","product_id":"caveat","installed_version":"0.19.13","observed_at":"2026-09-21T14:13:20.000Z","runtime_errors":[],"resolutions":[]}', 'utf8');
     expect(body.length).toBe(205);

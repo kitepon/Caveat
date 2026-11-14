@@ -59,6 +59,8 @@ For a targeted Cursor repair, run `caveat cursor-hook install`. It upserts Cavea
 in `~/.cursor/hooks.json` while preserving unrelated hooks. Use
 `caveat cursor-hook diagnostics` to inspect the installed contract.
 
+For external registration managers, `caveat harness-entries --json [--home <seat-home>]` exports `bellteam.harness-entries.v1` (E1 v1.1): native MCP entries for Claude, Codex, Grok and Cursor, Claude/Codex hook groups, Cursor event items, and settings/ownership metadata. Use repeatable `--harness` selections to emit only the integrations the manager intends to maintain; for example `--harness codex --harness grok` emits those two MCP entries and the three Codex hooks. There is no Gemini entry, Grok hook or Cursor permission entry. The exporter resolves the intended home's selected managed launcher without initializing or syncing Caveat, reading CLI settings, writing files or accessing the network. Existing standalone `init` and `uninstall` remain available. Publishing E1 alone does not transfer writer ownership; managed writer retirement follows the external manager's explicit applied result. Existing customized hook commands need separate equality confirmation before migration.
+
 Automation uses the aggregate product contract instead:
 `caveat factory-diagnostics --json --require-connector cursor`. Its versioned
 schema, top-level `overall.status`, and exit status are the complete gate. The

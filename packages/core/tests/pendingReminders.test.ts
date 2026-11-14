@@ -27,7 +27,6 @@ import {
   releasePendingClaim,
 } from '../src/pendingReminders.js';
 
-const OS_PROCESS_STRESS_TIMEOUT_MS = 30_000;
 const OS_PROCESS_CONCURRENCY = 8;
 
 function freshHome(): { home: string; cleanup: () => void } {
@@ -75,7 +74,7 @@ describe('pendingReminders', () => {
       writeFileSync(join(dir, '.torn.tmp'), 'partial', 'utf-8');
       expect(drainPendingReminders(home, 's1')).toEqual(['only once']);
     } finally { cleanup(); }
-  }, OS_PROCESS_STRESS_TIMEOUT_MS);
+  });
 
   it('runs a pre-publish builder exactly once across concurrent OS processes', async () => {
     const { home, cleanup } = freshHome();
@@ -95,7 +94,7 @@ describe('pendingReminders', () => {
       expect(readFileSync(counter, 'utf8').trim().split('\n')).toEqual(['1']);
       expect(drainPendingReminders(home, 's1')).toEqual(['built once']);
     } finally { cleanup(); }
-  }, OS_PROCESS_STRESS_TIMEOUT_MS);
+  });
 
   it('reclaims one expired claim without an ABA double-builder across concurrent OS processes', async () => {
     const { home, cleanup } = freshHome();
@@ -114,7 +113,7 @@ describe('pendingReminders', () => {
       expect(readFileSync(counter, 'utf8').trim().split('\n')).toEqual(['1']);
       expect(drainPendingReminders(home, 's1')).toEqual(['built once']);
     } finally { cleanup(); }
-  }, OS_PROCESS_STRESS_TIMEOUT_MS);
+  });
 
   it('does not let stale sweeping delete a concurrent fresh publish', async () => {
     const { home, cleanup } = freshHome();
@@ -143,7 +142,7 @@ describe('pendingReminders', () => {
         expect(reminders.filter((text) => text === 'only once')).toHaveLength(1);
       }
     } finally { cleanup(); }
-  }, OS_PROCESS_STRESS_TIMEOUT_MS);
+  });
 
   it('keeps a live builder claim when staleDays is zero', async () => {
     const { home, cleanup } = freshHome();
@@ -168,7 +167,7 @@ describe('pendingReminders', () => {
       await exit;
       expect(drainPendingReminders(home, 's1')).toEqual(['built after sweep']);
     } finally { cleanup(); }
-  }, OS_PROCESS_STRESS_TIMEOUT_MS);
+  });
 
   it('reclaims expired claims and reports cleanup failures through the detailed API', () => {
     const { home, cleanup } = freshHome();

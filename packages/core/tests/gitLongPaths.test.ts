@@ -33,6 +33,6 @@ it.skipIf(process.platform !== 'win32')('Windowsで260文字を超えるentryを
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
-}, 15_000);
+});
 
 afterEach(() => { vi.unstubAllEnvs(); });

@@ -7,8 +7,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createGit } from '../src/gitRuntime.js';
 
-const GIT_RUNTIME_TEST_TIMEOUT_MS = 15_000;
-
 let tmpDir: string | undefined;
 
 afterEach(() => {
@@ -61,7 +59,7 @@ async function startLocalServer(
   };
 }
 
-describe('createGit runtime policy', { timeout: GIT_RUNTIME_TEST_TIMEOUT_MS }, () => {
+describe('createGit runtime policy', () => {
   it('lets the HTTP helper timeout preempt the direct-child timeout despite conflicting inherited env', async () => {
     const root = makeTmpDir();
     vi.stubEnv('GIT_HTTP_LOW_SPEED_LIMIT', '0');

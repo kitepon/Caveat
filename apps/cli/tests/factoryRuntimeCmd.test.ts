@@ -85,7 +85,7 @@ function readyGrok(fixture: ReturnType<typeof isolated>) {
   return configPath;
 }
 
-describe('built factory/runtime CLI contracts', { timeout: 30_000 }, () => {
+describe('built factory/runtime CLI contracts', () => {
   it.each([
     ['bad\nuser', 'CAVEAT_GITHUB_USER_INVALID'],
     ['fixture-target', 'CAVEAT_GITHUB_TARGET_UNSUPPORTED'],

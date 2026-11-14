@@ -12,8 +12,6 @@ const POLL_TIMEOUT_MS = 3_000;
 // process bound, not a CI job limit; the surrounding bounds leave enough time
 // to report the failing git phase.
 const GIT_PROCESS_TIMEOUT_MS = 20_000;
-const GIT_FIXTURE_SETUP_TIMEOUT_MS = 45_000;
-const GIT_FIXTURE_CLEANUP_TIMEOUT_MS = 30_000;
 const GIT_E2E_TEST_TIMEOUT_MS = 60_000;
 const AUTO_SYNC_FIXTURE_NAME = 'auto sync hook fixture';
 
@@ -129,10 +127,10 @@ describe('auto sync hook', { timeout: GIT_E2E_TEST_TIMEOUT_MS }, () => {
   let fixture: ReturnType<typeof fresh>;
   beforeEach(() => {
     fixture = fresh();
-  }, GIT_FIXTURE_SETUP_TIMEOUT_MS);
+  });
   afterEach(() => {
     fixture.cleanup();
-  }, GIT_FIXTURE_CLEANUP_TIMEOUT_MS);
+  });
 
   it('pulls community updates and reindexes them while own sync skips non-repos', async () => {
     const { source, clone } = setupCommunityClone(fixture.home);

@@ -99,6 +99,55 @@ keyserverは無認証なので、動機ある人間による解析を防ぐと�
 詳細なhost契約は[`03_dual_agent_support.md`](03_dual_agent_support.md)、利用手順は
 [`../README.md`](../README.md)と[`../README.ja.md`](../README.ja.md)を正とする。
 
+### Harness registration function map and data flow
+
+`caveat harness-entries --json [--home <seat-home>] [--harness <name>]` publishes
+`bellteam.harness-entries.v1` (E1 v1.1). It is an additive, read-only interface:
+it does not initialize Caveat, open the index, read CLI configuration, run a
+provider, sync, access the network, or write files. `version` is the exporting
+package version, not evidence that another running client adopted it.
+
+| Function / connection | Input and owner | Output and state |
+| --- | --- | --- |
+| CLI adapters → knowledge / hooks / operations | Existing validated command and host payloads; Caveat owns markdown, derived index, pending reminders, sync, diagnostics, managed deployment and recovery. | Existing contracts in this document remain unchanged. The new exporter does not enter these operations. |
+| CLI `harness-entries` → `harnessEntries` | Optional seat home (default OS home), invoked CLI path, OS and repeatable harness selection (`claude`, `codex`, `grok`, `cursor`; default all four). Caveat owns the exporter. | Resolve the public managed registration entry for that home, then construct one JSON document without a `CliContext`. Selected harnesses get their own MCP and hooks only; Grok has no hooks. Invalid selections fail before output or mutation. |
+| `harnessEntries` → MCP / hook definitions | `createMcpRegistration` comes from `mcpInstall.ts:installMcpClient`; `claudeHookCommand` / `claudeHookEntry` come from `claudeInstall.ts:hookCommand/upsertHook`, with equivalent Codex/Cursor helpers in their installers. | The exporter and standalone installers reuse these exported native-definition helpers. Native MCP entries cover Claude, Codex, Grok and Cursor; no Gemini. Claude/Codex native hook groups and Cursor native hook items keep their event order, command quoting and fields. |
+| Caveat E1 → BellTeam CLI registration | `{schema, product:'caveat', version, mcpServers:{caveat:{claude,codex,grok,cursor}}, hooks:{claude,codex,cursor}, settings:{codex:{'features.hooks':true}}, owns:{commandIncludes:['caveat.js','caveat.mjs']}}`. E2 invokes the intended seat's selected managed launcher; `--home` alone cannot select a package when that home has no managed pointer. | BellTeam owns target availability, provider commands/APIs, atomic hook writes, Cursor's file envelope and Codex positional trust. Absent key means no entry: Caveat emits no Gemini MCP, Grok hooks or Cursor permissions. Ownership substrings still match env-prefixed commands. Caveat never reads BellTeam storage. |
+| Existing owned item → BellTeam merged apply | Under E1's “Merge inside an item” contract, declared MCP fields win; undeclared user fields stay. Env merges by key with E1 winning conflicts; `env:{}` clears nothing. Declared hook fields replace, while undeclared fields and native group metadata stay. The provider API receives the merged whole entry. | BellTeam's confirmed consumer contract owns this merge. Hook command strings are E1's exactly; the consumer does not prepend an existing env prefix. |
+| Existing standalone installers → CLI configuration | Existing home overrides and installed host availability; selected managed launcher or invoked CLI. | Existing installation/uninstallation, consent, backup, write and readback behavior stays active. Publishing E1 does not transfer writer ownership. |
+| BellTeam applied notice → managed writer handoff | Only after BellTeam is live and Molly sends its one `applied` result; Trony owns the startup maintainer. | A later managed-only change retires registration writers in serialized order. This exporter does not disable them, remove entries, or change standalone operation. |
+
+The exporter keeps native fields: Claude command hooks without a timeout;
+Codex `type:'command'`, `timeout:5`, `async:false`, `statusMessage:null`;
+Cursor `timeout:10`. Timeouts use each CLI's native unit. The Cursor adapter
+preserves the `version:1` file envelope separately from its event map. MCP args
+keep the warning flag, the selected CLI entry and `mcp-server`, using `node`
+from the client environment. Windows Codex commands keep their PowerShell call
+prefix. Product-owned command/args are declarative; existing user env, disabled,
+timeout and unknown fields are retained by BellTeam rather than exported.
+An empty default Claude env object must not clear an existing env map. The
+exporter describes canonical installer definitions without reading seat state.
+It cannot recover a user-specific prefix on an existing hook command. Such a
+seat has not established the required byte equality for adoption: a product
+command prefix must be supplied explicitly under an agreed deployment binding
+before that seat switches. This export alone does not authorize replacing a
+customized command, and does not claim equality with customized seats.
+BellTeam's initial shared-seat binding selects `--harness codex --harness grok`:
+Molly confirmed those two MCP registrations and three unprefixed Codex hooks,
+with no Caveat Claude/Cursor registrations. This observation is accepted without
+re-reading the seat's private files. E2's explicit selection prevents adding
+Claude/Cursor entries merely because those CLIs are installed.
+BellTeam sets `features.hooks` only when absent and respects explicit false.
+
+Data flow: seat home + invoked package → public read-only managed-entry
+resolution → shared native registration definitions → one stdout JSON document
+→ BellTeam ordered registry → provider MCP APIs / atomic hook writer → next
+client adoption. No secret values or existing seat config flow back into E1.
+Managed-entry resolution or invalid input failure produces no JSON and a
+nonzero exit, with no mutation; BellTeam retains the last accepted entries and
+the next configure retries. Writer retirement and release remain separate
+explicit stages, outside the exporter.
+
 ## 運用入口
 
 | 判断 | 正規入口 |

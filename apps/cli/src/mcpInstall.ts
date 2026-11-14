@@ -46,13 +46,17 @@ interface McpConfigOptions {
 }
 
 /** 設定形式の差を製品内に閉じ込め、Caveat以外の登録と利用者の指定を保持する。 */
-export function installMcpClient(options: McpConfigOptions & { nodePath: string; cliScriptPath: string }) {
-  return updateMcpClient(options, (previous) => ({
+export function createMcpRegistration(client: McpClient, nodePath: string, cliScriptPath: string, previous?: Record<string, unknown>) {
+  return {
     ...previous,
-    ...(options.client === 'claude' ? { type: 'stdio', env: previous?.env ?? {} } : {}),
-    command: options.nodePath,
-    args: ['--disable-warning=ExperimentalWarning', options.cliScriptPath, 'mcp-server'],
-  }));
+    ...(client === 'claude' ? { type: 'stdio', env: previous?.env ?? {} } : {}),
+    command: nodePath,
+    args: ['--disable-warning=ExperimentalWarning', cliScriptPath, 'mcp-server'],
+  };
+}
+
+export function installMcpClient(options: McpConfigOptions & { nodePath: string; cliScriptPath: string }) {
+  return updateMcpClient(options, (previous) => createMcpRegistration(options.client, options.nodePath, options.cliScriptPath, previous));
 }
 
 export function uninstallMcpClient(options: McpConfigOptions) {

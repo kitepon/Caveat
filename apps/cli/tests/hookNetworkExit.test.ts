@@ -30,4 +30,4 @@ for (const host of ['claude','codex']) it(`${host} hook drains HTTP cleanup afte
     expect(recorded).toMatchObject({host,decision:'below_struggle_threshold'});
     expect(recorded.turns).toHaveLength(3);
   } finally {rmSync(root,{recursive:true,force:true});}
-},30000);
+});

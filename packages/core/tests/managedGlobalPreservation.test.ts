@@ -193,7 +193,7 @@ describe('private working copies from retained originals', () => {
     } finally { guard.close(); }
   });
   // Durable native preservation/copy/quarantine/restore took 5467ms on macOS CI.
-  it('quarantines exact known working copies before restoring the original objects in dependency order', { timeout: 30_000 }, async () => {
+  it('quarantines exact known working copies before restoring the original objects in dependency order', async () => {
     const { source, backup, objects } = fixture(), guard = await openGlobalPathGuard([source, backup]);
     try {
       const journal = createGlobalMutationJournal(guard, backup, 'run.jsonl', plan), engine = prepareGlobalObjectPreservation(guard, journal, objects, async () => {});
