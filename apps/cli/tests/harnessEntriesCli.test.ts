@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { registrationFixture } from './registrationFixture.js';
 
 const denySideEffects = `
@@ -58,7 +59,8 @@ describe('shipped harness-entries CLI', () => {
       writeFileSync(join(fx.home, '.caveatrc.json'), 'invalid config: private-fixture-not-for-output');
       const before = snapshot(fx.home);
       const run = (harnesses: string[]) => spawnSync(process.execPath, [
-        '--import', preload, resolve('dist/caveat.js'),
+        // --import takes a module specifier; a bare C:\ path is read as URL scheme "c:" on Windows.
+        '--import', pathToFileURL(preload).href, resolve('dist/caveat.js'),
         'harness-entries', '--json', '--home', fx.home,
         ...harnesses.flatMap(name => ['--harness', name]),
       ], {
