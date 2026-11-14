@@ -6,9 +6,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openDb } from '@caveat/core';
 
-// Three shipped-bin invocations plus marker polling must fit the test budget.
+// Bound each shipped-bin invocation.
 const HOOK_CHILD_TIMEOUT_MS = 10_000;
-const HOOK_E2E_TIMEOUT_MS = 3 * HOOK_CHILD_TIMEOUT_MS + 5_000;
 
 const POLL_INTERVAL_MS = 25;
 const POLL_TIMEOUT_MS = 3_000;
@@ -79,7 +78,7 @@ function fresh(): { home: string; cleanup: () => void } {
 }
 
 describe('auto reindex hook', () => {
-  it('reindexes directly, writes its marker, and makes the entry surface', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('reindexes directly, writes its marker, and makes the entry surface', () => {
     const { home, cleanup } = fresh();
     try {
       const result = cli('reindex', home);
@@ -92,7 +91,7 @@ describe('auto reindex hook', () => {
     } finally { cleanup(); }
   });
 
-  it('spawns from stop only when dirty and leaves a clean marker unchanged', { timeout: HOOK_E2E_TIMEOUT_MS }, async () => {
+  it('spawns from stop only when dirty and leaves a clean marker unchanged', async () => {
     const { home, cleanup } = fresh();
     try {
       const stop = cli('stop', home);
@@ -107,7 +106,7 @@ describe('auto reindex hook', () => {
     } finally { cleanup(); }
   });
 
-  it('honors the autosync kill switch and a live lock', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('honors the autosync kill switch and a live lock', () => {
     const { home, cleanup } = fresh();
     try {
       const off = cli('reindex', home, { ...process.env, CAVEAT_INDEX_AUTOSYNC: 'off' });

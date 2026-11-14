@@ -58,7 +58,7 @@ for(const route of ['init','init-existing','sync-init','manual','background','pe
  else if(route==='background'){vi.stubEnv('CAVEAT_AUTO_SYNC','on');const halt=new Error('fixture worker exit');const exit=vi.spyOn(process,'exit').mockImplementation(()=>{throw halt;});try{await expect(runHook('autosync')).rejects.toBe(halt);}finally{exit.mockRestore();}expect(readAutoSyncState(f.caveatHome)?.ownSync.consecutiveFailureCount).toBe(1);}
  else{await runAutosync(f.ctx);const r=readPeriodicSyncState(f.caveatHome)?.last_result;expect(r?.status).toBe('failed');expect(r?.reason).toBe('caveat_github_user_unavailable');}
  selected(f);
-}),30000);
+}));
 
 it('neutralizes user helper/protocol values only in the selected instance',()=>fixture(async f=>{
  initialize(f);const evil=path.join(f.root,'external.mjs');fs.writeFileSync(evil,`import fs from'node:fs';fs.writeFileSync(${JSON.stringify(f.forbidden)},'unexpected');`);
@@ -71,7 +71,7 @@ it('neutralizes user helper/protocol values only in the selected instance',()=>f
  expect(await named.raw(['config','--get','protocol.file.allow'])).toBe('never\n');
  await runSync(f.ctx,{});selected(f);expect(fs.readFileSync(path.join(f.own,'.git/config'))).toEqual(before);
  const ordinary=createGit(f.own);await expect(ordinary.raw(['-c','credential.helper=fixture','status'])).rejects.toThrow('allowUnsafeCredentialHelper');
-}),30000);
+}));
 
 for(const mode of ['count','parameters','files','protocol','trace'])it(`rejects inherited GIT_CONFIG injection: ${mode}`,()=>fixture(async f=>{
  initialize(f);
@@ -83,7 +83,7 @@ for(const mode of ['count','parameters','files','protocol','trace'])it(`rejects 
  await runSync(f.ctx,{});
  if(mode==='trace')selected(f);
  else{expect(log.error.mock.calls.flat().join(' ')).toContain('CAVEAT_GIT_ENV_UNSAFE');expect(fs.existsSync(f.marker)).toBe(false);expect(fs.existsSync(f.forbidden)).toBe(false);}
-}),30000);
+}));
 for(const user of ['','bad user','bad\tuser',`bad'quote`,'bad"quote','bad;user','bad\nuser','-bad','bad-','bad--user','fixture-target\n','fixture-target\r','fixture-target\r\n'])it(`rejects invalid named user ${JSON.stringify(user)} before an opted-in Git instance`,()=>{
  expect(()=>createGit(os.tmpdir(),{githubUser:user})).toThrow('CAVEAT_GITHUB_USER_INVALID');
 });
@@ -92,7 +92,7 @@ it('refuses an unrecognized user helper key before enabling the named instance',
  initialize(f);f.git(['config','credential.https://github.com/fixture path.helper','!exit 83']);
  expect(()=>createGit(f.own,{githubUser:'fixture-target'})).toThrow('CAVEAT_GITHUB_CONFIG_UNSUPPORTED');
  expect(fs.existsSync(f.marker)).toBe(false);expect(fs.existsSync(f.forbidden)).toBe(false);
-}),30000);
+}));
 
 it('routes the real MCP own sync through simple-git, Git and the named fake credential helper',()=>fixture(async f=>{
   initialize(f);
@@ -109,7 +109,7 @@ it('routes the real MCP own sync through simple-git, Git and the named fake cred
     const {readMcpSyncState}=await import('../src/mcpSyncState.js');
     expect(readMcpSyncState(f.caveatHome)).toMatchObject({status:'failed',code:'CAVEAT_GITHUB_USER_UNAVAILABLE'});
   } finally {await mcp.close();}
-}),20000);
+}));
 
 it('refuses configured askpass instead of broadening named helper opt-ins',()=>fixture(async f=>{
  initialize(f);f.git(['config','core.askPass','fixture-never-invoked']);const before=fs.readFileSync(path.join(f.own,'.git/config'));

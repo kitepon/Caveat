@@ -11,17 +11,13 @@ it('formats Claude pending cleanup failures with a fixed stderr prefix', () => {
   expect(claudePendingCleanupFailureText()).toBe('[caveat:hook] pending reminder cleanup failed');
 });
 
-// CLI integration includes process startup and SQLite; bound each child and
-// budget both invocations plus local fixture setup/assertions. The deliberate
+// CLI integration includes process startup and SQLite; bound each child. The deliberate
 // runtime-error path also secures the Windows error store (multiple ACL calls);
 // its child hit 10s in canonical CI while ordinary hook children stayed <1s.
 const HOOK_CHILD_TIMEOUT_MS = 10_000;
 const RUNTIME_ERROR_CHILD_TIMEOUT_MS = 20_000;
-const FIXTURE_OVERHEAD_MS = 10_000;
-const HOOK_E2E_TIMEOUT_MS = 2 * HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
-const RUNTIME_ERROR_E2E_TIMEOUT_MS = RUNTIME_ERROR_CHILD_TIMEOUT_MS + HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS;
 
-it('passes write request times through the shipped autosync worker and rejects malformed arguments', { timeout: 3 * HOOK_CHILD_TIMEOUT_MS + FIXTURE_OVERHEAD_MS }, () => {
+it('passes write request times through the shipped autosync worker and rejects malformed arguments', () => {
   const root = mkdtempSync(join(tmpdir(), 'caveat-write-worker-')); const userHome = join(root, 'home'); const caveatHome = join(root, 'caveat');
   mkdirSync(userHome);
   const env = { ...process.env, HOME: userHome, USERPROFILE: userHome, CAVEAT_HOME: caveatHome, CAVEAT_AUTO_SYNC: 'on', TMPDIR: root, TEMP: root, TMP: root };
@@ -74,7 +70,7 @@ function runHook(
 }
 
 describe('Claude hook output', () => {
-  it('Jev有効時は旧検索と保留罠を止め、全体通知だけ配送する', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('Jev有効時は旧検索と保留罠を止め、全体通知だけ配送する', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-jev-only-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -174,7 +170,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('reports query-log failures without interrupting a successful zero-hit search', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('reports query-log failures without interrupting a successful zero-hit search', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-query-log-error-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -198,7 +194,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('records an unexpected search/open failure but not expected empty-input validation', { timeout: RUNTIME_ERROR_E2E_TIMEOUT_MS }, () => {
+  it('records an unexpected search/open failure but not expected empty-input validation', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-runtime-error-'));
     const caveatHome = join(root, 'caveat-home'); const userHome = join(root, 'home'); const configHome = join(root, 'xdg-config'); const stateHome = join(root, 'xdg-state'); const localAppData = join(root, 'local-app-data');
     const runtimeEnv = { ...process.env, CAVEAT_HOME: caveatHome, HOME: userHome, USERPROFILE: userHome, LOCALAPPDATA: localAppData, XDG_CONFIG_HOME: configHome, XDG_STATE_HOME: stateHome };
@@ -221,7 +217,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('drains multiple pending reminders as one system-reminder block', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('drains multiple pending reminders as one system-reminder block', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-hook-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -259,7 +255,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('keeps exactly one real system-reminder wrapper when pending text contains tags', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('keeps exactly one real system-reminder wrapper when pending text contains tags', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-wrapper-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -283,7 +279,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('queues stop reminders without writing stdout immediately', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('queues stop reminders without writing stdout immediately', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-stop-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');
@@ -338,7 +334,7 @@ describe('Claude hook output', () => {
     }
   });
 
-  it('does not requeue unchanged stop reminders for the same session', { timeout: HOOK_E2E_TIMEOUT_MS }, () => {
+  it('does not requeue unchanged stop reminders for the same session', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-claude-stop-'));
     const caveatHome = join(root, 'caveat-home');
     const userHome = join(root, 'home');

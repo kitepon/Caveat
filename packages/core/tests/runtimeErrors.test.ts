@@ -34,7 +34,7 @@ function childExit(childProcess: ReturnType<typeof spawn>) {
   });
 }
 
-describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, () => {
+describe('runtime errors', () => {
   it('uses observed impact, keeps unresolved serious impact, and preserves historical identity/counts', () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
     // This case owns state/impact invariants, not native ACL latency. Exercise
