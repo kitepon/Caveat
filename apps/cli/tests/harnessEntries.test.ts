@@ -71,7 +71,7 @@ describe('harnessEntries', () => {
     expect(Object.keys(exported.mcpServers.caveat).sort()).toEqual(['claude', 'codex', 'cursor', 'grok']);
     expect(exported.mcpServers.caveat).toEqual({
       claude: claudeMcp.mcpServers.caveat,
-      codex: codexConfig.mcp_servers.caveat,
+      codex: { ...codexConfig.mcp_servers.caveat, env_vars: ['CAVEAT_HOME', 'GIT_CONFIG_GLOBAL', 'GH_CONFIG_DIR'] },
       grok: grokConfig.mcp_servers.caveat,
       cursor: cursorMcp.mcpServers.caveat,
     });

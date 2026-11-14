@@ -75,8 +75,9 @@ describe('shipped harness-entries CLI', () => {
       expect(result.stdout.trim().split('\n')).toHaveLength(1);
       expect(output.schema).toBe('bellteam.harness-entries.v1');
       expect(Object.keys(output.mcpServers.caveat)).toEqual(['codex', 'grok']);
-      for (const entry of Object.values(output.mcpServers.caveat)) expect(entry).toEqual({
-        command: 'node', args: ['--disable-warning=ExperimentalWarning', fx.paths.launcher, 'mcp-server'],
+      const mcp = { command: 'node', args: ['--disable-warning=ExperimentalWarning', fx.paths.launcher, 'mcp-server'] };
+      expect(output.mcpServers.caveat).toEqual({
+        codex: { ...mcp, env_vars: ['CAVEAT_HOME', 'GIT_CONFIG_GLOBAL', 'GH_CONFIG_DIR'] }, grok: mcp,
       });
       expect(Object.keys(output.hooks)).toEqual(['codex']);
       expect(result.stdout).not.toContain('private-fixture-not-for-output');

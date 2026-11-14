@@ -4,6 +4,13 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.21.21] — 2026-11-15
+
+### Fixed
+- Accept `GIT_CONFIG_GLOBAL` as the relocated user global Git layer (same trust as `~/.gitconfig`), so sync and autosync no longer fail with `CAVEAT_GIT_ENV_UNSAFE` on hosts that set it. `GIT_CONFIG_SYSTEM`, `GIT_CONFIG`, `GIT_CONFIG_COUNT`/`PARAMETERS` and other unreviewed Git environment stay refused.
+- `harness-entries` declares Codex MCP `env_vars` `CAVEAT_HOME`, `GIT_CONFIG_GLOBAL` and `GH_CONFIG_DIR` (names only), because Codex starts stdio MCP servers with its default environment and the server otherwise opened the default Caveat home.
+- Native process observation uses the same 60s bound as the owned npm child on loaded runners.
+
 ## [0.21.20] — 2026-11-14
 
 ### Added
