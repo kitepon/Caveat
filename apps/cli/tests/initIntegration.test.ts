@@ -124,9 +124,10 @@ describe('caveat init integrated setup', () => {
     expect(existsSync(ctx.paths.dbPath)).toBe(false);
   });
 
-  // Two real local-Git init/sync passes can exceed Vitest's default 5s on
-  // Windows. Match the existing Git integration budget, not a product timeout.
-  it('initializes an explicit file URL without gh and syncs it on re-init', { timeout: process.platform === 'win32' ? 60_000 : 5_000 }, async () => {
+  // Two real local-Git init/sync passes exceed Vitest's default 5s on Windows
+  // and on a shared macOS runner slice (5.1s observed). Match the existing Git
+  // integration budget on every OS, not a product timeout.
+  it('initializes an explicit file URL without gh and syncs it on re-init', { timeout: 60_000 }, async () => {
     const remote = join(fx.root, 'private.git');
     execFileSync('git', ['init', '--bare', '--initial-branch=main', remote], { env: { ...process.env, ...isolatedGitEnv(process.env.HOME!) }, timeout: 20_000 });
     const remoteUrl = pathToFileURL(remote).href;
