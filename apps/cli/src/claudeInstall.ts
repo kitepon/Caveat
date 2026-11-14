@@ -33,7 +33,7 @@ const EVENT_POST_TOOL_USE = 'PostToolUse';
 const EVENT_POST_TOOL_USE_FAILURE = 'PostToolUseFailure';
 const EVENT_STOP = 'Stop';
 
-function hookCommand(
+export function claudeHookCommand(
   nodePath: string,
   cliScriptPath: string,
   event: 'user-prompt-submit' | 'post-tool-use' | 'stop',
@@ -42,6 +42,7 @@ function hookCommand(
 }
 
 type HookEntry = { hooks: Array<{ type: string; command: string }> };
+export function claudeHookEntry(command: string) { return { type: 'command', command }; }
 type HookMap = Record<string, HookEntry[]>;
 type Settings = {
   hooks?: HookMap;
@@ -71,7 +72,7 @@ function upsertHook(
       }
     }
   }
-  list.push({ hooks: [{ type: 'command', command }] });
+  list.push({ hooks: [claudeHookEntry(command)] });
   return 'added';
 }
 
@@ -126,7 +127,7 @@ export function isCanonicalCaveatClaudeHookCommand(actual: string, event: 'user-
   // quoting はコマンド内の実パスから再構成した正規形と一致する場合だけ認める（legacy unsafe shape の拒否）。
   // パス同一性は realpath 照合（isCanonicalAsset）が持つ——installer の安定パス（symlink）と
   // 診断側の process.execPath（実体）は文字列一致しないため、期待文字列との完全一致では比較しない。
-  if (actual !== hookCommand(actualNodePath, actualCliScriptPath, event)) return false;
+  if (actual !== claudeHookCommand(actualNodePath, actualCliScriptPath, event)) return false;
   return isCanonicalAsset(actualNodePath, nodePath, constants.X_OK) && isCanonicalAsset(actualCliScriptPath, cliScriptPath, constants.R_OK);
 }
 
@@ -169,9 +170,9 @@ export function installClaudeIntegration(
   const settingsPath = join(opts.claudeDir, 'settings.json');
   const settings = readSettings(settingsPath);
 
-  const usCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
-  const ptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
-  const stopCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
+  const usCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
+  const ptCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
+  const stopCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
   const ptInstallCmd =
     findExistingHookCommand(settings, EVENT_POST_TOOL_USE, ptCmd) ?? ptCmd;
 
@@ -216,9 +217,9 @@ export function uninstallClaudeIntegration(
   const settingsPath = join(opts.claudeDir, 'settings.json');
   const settings = readSettings(settingsPath);
 
-  const usCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
-  const ptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
-  const stopCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
+  const usCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
+  const ptCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
+  const stopCmd = claudeHookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
 
   const removedUs = removeHook(settings, EVENT_USER_PROMPT_SUBMIT, usCmd);
   const removedPt = removeHook(settings, EVENT_POST_TOOL_USE, ptCmd);

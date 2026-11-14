@@ -2,6 +2,11 @@
 
 All notable changes are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Export native MCP and hook definitions with the read-only `caveat harness-entries --json` interface, supporting an explicit seat home and repeatable harness selection without changing standalone installation or transferring writer ownership.
+
 ## [0.21.19] — 2026-11-06
 
 ### Fixed

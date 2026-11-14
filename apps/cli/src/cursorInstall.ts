@@ -69,8 +69,9 @@ type CursorHooksFile = {
 };
 
 const TIMEOUT_SEC = 10;
+export function cursorHookEntry(command: string) { return { command, timeout: TIMEOUT_SEC }; }
 
-function hookCommand(
+export function cursorHookCommand(
   nodePath: string,
   cliScriptPath: string,
   event: 'user-prompt-submit' | 'post-tool-use' | 'stop',
@@ -160,13 +161,12 @@ function upsertHook(
       return 'unchanged';
     }
     if (isSameCommand(entry.command, command) || isCaveatCursorHookCommand(entry.command, subcommand)) {
-      entry.command = command;
-      entry.timeout = TIMEOUT_SEC;
+      Object.assign(entry, cursorHookEntry(command));
       file.hooks[event] = list;
       return 'added';
     }
   }
-  list.push({ command, timeout: TIMEOUT_SEC });
+  list.push(cursorHookEntry(command));
   file.hooks[event] = list;
   return 'added';
 }
@@ -216,9 +216,9 @@ function persist(opts: CursorInstallOptions, file: CursorHooksFile, changed: boo
 export function installCursorHooks(opts: CursorInstallOptions): CursorInstallResult {
   const hooksPath = join(opts.cursorDir, 'hooks.json');
   const file = readHooks(hooksPath);
-  const promptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
-  const toolCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
-  const stopCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
+  const promptCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
+  const toolCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
+  const stopCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
   const hooks = {
     beforeSubmitPrompt: upsertHook(file, 'beforeSubmitPrompt', promptCmd, 'user-prompt-submit'),
     postToolUse: upsertHook(file, 'postToolUse', toolCmd, 'post-tool-use'),
@@ -233,9 +233,9 @@ export function installCursorHooks(opts: CursorInstallOptions): CursorInstallRes
 export function uninstallCursorHooks(opts: CursorInstallOptions): CursorInstallResult {
   const hooksPath = join(opts.cursorDir, 'hooks.json');
   const file = readHooks(hooksPath);
-  const promptCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
-  const toolCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
-  const stopCmd = hookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
+  const promptCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit');
+  const toolCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use');
+  const stopCmd = cursorHookCommand(opts.nodePath, opts.cliScriptPath, 'stop');
   const removed = {
     beforeSubmitPrompt: removeHook(file, 'beforeSubmitPrompt', promptCmd, 'user-prompt-submit'),
     postToolUse: removeHook(file, 'postToolUse', toolCmd, 'post-tool-use'),

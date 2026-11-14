@@ -53,12 +53,15 @@ type HookEntry = {
   matcher?: string | null;
   hooks: HookCommand[];
 };
+export function codexHookEntry(command: string) {
+  return { type: 'command', command, timeout: 5, async: false, statusMessage: null };
+}
 type HooksJson = {
   hooks?: Partial<Record<HookEvent, HookEntry[]>>;
   [key: string]: unknown;
 };
 
-function hookCommand(
+export function codexHookCommand(
   nodePath: string,
   cliScriptPath: string,
   event: 'user-prompt-submit' | 'post-tool-use' | 'stop',
@@ -147,27 +150,13 @@ function upsertHook(
         && hook.statusMessage === null) return 'unchanged';
       if (isSameHookCommand(hook.command, command)
         || isCaveatCodexHookCommand(hook.command, subcommand)) {
-        hook.command = command;
-        hook.type = 'command';
-        hook.timeout = 5;
+        Object.assign(hook, codexHookEntry(command));
         delete hook.timeoutSec;
-        hook.async = false;
-        hook.statusMessage = null;
         return 'added';
       }
     }
   }
-  list.push({
-    hooks: [
-      {
-        type: 'command',
-        command,
-        timeout: 5,
-        async: false,
-        statusMessage: null,
-      },
-    ],
-  });
+  list.push({ hooks: [codexHookEntry(command)] });
   return 'added';
 }
 
@@ -360,19 +349,19 @@ export function installCodexHooks(opts: CodexHookInstallOptions): CodexHookInsta
   const userPromptSubmit = upsertHook(
     hooksJson,
     'UserPromptSubmit',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit', opts.platform),
     'user-prompt-submit',
   );
   const postToolUse = upsertHook(
     hooksJson,
     'PostToolUse',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use', opts.platform),
     'post-tool-use',
   );
   const stop = upsertHook(
     hooksJson,
     'Stop',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'stop', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'stop', opts.platform),
     'stop',
   );
 
@@ -409,19 +398,19 @@ export function uninstallCodexHooks(opts: CodexHookInstallOptions): CodexHookIns
   const userPromptSubmitRemoved = removeHook(
     hooksJson,
     'UserPromptSubmit',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'user-prompt-submit', opts.platform),
     'user-prompt-submit',
   );
   const postToolUseRemoved = removeHook(
     hooksJson,
     'PostToolUse',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'post-tool-use', opts.platform),
     'post-tool-use',
   );
   const stopRemoved = removeHook(
     hooksJson,
     'Stop',
-    hookCommand(opts.nodePath, opts.cliScriptPath, 'stop', opts.platform),
+    codexHookCommand(opts.nodePath, opts.cliScriptPath, 'stop', opts.platform),
     'stop',
   );
 

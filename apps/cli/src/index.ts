@@ -36,6 +36,7 @@ import { disableJev, enableJev, jevStatus, listJevCases, reviewJevCase } from '.
 import { runGlobalMigrationCommand, runGlobalRecoveryInspection, runGlobalRecoveryPlan, runGlobalRecovery, type GlobalMigrationOptions } from './commands/globalMigration.js';
 import { runRegistrationMigration, runRegistrationRecovery, type RegistrationOptions } from './commands/registrationMigration.js';
 import { deploymentStage, deploymentPreflight, deploymentActivate, deploymentStatus, deploymentUnlock, deploymentShellPlan, deploymentShellManifest } from './commands/deployment.js';
+import { harnessEntries } from './harnessEntries.js';
 
 const program = new Command();
 const agentPaths = resolveAgentConfigPaths();
@@ -47,6 +48,16 @@ program
   .name('caveat')
   .description('External spec gotcha knowledge base CLI')
   .version(CAVEAT_VERSION);
+
+program.command('harness-entries')
+  .description('Export native integrations for an external registration manager without changing state')
+  .requiredOption('--json', 'emit bellteam.harness-entries.v1')
+  .option('--home <path>', 'seat home used to select the installed managed launcher')
+  .option('--harness <name>', 'select claude, codex, grok or cursor (repeatable; default all)', collectRepeatable, [])
+  .action((opts: { home?: string; harness: string[] }) => {
+    const output = harnessEntries(process.argv[1] ?? '', opts.home, opts.harness.length ? opts.harness : undefined);
+    process.stdout.write(`${JSON.stringify(output)}\n`);
+  });
 
 program
   .command('factory-diagnostics')
