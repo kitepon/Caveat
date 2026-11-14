@@ -9,6 +9,8 @@ import { resolveHookNodePath } from './nodePath.js';
 import { CAVEAT_VERSION } from './version.js';
 
 const clients: readonly McpClient[] = ['claude', 'codex', 'grok', 'cursor'];
+// Codex gives stdio MCP servers only its default env; forward these names (never values).
+const codexMcpEnvVars = ['CAVEAT_HOME', 'GIT_CONFIG_GLOBAL', 'GH_CONFIG_DIR'];
 type HookEvent = 'user-prompt-submit' | 'post-tool-use' | 'stop';
 
 /** Only the public managed-entry resolver reads state; no CLI config or CliContext. */
@@ -52,7 +54,9 @@ export function harnessEntries(
     product: 'caveat',
     version: CAVEAT_VERSION,
     mcpServers: {
-      caveat: Object.fromEntries(selected.map(client => [client, createMcpRegistration(client, node, entry)])),
+      caveat: Object.fromEntries(selected.map(client => [client, client === 'codex'
+        ? { ...createMcpRegistration(client, node, entry), env_vars: codexMcpEnvVars }
+        : createMcpRegistration(client, node, entry)])),
     },
     hooks: Object.fromEntries(selected.filter(client => client !== 'grok').map(client => [client, definitions[client]])),
     settings: selected.includes('codex') ? { codex: { 'features.hooks': true } } : {},

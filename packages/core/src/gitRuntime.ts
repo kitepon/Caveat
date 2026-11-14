@@ -52,7 +52,11 @@ export function createGit(baseDir?: string, opts?: { timeoutMs?: number; githubU
     ],
     // Opt in only for the validated product helper and its HTTPS-only protocol policy.
     allowEnvironment: Object.keys(env).filter(key => /^GIT_/i.test(key)),
-    unsafe: opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true },
+    unsafe: {
+      ...(opts?.githubUser == null ? {} : { allowUnsafeCredentialHelper: true, allowUnsafeProtocolOverride: true }),
+      // Only the reviewed global layer reaches here; other config paths were refused above. Product argv never uses -C/--git-dir.
+      ...(Object.keys(env).some(isGlobalLayer) ? { allowUnsafeConfigPaths: true } : {}),
+    },
   };
   const git = baseDir === undefined ? simpleGit(options) : simpleGit(baseDir, options);
   return git.env(env);
@@ -63,14 +67,17 @@ const supportedGitEnvironment = new Set([
   'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL', 'GIT_COMMITTER_DATE',
   'GIT_SSL_CAINFO', 'GIT_SSL_CAPATH', 'GIT_SSL_NO_VERIFY',
   'GIT_TERMINAL_PROMPT', 'GIT_HTTP_LOW_SPEED_LIMIT', 'GIT_HTTP_LOW_SPEED_TIME',
+  // Relocated user global layer: same trust as HOME/.gitconfig, and named-helper validation reads it.
+  'GIT_CONFIG_GLOBAL',
 ]);
+const isGlobalLayer = (key: string) => key.toUpperCase() === 'GIT_CONFIG_GLOBAL';
 
 /** Validate before naming/scrubbing: inherited command/config opt-ins are never inferred. */
 function nonInteractiveGitEnvironment(user?: string | null): NodeJS.ProcessEnv {
   if (user != null) validateGithubUser(user);
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^(EDITOR|VISUAL|GIT_EDITOR|GIT_SEQUENCE_EDITOR|PAGER|GIT_PAGER|GIT_CURL_VERBOSE|GH_DEBUG)$/i.test(key) || /^GIT_TRACE/i.test(key)) delete env[key];
-  const categories = new Set(parseEnv(env).vulnerabilities.map(v => v.category as string));
+  const categories = new Set(parseEnv(Object.fromEntries(Object.entries(env).filter(([key]) => !isGlobalLayer(key)))).vulnerabilities.map(v => v.category as string));
   const unsupported = Object.keys(env).filter(key => /^GIT_/i.test(key) && !supportedGitEnvironment.has(key.toUpperCase()));
   if (unsupported.length) categories.add('unreviewedGitEnvironment');
   if (categories.size) throw new SyncError('CAVEAT_GIT_ENV_UNSAFE', `CAVEAT_GIT_ENV_UNSAFE (${[...categories].sort().join(', ')}); remove unreviewed Git environment overrides`);
