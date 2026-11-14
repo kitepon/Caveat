@@ -4,6 +4,8 @@ All notable changes are documented here. Format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [0.21.20] — 2026-11-14
+
 ### Added
 - Export native MCP and hook definitions with the read-only `caveat harness-entries --json` interface, supporting an explicit seat home and repeatable harness selection without changing standalone installation or transferring writer ownership.
 
