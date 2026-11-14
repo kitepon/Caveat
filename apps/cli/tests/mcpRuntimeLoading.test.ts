@@ -47,4 +47,4 @@ it('ordinary packaged hooks work with the MCP runtime asset absent', () => {
     expect(hook.stderr).toBe('');
     expect(readFileSync(join(home, '.caveatrc.json'), 'utf8')).not.toContain('runtimeErrorReportCredentialFile');
   } finally { rmSync(root, { recursive: true, force: true }); }
-}, 15000);
+});

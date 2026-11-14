@@ -9,4 +9,4 @@ for(const adapter of ['hook','codex-hook','cursor-hook'])it(`${adapter} uses man
   const result=spawnSync(process.execPath,[fileURLToPath(new URL('../dist/caveat.js',import.meta.url)),adapter,'user-prompt-submit'],{input:JSON.stringify({session_id:'fixture',prompt:'node-gyp build failed during pnpm install'}),encoding:'utf8',windowsHide:true,timeout:15000,env:{...process.env,HOME:home,USERPROFILE:home,CAVEAT_HOME:caveatHome,CAVEAT_AUTO_SYNC:'off',CAVEAT_INDEX_AUTOSYNC:'off',XDG_STATE_HOME:join(root,'state'),LOCALAPPDATA:join(root,'state')}});
   expect(result.status,result.stderr).toBe(0);expect(result.stdout).toContain('caveat_get');expect(result.stdout).toContain('caveat_sync');expect(result.stdout).not.toContain('mcp__caveat__');expect(result.stdout).not.toMatch(/caveat (show|index|sync)\b/);
  }finally{rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
-},20000);
+});

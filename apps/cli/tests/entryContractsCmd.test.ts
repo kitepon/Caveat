@@ -10,4 +10,4 @@ it('full index retains a rejected old row, lists diagnostics, and CLI show retur
   const show=run(['show','--path',created.path,'--limit-bytes','32']);expect(show.status,show.stderr).toBe(0);expect(JSON.parse(show.stdout)).toMatchObject({kind:'raw_entry',raw:{offset_bytes:0,length_bytes:32,next_offset_bytes:32}});
   expect(readFileSync(created.filePath,'utf8')).toBe(old+'x'.repeat(1024*1024));
  }finally{rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
-},20000);
+});

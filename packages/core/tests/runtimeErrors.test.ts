@@ -182,14 +182,14 @@ describe('runtime errors', { timeout: process.platform === 'win32' ? 60_000 : 5_
     expect(() => recordRuntimeError(definition, { env: e, version: '0.16.2', isWindows: () => true, aclRunner: () => { throw Error('acl failed'); } })).toThrow('store_unsafe');
     expect(existsSync(runtimeErrorsStatePath(e))).toBe(false);
   });
-  it.skipIf(process.platform === 'win32')('serializes 20 truly concurrent child recorders without corrupting JSON', { timeout: 30_000 }, async () => {
+  it.skipIf(process.platform === 'win32')('serializes 20 truly concurrent child recorders without corrupting JSON', async () => {
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true);
     const children = Array.from({ length: 20 }, () => child([], e));
     const exits = await Promise.all(children.map(childExit));
     expect(exits.every((result) => result.code === 0 && result.signal === null)).toBe(true);
     const snapshot = runtimeErrorsSnapshot(0, 256, { env: e, version: '0.16.2' }); expect(snapshot.runtime_errors[0]?.occurrence_count).toBe(20); expect(() => JSON.parse(readFileSync(runtimeErrorsStatePath(e), 'utf8'))).not.toThrow();
   });
-  it('recovers after the OS releases a SIGKILLed SQLite BEGIN IMMEDIATE holder', { timeout: 30_000 }, async () => {
+  it('recovers after the OS releases a SIGKILLed SQLite BEGIN IMMEDIATE holder', async () => {
     if (process.platform === 'win32') return;
     const root = mkdtempSync(join(tmpdir(), 'caveat-runtime-')); const e = env(root, true); recordRuntimeError(definition, { env: e, version: '0.16.2' });
     const lock = `${runtimeErrorsStatePath(e)}.lock.sqlite`; const holder = child(['hold-lock', lock], e);
