@@ -916,3 +916,15 @@ simple-git4.0.2/argv-parser2.0.1へ固定し、検出したunsafe categoryの自
 ### 空worker回収のpatch供給（0.21.19）
 
 上の保存・回収の機能/データフローを0.21.19で供給する。入出力・所有・24時間猶予・失敗時保持の契約は同表のまま。CLI package manifest/version表示とrelease metadataだけを次patchへ更新し、固定managed entry/runtimeと登録先は変更しない。
+
+### Harness registration export release (0.21.20)
+
+The harness registration function map and data flow above ship in CLI 0.21.20.
+The package manifest, CLI/MCP version reporting and E1 `version` identify that
+package; the exporter and standalone registration contracts stay unchanged.
+
+| Release function / owner | Input → output / next consumer | State and handoff |
+| --- | --- | --- |
+| Caveat package release | Accepted main source + version/changelog → one `pack-release.yml` archive and provenance → `publish-npm.yml` publishes that same archive | Registry bytes must match the accepted archive; publication alone does not install a package or apply E1. |
+| Deployment → BellTeam E1 | Published package → deployment owner installs a fixed package path → read-only `harness-entries --json --harness codex --harness grok` | BellTeam owns E2 enrollment, byte-equality proof and production application; Caveat does not write BellTeam storage. |
+| BellTeam applied notice → writer handoff | Molly's explicit live `applied` result → serialized managed writer transfer | Trony owns startup maintainer retirement. This metadata release does not retire writers or change standalone installation. |
