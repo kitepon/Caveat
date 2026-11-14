@@ -132,7 +132,7 @@ export async function createMacKernelReader(protectedFiles: { dev: string; ino: 
       assert.deepEqual(vnode(process.pid, fd), { writable: false, regular: true, dev: String(stat.dev), ino: String(stat.ino) }, 'mac_fd_abi_calibration_failed');
     } finally { closeSync(fd); }
   }
-  const readProcess = (pid: number, deadline = Date.now() + 20000): NativeProcessRecord => {
+  const readProcess = (pid: number, deadline = Date.now() + 60000): NativeProcessRecord => {
     let phase = 'kinfo';
     const code = (error: unknown) => { const value = error as { nativeCode?: number; errno?: number }; return value.nativeCode ?? value.errno ?? null; };
     let row: NativeProcessRecord = { pid, ppid: null, uid: null, birth: null, executable: null, argv: null };

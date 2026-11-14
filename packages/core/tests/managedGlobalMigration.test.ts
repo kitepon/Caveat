@@ -167,9 +167,9 @@ describe('product global migration caller', () => {
     writeFileSync(join(packageSource, 'dist/caveat.js'), '#!/usr/bin/env node\nprocess.exit(0);\n', { mode: 0o700 });
     rmSync(f.packageRoot, { recursive: true }); for (const name of isWindows() ? ['caveat', 'caveat.cmd', 'caveat.ps1'] : ['caveat']) rmSync(join(f.binDirectory, name));
     const env = globalNpmEnvironment(process.execPath, control), common = ['--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--userconfig', userConfig, '--globalconfig', globalConfig, '--cache', join(control, 'cache')];
-    const pack = spawnSync(process.execPath, [npm, 'pack', packageSource, '--pack-destination', control, ...common], { cwd: control, env, encoding: 'utf8', timeout: 20000 });
+    const pack = spawnSync(process.execPath, [npm, 'pack', packageSource, '--pack-destination', control, ...common], { cwd: control, env, encoding: 'utf8', timeout: 60000 });
     expect(pack.status, pack.stderr).toBe(0);
-    const install = spawnSync(process.execPath, [npm, 'install', '--global', '--prefix', f.prefix, join(control, 'caveat-cli-0.9.0.tgz'), ...common], { cwd: control, env, encoding: 'utf8', timeout: 20000 });
+    const install = spawnSync(process.execPath, [npm, 'install', '--global', '--prefix', f.prefix, join(control, 'caveat-cli-0.9.0.tgz'), ...common], { cwd: control, env, encoding: 'utf8', timeout: 60000 });
     expect(install.status, install.stderr).toBe(0); f.input.snapshot.npmAlias = npm;
     const before = readFileSync(join(f.packageRoot, 'package.json')), pointer = readFileSync(f.paths.pointer);
     const session = await bindGlobalMigration(f.input, () => {}, async () => tables());
@@ -214,7 +214,7 @@ describe('owned npm child protocol', () => {
     expect(globalNpmEnvironment('/node', '/run').NODE_OPTIONS).toBeUndefined(); expect(globalNpmLayout(isWindows() ? 'C:/prefix/node_modules' : '/prefix/lib/node_modules').prefix).toContain('prefix');
   });
   it('observes started, exit and close separately without returning child output', async () => {
-    const events: string[] = [], receipt = await runOwnedGlobalNpm(process.execPath, ['-e', "process.stdout.write('fixture-private-output')"], tmpdir(), {}, event => events.push(event.event), 5000);
+    const events: string[] = [], receipt = await runOwnedGlobalNpm(process.execPath, ['-e', "process.stdout.write('fixture-private-output')"], tmpdir(), {}, event => events.push(event.event));
     expect(receipt.status).toBe('completed'); expect(receipt.exitObserved).toBe(true); expect(receipt.closeObserved).toBe(true); expect(events).toEqual(['issued', 'started', 'exit', 'close']);
     expect(JSON.stringify(receipt)).not.toContain('fixture-private-output');
   });
@@ -223,7 +223,7 @@ describe('owned npm child protocol', () => {
     expect(receipt.status).toBe('unknown'); expect(receipt.reason).toBe('global_npm_receipt_failed'); expect(receipt.terminationRequested).toBe(true);
   });
   it('retains nonzero and timeout as unknown and terminates only the owned child once', async () => {
-    const failed = await runOwnedGlobalNpm(process.execPath, ['-e', 'process.exit(7)'], tmpdir(), {}, () => {}, 5000);
+    const failed = await runOwnedGlobalNpm(process.execPath, ['-e', 'process.exit(7)'], tmpdir(), {}, () => {});
     expect(failed.status).toBe('unknown'); expect(failed.exitCode).toBe(7); expect(failed.closeObserved).toBe(true);
     const timeout = await runOwnedGlobalNpm(process.execPath, ['-e', 'setInterval(()=>{},1000)'], tmpdir(), {}, () => {}, 100);
     expect(timeout.status).toBe('unknown'); expect(timeout.terminationRequested).toBe(true); expect(timeout.reason).toBe('global_npm_timeout');
@@ -237,7 +237,7 @@ async function removeFixtureWorking(session: Awaited<ReturnType<typeof bindGloba
   const paths = session.engine.manifest().objects.map(row => join(row.directory, row.name));
   const result = await session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath,
     ['-e', "for(const file of process.argv.slice(1))require('node:fs').rmSync(file,{recursive:true})", ...paths],
-    session.runDirectory, {}, () => {}, 5000));
+    session.runDirectory, {}, () => {}));
   expect(result.status).toBe('removed');
 }
 describe('product-owned shell publication and known-only rollback', () => {
@@ -510,7 +510,7 @@ describe('read-only admission and native-v2 independent status', () => {
     try { await removeFixtureWorking(session); expect((await session.shell.install()).status).toBe('installed'); } finally { session.close(); }
     expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ native: true, status: 'ready', deployment: { payloadVerified: true } });
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url)), 'deployment', 'status', '--json'],
-      { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CAVEAT_HOME: join(f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 30000 });
+      { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CAVEAT_HOME: join(f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 60000 });
     expect(cli.status, cli.stderr).toBe(0); expect(JSON.parse(cli.stdout)).toMatchObject({ status: 'ready', payloadVerified: true, shell: { native: true, status: 'ready' } });
     rmSync(join(f.binDirectory, 'caveat'));
     expect(await managedShellStatusCurrent({ userHome: f.profile })).toMatchObject({ native: true, status: 'changed', reason: 'wrapper_identity_or_bytes_changed', deployment: { payloadVerified: true } });
@@ -617,7 +617,7 @@ describe('built product global CLI', () => {
     const before = readdirSync(f.paths.root), npmBefore = readFileSync(options.npmCli);
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL('../../../apps/cli/dist/caveat.js', import.meta.url)), 'deployment', 'global-plan', '--global-root', options.globalRoot, '--npm-cli', options.npmCli, '--json'],
       { env: { ...process.env, HOME: f.profile, USERPROFILE: f.profile, CAVEAT_HOME: join(f.profile, 'knowledge'), CLAUDE_CONFIG_DIR: '', CODEX_HOME: '', GROK_HOME: '', CURSOR_HOME: '' }, encoding: 'utf8', timeout: 60000 });
-    expect(cli.status, cli.stderr).toBe(0);
+    expect(cli.status, cli.stderr + cli.stdout).toBe(0);
     const events = cli.stdout.trim().split('\n').map(line => JSON.parse(line));
     expect(events[0]).toMatchObject({ phase: 'input', event: 'issued', sequence: 1 });
     expect(events.at(-1)).toMatchObject({ status: 'ready', filesystemWrites: 0, existingProcessOperations: 0 });
@@ -634,7 +634,7 @@ async function recoveryFixture(mode: 'backup' | 'working' | 'installed' | 'parti
   try {
     if (mode === 'failed-known') {
       expect((await session.engine.preserveAll()).status).toBe('preserved'); expect((await session.engine.createWorkingCopies()).status).toBe('working');
-      const after = await session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath, ['-e', "require('node:fs').rmSync(require('node:path').join(process.argv[1],'dist/caveat.js'));process.exit(7)", f.packageRoot], session.runDirectory, {}, () => {}, 5000));
+      const after = await session.engine.uninstallWorking(() => runOwnedGlobalNpm(process.execPath, ['-e', "require('node:fs').rmSync(require('node:path').join(process.argv[1],'dist/caveat.js'));process.exit(7)", f.packageRoot], session.runDirectory, {}, () => {}));
       expect(after.status).toBe('failed-known');
     } else if (mode === 'partial') {
       await removeFixtureWorking(session); let calls = 0;
@@ -769,7 +769,7 @@ it('uses the built recovery CLI with the real collector and read-only attempt in
   expect(completed.status, completed.stderr + completed.stdout).toBe(0); const events = completed.stdout.trim().split('\n').map(line => JSON.parse(line));
   expect(events[0]).toMatchObject({ phase: 'input', event: 'issued', sequence: 1 }); const restored = events.at(-1); expect(restored).toMatchObject({ status: 'restored' });
   expect(events.map(row => row.sequence)).toEqual(events.map((_, index) => index + 1)); expect(completed.stdout).not.toContain(r.f.root); r.unchanged();
-  const inspected = spawnSync(process.execPath, [cli, 'deployment', 'global-inspect-recovery', restored.runId!, '--plan-sha256', r.session.planSha256, '--json'], { env, encoding: 'utf8', timeout: 30000 });
+  const inspected = spawnSync(process.execPath, [cli, 'deployment', 'global-inspect-recovery', restored.runId!, '--plan-sha256', r.session.planSha256, '--json'], { env, encoding: 'utf8', timeout: 60000 });
   expect(inspected.status, inspected.stderr).toBe(0); expect(JSON.parse(inspected.stdout)).toMatchObject({ status: 'observed', journalStatus: 'complete', currentObjects: 'not-assessed', filesystemWrites: 0, childProcesses: 0, executionPermission: false }); r.unchanged();
 });
 
@@ -1053,7 +1053,7 @@ it('keeps confirmed npm-after state recoverable when a bound consumer appears af
     expect((await session.engine.createWorkingCopies()).status).toBe('working');
     const result = await session.engine.uninstallWorking(async () => {
       const receipt = await runOwnedGlobalNpm(process.execPath, ['-e', 'for(const p of process.argv.slice(1))require("node:fs").rmSync(p,{recursive:true})',
-        ...session.engine.manifest().objects.map(row => join(row.directory, row.name))], run, {}, () => {}, 5000);
+        ...session.engine.manifest().objects.map(row => join(row.directory, row.name))], run, {}, () => {});
       closed = true; return receipt;
     });
     expect(result).toMatchObject({ status: 'stopped', recovery: 'fresh-known-only-plan-required' });

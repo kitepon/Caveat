@@ -217,7 +217,7 @@ function linuxRecord(procRoot: string, pid: number, protectedFiles: { dev: strin
 }
 
 export function readLinuxProcessTables(procRoot = '/proc', protectedFiles: { dev: string; ino: string }[] = []): NativeProcessTables {
-  const deadline = Date.now() + 20000;
+  const deadline = Date.now() + 60000;
   const readTable = () => {
     const pids = readdirSync(procRoot).filter(name => /^\d+$/.test(name)).map(Number).sort((a, b) => a - b);
     assert.ok(pids.length > 0 && pids.length <= 100000, 'process_table_bound');
@@ -292,7 +292,8 @@ export function parseMacTextImages(text: string) {
 
 export async function readMacProcessTables(_run: ProcessProbeRun, kernelTable?: (deadline: number) => NativeProcessRecord[], protectedFiles: { dev: string; ino: string }[] = []): Promise<NativeProcessTables> {
   const readTable = kernelTable ?? (await createMacKernelReader(protectedFiles)).readTable;
-  const deadline = Date.now() + 20000;
+  // Shared with Linux/Windows and the owned npm child: 20s stopped real-table reads on a loaded macOS CI runner.
+  const deadline = Date.now() + 60000;
   return { before: readTable(deadline), after: readTable(deadline), errors: [],
     selfPid: process.pid, selfExecutable: executable(realpathSync(process.execPath)), caseInsensitive: false };
 }
@@ -356,7 +357,7 @@ export function decodeWindowsProcessTables(text: string, ownedPid: number): { be
 }
 
 export async function readWindowsProcessTables(command: string, run: ProcessProbeRun): Promise<NativeProcessTables> {
-  const result = await run(command, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROCESS_PROBE, 'utf16le').toString('base64')], 'cim', Date.now() + 20000);
+  const result = await run(command, ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(WINDOWS_PROCESS_PROBE, 'utf16le').toString('base64')], 'cim', Date.now() + 60000);
   const tables = decodeWindowsProcessTables(result.stdout, result.pid);
   const convert = (rows: WindowsRow[]): NativeProcessRecord[] => rows.filter(row => row.pid !== result.pid).map(row => {
     const base: NativeProcessRecord = { pid: row.pid, ppid: row.ppid, birth: row.birth, uid: row.uid, executable: null, argv: null,
